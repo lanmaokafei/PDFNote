@@ -78,13 +78,15 @@ scripts/ui-smoke.mjs     Playwright 界面冒烟脚本（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.2.0_aarch64.dmg
-release/PDFNote_0.2.0_aarch64.dmg.sha256
+release/PDFNote_0.2.1_aarch64.dmg
+release/PDFNote_0.2.1_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
 
 ## 重要修复
+
+- 修复进入脑图视图后 React #185（Maximum update depth）导致界面中断：选择回调改为内容比较，节点补齐 measured 尺寸。详见 [脑图崩溃复盘](docs/react-185-regression.md)。
 
 - 修复扫描版 PDF 框选后“创建失败”：允许标注-only 建卡，并自动 OCR。
 
@@ -95,6 +97,7 @@ release/PDFNote_0.2.0_aarch64.dmg.sha256
 ## 文档
 
 - [离线中文 OCR](docs/ocr.md)
+- [脑图 React #185 复盘](docs/react-185-regression.md)
 
 - [架构基线](docs/architecture.md)
 - [实施与验收计划](docs/implementation-plan.md)

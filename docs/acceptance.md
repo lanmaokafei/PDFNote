@@ -12,7 +12,7 @@
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
 | 原生编译 | `npx tauri build --bundles app` | 通过，生成 20.2 MB release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.2.0 已通过 `hdiutil verify`，约 52 MB（含离线 OCR） |
+| DMG | 手动 `hdiutil` 打包 | 0.2.1 已通过 `hdiutil verify`，约 53 MB |
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=1`，`quick_check=ok` |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
 
@@ -59,6 +59,7 @@ Rust 测试覆盖：
 | 大文件 | 原生 + 浏览器实测 | 526MB / 752 页 PDF 打开不崩溃，仅请求可视页；备份改为 Stored 且后台执行 |
 | 顶部栏固定 | 浏览器布局实测 | body 无滚动，内容区独立滚动，topbar top 始终为 0 |
 | OCR 建卡 | Rust + 浏览器实测 | 标注-only 建卡通过；macOS Vision 中文页约 1.1 秒；Tesseract 离线模型可加载 |
+| 脑图稳定性 | Chromium + IPC 模拟 | 进入脑图、选中、拖拽、PDF 建卡后切换均无 React #185 |
 
 ## 大文件回归证据
 

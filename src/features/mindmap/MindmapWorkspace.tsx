@@ -66,6 +66,7 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
   const { getIntersectingNodes } = useReactFlow<MindmapFlowNode, Edge>()
 
   const [positions, setPositions] = useState<Record<string, Point>>({})
+  const [measuredSizes, setMeasuredSizes] = useState<Record<string, { width: number; height: number }>>({})
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [hasLoaded, setHasLoaded] = useState(false)
@@ -109,14 +110,19 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
   const visibleIds = useMemo(() => new Set(orderedVisibleCards.map((card) => card.id)), [orderedVisibleCards])
 
   const nodes = useMemo<MindmapFlowNode[]>(
-    () => orderedVisibleCards.map((card) => ({
-      id: card.id,
-      type: 'mindmapCard',
-      position: positions[card.id] ?? { x: 80, y: 80 },
-      data: { card_id: card.id },
-      selected: selectedIds.has(card.id),
-    })),
-    [orderedVisibleCards, positions, selectedIds],
+    () => orderedVisibleCards.map((card) => {
+      const size = measuredSizes[card.id]
+      return {
+        id: card.id,
+        type: 'mindmapCard',
+        position: positions[card.id] ?? { x: 80, y: 80 },
+        data: { card_id: card.id },
+        selected: selectedIds.has(card.id),
+        // 保留 React Flow 的实测尺寸，否则拖拽时会提示节点未初始化。
+        ...(size ? { measured: size } : {}),
+      }
+    }),
+    [measuredSizes, orderedVisibleCards, positions, selectedIds],
   )
   const edges = useMemo<Edge[]>(
     () => orderedVisibleCards.flatMap((card) => {
@@ -207,12 +213,44 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
     setPositions((current) => {
       let next = current
       for (const change of changes) {
-        if (change.type === 'position' && change.position) {
-          if (next === current) next = { ...current }
-          next[change.id] = change.position
+        if (change.type !== 'position' || !change.position) continue
+        const previous = next[change.id]
+        if (previous
+          && Math.abs(previous.x - change.position.x) < 0.01
+          && Math.abs(previous.y - change.position.y) < 0.01) {
+          continue
         }
+        if (next === current) next = { ...current }
+        next[change.id] = change.position
+      }
+      // 返回同一引用，避免“测量 → 位置回写 → 重新测量”的无意义循环。
+      return next
+    })
+
+    setMeasuredSizes((current) => {
+      let next = current
+      for (const change of changes) {
+        if (change.type !== 'dimensions' || !change.dimensions) continue
+        const { width, height } = change.dimensions
+        const previous = next[change.id]
+        if (previous && Math.abs(previous.width - width) < 0.5 && Math.abs(previous.height - height) < 0.5) continue
+        if (next === current) next = { ...current }
+        next[change.id] = { width, height }
       }
       return next
+    })
+  }, [])
+
+  /**
+   * React Flow 会在每次内部节点变化时回调选择集。这里必须做内容比较：
+   * 直接 setSelectedIds(new Set(...)) 会让 nodes 数组每次重建，StoreUpdater
+   * 再次 setNodes，形成 Maximum update depth exceeded（React #185）。
+   */
+  const handleSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Array<{ id: string }> }) => {
+    const nextIds = selectedNodes.map((node) => node.id)
+    setSelectedIds((current) => {
+      if (current.size === nextIds.length && nextIds.every((id) => current.has(id))) return current
+      return new Set(nextIds)
     })
   }, [])
 
@@ -526,7 +564,7 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
             onNodesChange={handleNodesChange}
             onNodeDragStop={handleNodeDragStop}
             onConnect={handleConnect}
-            onSelectionChange={({ nodes: selectedNodes }) => setSelectedIds(new Set(selectedNodes.map((node) => node.id)))}
+            onSelectionChange={handleSelectionChange}
             fitView
             fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
             minZoom={0.15}

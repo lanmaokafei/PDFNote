@@ -1,5 +1,3 @@
-BEGIN;
-
 CREATE TABLE documents (
     id              TEXT PRIMARY KEY,
     title           TEXT NOT NULL,
@@ -30,6 +28,9 @@ CREATE TABLE cards (
     collapsed           INTEGER NOT NULL DEFAULT 0 CHECK (collapsed IN (0, 1)),
     stability           REAL NOT NULL DEFAULT 0 CHECK (stability >= 0),
     difficulty          REAL NOT NULL DEFAULT 0 CHECK (difficulty >= 0),
+    elapsed_days        REAL NOT NULL DEFAULT 0,
+    scheduled_days      INTEGER NOT NULL DEFAULT 0 CHECK (scheduled_days >= 0),
+    learning_steps      INTEGER NOT NULL DEFAULT 0,
     due                 TEXT NOT NULL,
     last_review         TEXT,
     reps                INTEGER NOT NULL DEFAULT 0 CHECK (reps >= 0),
@@ -86,9 +87,16 @@ CREATE TABLE review_logs (
     previous_state      TEXT NOT NULL,
     previous_due        TEXT NOT NULL,
     new_due             TEXT NOT NULL,
+    new_state           TEXT NOT NULL DEFAULT 'new'
+                        CHECK (new_state IN ('new', 'learning', 'review', 'relearning')),
     stability           REAL NOT NULL,
     difficulty          REAL NOT NULL,
     elapsed_days        REAL NOT NULL DEFAULT 0,
+    scheduled_days      INTEGER NOT NULL DEFAULT 0 CHECK (scheduled_days >= 0),
+    learning_steps      INTEGER NOT NULL DEFAULT 0 CHECK (learning_steps >= 0),
+    reps                INTEGER NOT NULL DEFAULT 0 CHECK (reps >= 0),
+    lapses              INTEGER NOT NULL DEFAULT 0 CHECK (lapses >= 0),
+    payload_json        TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(payload_json)),
     scheduler_version   TEXT NOT NULL,
     reviewed_at         TEXT NOT NULL
 );
@@ -111,4 +119,3 @@ CREATE INDEX idx_mindmap_layout_canvas ON mindmap_layout(canvas_id);
 CREATE INDEX idx_review_logs_card_time ON review_logs(card_id, reviewed_at DESC);
 CREATE INDEX idx_review_logs_reviewed_at ON review_logs(reviewed_at);
 
-COMMIT;

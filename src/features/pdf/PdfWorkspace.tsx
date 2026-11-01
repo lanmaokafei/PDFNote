@@ -1,0 +1,653 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { convertFileSrc } from '@tauri-apps/api/core'
+import {
+  getDocument,
+  GlobalWorkerOptions,
+  type PDFDocumentLoadingTask,
+  type PDFDocumentProxy,
+  type PDFPageProxy,
+} from 'pdfjs-dist'
+import type {
+  Annotation,
+  AnnotationGeometry,
+  Card,
+  Document as PdfDocument,
+  NormalizedBBox,
+  Rating,
+} from '../../domain/card'
+import {
+  listAnnotations,
+  removeAnnotation,
+  resolveDocumentPath,
+  updateAnnotationGeometry,
+} from '../../services/pdfnote'
+import { useCardStore } from '../../store/cardStore'
+import { reviewCard } from '../review/scheduler'
+import { PdfPage, type PageSize, type PdfTool } from './PdfPage'
+import './PdfWorkspace.css'
+
+GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs'
+
+const DEFAULT_PAGE_SIZE: PageSize = { width: 612, height: 792 }
+const MIN_SCALE = 0.5
+const MAX_SCALE = 3
+const EMPTY_ANNOTATIONS: Annotation[] = []
+
+export interface PdfWorkspaceProps {
+  document: PdfDocument
+  onPageCount: (count: number) => void
+  onCardsChanged: () => void
+}
+
+function errorMessage(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason)
+}
+
+function updateSet(previous: Set<number>, page: number, included: boolean): Set<number> {
+  if (previous.has(page) === included) return previous
+  const next = new Set(previous)
+  if (included) next.add(page)
+  else next.delete(page)
+  return next
+}
+
+export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorkspaceProps) {
+  const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
+  const [pageCount, setPageCount] = useState(document.page_count)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [scale, setScale] = useState(1)
+  const [tool, setTool] = useState<PdfTool>('select')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageInput, setPageInput] = useState('1')
+  const [visiblePages, setVisiblePages] = useState<Set<number>>(new Set())
+  const [renderPages, setRenderPages] = useState<Set<number>>(new Set())
+  const [pageSizes, setPageSizes] = useState<Record<number, PageSize>>({})
+  const [annotationsByPage, setAnnotationsByPage] = useState<Record<number, Annotation[]>>({})
+  const [annotationVersion, setAnnotationVersion] = useState(0)
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
+  const [operationError, setOperationError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Annotation | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [recallMode, setRecallMode] = useState(false)
+  const [sessionId, setSessionId] = useState('')
+  const [revealedCardIds, setRevealedCardIds] = useState<Set<string>>(new Set())
+  const [ratedCardIds, setRatedCardIds] = useState<Set<string>>(new Set())
+  const [ratingBusy, setRatingBusy] = useState(false)
+  const [reviewedCards, setReviewedCards] = useState<Record<string, Card>>({})
+
+  const cardsById = useCardStore((state) => state.cardsById)
+  const createCard = useCardStore((state) => state.createCard)
+  const loadCards = useCardStore((state) => state.loadCards)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const pageElementsRef = useRef<Map<number, HTMLElement>>(new Map())
+  const renderObserverRef = useRef<IntersectionObserver | null>(null)
+  const visibleObserverRef = useRef<IntersectionObserver | null>(null)
+  const pageCacheRef = useRef<Map<number, Promise<PDFPageProxy>>>(new Map())
+  const loadedAnnotationPagesRef = useRef<Set<number>>(new Set())
+  const pendingAnnotationPagesRef = useRef<Set<number>>(new Set())
+  const annotationRequestsRef = useRef<Map<number, number>>(new Map())
+  const documentGenerationRef = useRef(0)
+  const scrollFrameRef = useRef<number | null>(null)
+  const moveRequestsRef = useRef<Map<string, number>>(new Map())
+  const callbacksRef = useRef({ onPageCount, onCardsChanged })
+
+  useEffect(() => {
+    callbacksRef.current = { onPageCount, onCardsChanged }
+  }, [onCardsChanged, onPageCount])
+
+  useEffect(() => {
+    const generation = documentGenerationRef.current + 1
+    documentGenerationRef.current = generation
+    let active = true
+    let loadingTask: PDFDocumentLoadingTask | null = null
+
+    setPdf(null)
+    setLoading(true)
+    setLoadError('')
+    setOperationError('')
+    setNotice('')
+    setPageCount(document.page_count)
+    setCurrentPage(1)
+    setPageInput('1')
+    setVisiblePages(new Set())
+    setRenderPages(new Set())
+    setPageSizes({})
+    setAnnotationsByPage({})
+    setSelectedAnnotationId(null)
+    setDeleteTarget(null)
+    setRecallMode(false)
+    setSessionId('')
+    setRevealedCardIds(new Set())
+    setRatedCardIds(new Set())
+    setReviewedCards({})
+    pageCacheRef.current.clear()
+    loadedAnnotationPagesRef.current.clear()
+    pendingAnnotationPagesRef.current.clear()
+    annotationRequestsRef.current.clear()
+
+    if (document.file_status === 'importing') {
+      return () => {
+        active = false
+      }
+    }
+    if (document.file_status === 'missing' || document.file_status === 'mismatch') {
+      setLoading(false)
+      setLoadError(document.file_status === 'missing' ? 'PDF 文件缺失，请先在文档库中重新定位文件。' : 'PDF 文件内容已变化，请先完成文件校验。')
+      return () => {
+        active = false
+      }
+    }
+
+    const openDocument = async () => {
+      try {
+        const path = await resolveDocumentPath(document.id)
+        if (!active) return
+        loadingTask = getDocument({
+          url: convertFileSrc(path),
+          cMapUrl: '/pdfjs/cmaps/',
+          cMapPacked: true,
+          standardFontDataUrl: '/pdfjs/standard_fonts/',
+        })
+        const loadedPdf = await loadingTask.promise
+        if (!active) {
+          await loadingTask.destroy()
+          return
+        }
+        setPdf(loadedPdf)
+        setPageCount(loadedPdf.numPages)
+        callbacksRef.current.onPageCount(loadedPdf.numPages)
+        setLoading(false)
+      } catch (reason) {
+        if (!active) return
+        setLoading(false)
+        setLoadError(errorMessage(reason))
+      }
+    }
+    void openDocument()
+
+    return () => {
+      active = false
+      if (loadingTask) void loadingTask.destroy()
+      pageCacheRef.current.clear()
+    }
+  }, [document.file_status, document.id, document.page_count, loadAttempt])
+
+  useEffect(() => {
+    void loadCards().catch((reason: unknown) => {
+      setOperationError(`卡片载入失败：${errorMessage(reason)}`)
+    })
+  }, [document.id, loadCards])
+
+  const getPage = useCallback((pageNumber: number): Promise<PDFPageProxy> => {
+    if (!pdf) return Promise.reject(new Error('PDF 尚未载入'))
+    const cached = pageCacheRef.current.get(pageNumber)
+    if (cached) return cached
+    const request = pdf.getPage(pageNumber).catch((reason: unknown) => {
+      pageCacheRef.current.delete(pageNumber)
+      throw reason instanceof Error ? reason : new Error(String(reason))
+    })
+    pageCacheRef.current.set(pageNumber, request)
+    return request
+  }, [pdf])
+
+  const registerPage = useCallback((pageNumber: number, element: HTMLElement | null) => {
+    const previous = pageElementsRef.current.get(pageNumber)
+    if (previous && previous !== element) {
+      renderObserverRef.current?.unobserve(previous)
+      visibleObserverRef.current?.unobserve(previous)
+    }
+    if (!element) {
+      pageElementsRef.current.delete(pageNumber)
+      return
+    }
+    pageElementsRef.current.set(pageNumber, element)
+    renderObserverRef.current?.observe(element)
+    visibleObserverRef.current?.observe(element)
+  }, [])
+
+  useEffect(() => {
+    const root = scrollRef.current
+    if (!root || !pdf) return
+    const renderObserver = new IntersectionObserver((entries) => {
+      setRenderPages((previous) => entries.reduce((pages, entry) => {
+        const page = Number((entry.target as HTMLElement).dataset.page)
+        return Number.isFinite(page) ? updateSet(pages, page, entry.isIntersecting) : pages
+      }, previous))
+    }, { root, rootMargin: '100% 0px', threshold: 0 })
+    const visibleObserver = new IntersectionObserver((entries) => {
+      setVisiblePages((previous) => entries.reduce((pages, entry) => {
+        const page = Number((entry.target as HTMLElement).dataset.page)
+        return Number.isFinite(page) ? updateSet(pages, page, entry.isIntersecting) : pages
+      }, previous))
+    }, { root, threshold: 0.01 })
+    renderObserverRef.current = renderObserver
+    visibleObserverRef.current = visibleObserver
+    pageElementsRef.current.forEach((element) => {
+      renderObserver.observe(element)
+      visibleObserver.observe(element)
+    })
+    return () => {
+      renderObserver.disconnect()
+      visibleObserver.disconnect()
+      renderObserverRef.current = null
+      visibleObserverRef.current = null
+    }
+  }, [pdf])
+
+  useEffect(() => {
+    if (!pdf || visiblePages.size === 0) return
+    const pages = [...visiblePages]
+      .filter((page) => !loadedAnnotationPagesRef.current.has(page) && !pendingAnnotationPagesRef.current.has(page))
+      .sort((a, b) => a - b)
+    if (pages.length === 0) return
+    const generation = documentGenerationRef.current
+    const requestIds = new Map<number, number>()
+    pages.forEach((page) => {
+      const requestId = (annotationRequestsRef.current.get(page) ?? 0) + 1
+      annotationRequestsRef.current.set(page, requestId)
+      requestIds.set(page, requestId)
+      pendingAnnotationPagesRef.current.add(page)
+    })
+
+    void listAnnotations(document.id, pages)
+      .then((annotations) => {
+        if (generation !== documentGenerationRef.current) return
+        setAnnotationsByPage((previous) => {
+          const next = { ...previous }
+          pages.forEach((page) => {
+            if (annotationRequestsRef.current.get(page) !== requestIds.get(page)) return
+            next[page] = annotations.filter((annotation) => annotation.page === page)
+            loadedAnnotationPagesRef.current.add(page)
+          })
+          return next
+        })
+      })
+      .catch((reason: unknown) => {
+        if (generation === documentGenerationRef.current) {
+          setOperationError(`标注载入失败：${errorMessage(reason)}`)
+        }
+      })
+      .finally(() => {
+        pages.forEach((page) => {
+          if (annotationRequestsRef.current.get(page) === requestIds.get(page)) {
+            pendingAnnotationPagesRef.current.delete(page)
+          }
+        })
+      })
+  }, [annotationVersion, document.id, pdf, visiblePages])
+
+  const invalidateAnnotations = useCallback((page: number) => {
+    loadedAnnotationPagesRef.current.delete(page)
+    pendingAnnotationPagesRef.current.delete(page)
+    annotationRequestsRef.current.set(page, (annotationRequestsRef.current.get(page) ?? 0) + 1)
+    setAnnotationVersion((version) => version + 1)
+  }, [])
+
+  const handleSize = useCallback((pageNumber: number, size: PageSize) => {
+    setPageSizes((previous) => {
+      const old = previous[pageNumber]
+      if (old && Math.abs(old.width - size.width) < 0.01 && Math.abs(old.height - size.height) < 0.01) return previous
+      return { ...previous, [pageNumber]: size }
+    })
+  }, [])
+
+  const handleScroll = useCallback(() => {
+    if (scrollFrameRef.current !== null) return
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      const root = scrollRef.current
+      if (!root) return
+      const rootBounds = root.getBoundingClientRect()
+      const center = rootBounds.top + rootBounds.height / 2
+      let nearestPage = 1
+      let nearestDistance = Number.POSITIVE_INFINITY
+      visiblePages.forEach((page) => {
+        const element = pageElementsRef.current.get(page)
+        if (!element) return
+        const bounds = element.getBoundingClientRect()
+        const distance = Math.abs(bounds.top + bounds.height / 2 - center)
+        if (distance < nearestDistance) {
+          nearestDistance = distance
+          nearestPage = page
+        }
+      })
+      setCurrentPage(nearestPage)
+    })
+  }, [visiblePages])
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current)
+  }, [])
+
+  const jumpToPage = () => {
+    const page = Number(pageInput)
+    if (!Number.isInteger(page) || page < 1 || page > pageCount) {
+      setOperationError(`请输入 1 至 ${pageCount} 的页码。`)
+      return
+    }
+    const element = pageElementsRef.current.get(page)
+    const root = scrollRef.current
+    if (!element || !root) return
+    setOperationError('')
+    setCurrentPage(page)
+    root.scrollTo({ top: Math.max(0, element.offsetTop - 20), behavior: 'smooth' })
+  }
+
+  const handleCreate = useCallback(async (page: PDFPageProxy, rect: NormalizedBBox, excerpt: string) => {
+    if (creating || recallMode || tool === 'select') return
+    setCreating(true)
+    setOperationError('')
+    setNotice('')
+    try {
+      await createCard({
+        source_ref: { document_id: document.id, page: page.pageNumber, bbox: rect },
+        excerpt,
+        annotation: {
+          kind: tool === 'rectangle' ? 'rectangle' : 'highlight',
+          geometry: { rects: [rect] },
+        },
+      })
+      invalidateAnnotations(page.pageNumber)
+      callbacksRef.current.onCardsChanged()
+      setNotice(excerpt ? '已创建卡片与标注。' : '已创建标注；此区域未提取到文字。')
+    } catch (reason) {
+      setOperationError(`创建失败：${errorMessage(reason)}`)
+    } finally {
+      setCreating(false)
+    }
+  }, [createCard, creating, document.id, invalidateAnnotations, recallMode, tool])
+
+  const handleMove = useCallback((annotation: Annotation, geometry: AnnotationGeometry, bbox: NormalizedBBox) => {
+    const requestId = (moveRequestsRef.current.get(annotation.id) ?? 0) + 1
+    moveRequestsRef.current.set(annotation.id, requestId)
+    setAnnotationsByPage((previous) => ({
+      ...previous,
+      [annotation.page]: (previous[annotation.page] ?? []).map((item) => item.id === annotation.id ? { ...item, geometry } : item),
+    }))
+    setOperationError('')
+    void updateAnnotationGeometry(annotation.id, geometry, bbox)
+      .then(() => {
+        if (moveRequestsRef.current.get(annotation.id) !== requestId) return
+        setNotice('标注位置已保存。')
+        callbacksRef.current.onCardsChanged()
+      })
+      .catch((reason: unknown) => {
+        if (moveRequestsRef.current.get(annotation.id) !== requestId) return
+        setAnnotationsByPage((previous) => ({
+          ...previous,
+          [annotation.page]: (previous[annotation.page] ?? []).map((item) => item.id === annotation.id ? annotation : item),
+        }))
+        setOperationError(`位置保存失败，已还原：${errorMessage(reason)}`)
+      })
+  }, [])
+
+  const confirmDelete = async (deleteCard: boolean) => {
+    if (!deleteTarget || deleting) return
+    setDeleting(true)
+    setOperationError('')
+    try {
+      await removeAnnotation(deleteTarget.id, deleteCard)
+      setAnnotationsByPage((previous) => ({
+        ...previous,
+        [deleteTarget.page]: (previous[deleteTarget.page] ?? []).filter((item) => item.id !== deleteTarget.id),
+      }))
+      setSelectedAnnotationId(null)
+      setDeleteTarget(null)
+      setNotice(deleteCard ? '标注与卡片已删除。' : '标注已删除，卡片已保留为孤儿卡片。')
+      callbacksRef.current.onCardsChanged()
+      await loadCards()
+    } catch (reason) {
+      setOperationError(`删除失败：${errorMessage(reason)}`)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const toggleRecall = () => {
+    setOperationError('')
+    setSelectedAnnotationId(null)
+    if (recallMode) {
+      setRecallMode(false)
+      setSessionId('')
+      return
+    }
+    setTool('select')
+    setRecallMode(true)
+    setSessionId(crypto.randomUUID())
+    setRevealedCardIds(new Set())
+    setRatedCardIds(new Set())
+    setReviewedCards({})
+    setNotice('回忆会话已开始；点击遮挡块揭示内容。')
+  }
+
+  const allAnnotations = useMemo(() => Object.values(annotationsByPage).flat(), [annotationsByPage])
+  const selectedAnnotation = allAnnotations.find((annotation) => annotation.id === selectedAnnotationId) ?? null
+  const selectedCard = selectedAnnotation
+    ? reviewedCards[selectedAnnotation.card_id] ?? cardsById[selectedAnnotation.card_id] ?? null
+    : null
+
+  const excerpts = useMemo(() => {
+    const result: Record<string, string> = {}
+    Object.values(cardsById).forEach((card) => {
+      result[card.id] = card.excerpt
+    })
+    Object.values(reviewedCards).forEach((card) => {
+      result[card.id] = card.excerpt
+    })
+    return result
+  }, [cardsById, reviewedCards])
+
+  const handleReveal = useCallback((annotationIds: string[]) => {
+    const ids = new Set(annotationIds)
+    const revealed = allAnnotations.filter((annotation) => ids.has(annotation.id))
+    if (revealed.length === 0) return
+    setRevealedCardIds((previous) => {
+      const next = new Set(previous)
+      revealed.forEach((annotation) => next.add(annotation.card_id))
+      return next
+    })
+    const first = revealed[0]
+    if (first) setSelectedAnnotationId(first.id)
+  }, [allAnnotations])
+
+  const handleRating = async (rating: Rating) => {
+    if (!selectedAnnotation || !selectedCard || ratingBusy || ratedCardIds.has(selectedCard.id) || !sessionId) return
+    setRatingBusy(true)
+    setOperationError('')
+    try {
+      const updated = await reviewCard(selectedCard, rating, 'document_recall', sessionId)
+      setReviewedCards((previous) => ({ ...previous, [updated.id]: updated }))
+      setRatedCardIds((previous) => new Set(previous).add(updated.id))
+      setNotice('评分已记录，本会话不会重复计算此卡片。')
+      callbacksRef.current.onCardsChanged()
+      await loadCards()
+    } catch (reason) {
+      setOperationError(`评分失败：${errorMessage(reason)}`)
+    } finally {
+      setRatingBusy(false)
+    }
+  }
+
+  const zoom = (delta: number) => {
+    setScale((previous) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round((previous + delta) * 10) / 10)))
+  }
+
+  const pageNumbers = useMemo(() => Array.from({ length: Math.max(0, pageCount) }, (_, index) => index + 1), [pageCount])
+  const visibleAnnotationCount = [...visiblePages].reduce((count, page) => count + (annotationsByPage[page]?.length ?? 0), 0)
+  const loadingMessage = document.file_status === 'importing' ? '文档正在导入，请稍候…' : '正在打开 PDF 文档…'
+
+  return (
+    <div className="pdf-workspace">
+      <header className="pdf-toolbar">
+        <div className="pdf-document-heading">
+          <span className="pdf-document-icon">PDF</span>
+          <div>
+            <strong title={document.title}>{document.title}</strong>
+            <small>{pageCount > 0 ? `共 ${pageCount} 页` : '文档工作区'}</small>
+          </div>
+        </div>
+
+        <div className="pdf-tool-group" aria-label="标注工具">
+          <button type="button" className={tool === 'select' ? 'is-active' : ''} aria-pressed={tool === 'select'} onClick={() => setTool('select')} disabled={recallMode}>选择</button>
+          <button type="button" className={tool === 'highlight' ? 'is-active' : ''} aria-pressed={tool === 'highlight'} onClick={() => setTool('highlight')} disabled={recallMode}>高亮</button>
+          <button type="button" className={tool === 'rectangle' ? 'is-active' : ''} aria-pressed={tool === 'rectangle'} onClick={() => setTool('rectangle')} disabled={recallMode}>矩形</button>
+        </div>
+
+        <div className="pdf-zoom-group" aria-label="缩放">
+          <button type="button" onClick={() => zoom(-0.1)} disabled={scale <= MIN_SCALE} aria-label="缩小">−</button>
+          <button type="button" className="pdf-zoom-value" onClick={() => setScale(1)} title="恢复 100%">{Math.round(scale * 100)}%</button>
+          <button type="button" onClick={() => zoom(0.1)} disabled={scale >= MAX_SCALE} aria-label="放大">+</button>
+        </div>
+
+        <div className="pdf-page-jump">
+          <span>第</span>
+          <input
+            value={pageInput}
+            onChange={(event) => setPageInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') jumpToPage()
+            }}
+            inputMode="numeric"
+            aria-label="跳转页码"
+          />
+          <span>/ {pageCount || '—'} 页</span>
+          <button type="button" onClick={jumpToPage} disabled={!pdf || pageCount === 0}>跳转</button>
+        </div>
+
+        <button type="button" className={`pdf-recall-toggle ${recallMode ? 'is-active' : ''}`} aria-pressed={recallMode} onClick={toggleRecall} disabled={!pdf}>
+          {recallMode ? '退出回忆' : '文档回忆'}
+        </button>
+      </header>
+
+      {(operationError || notice || creating) && (
+        <div className={`pdf-operation-bar ${operationError ? 'is-error' : ''}`} role={operationError ? 'alert' : 'status'}>
+          <span>{operationError || (creating ? '正在创建卡片与标注…' : notice)}</span>
+          {(operationError || notice) && <button type="button" onClick={() => { setOperationError(''); setNotice('') }} aria-label="关闭提示">×</button>}
+        </div>
+      )}
+
+      <div className="pdf-workspace-body">
+        <div className="pdf-scroll" ref={scrollRef} onScroll={handleScroll}>
+          {loading && (
+            <div className="pdf-state" role="status">
+              <span className="pdf-spinner" />
+              <strong>{loadingMessage}</strong>
+              <p>正在准备连续滚动工作区。</p>
+            </div>
+          )}
+          {!loading && loadError && (
+            <div className="pdf-state is-error" role="alert">
+              <strong>无法打开 PDF</strong>
+              <p>{loadError}</p>
+              {document.file_status === 'ready' && <button type="button" onClick={() => setLoadAttempt((value) => value + 1)}>重新加载</button>}
+            </div>
+          )}
+          {!loading && !loadError && pdf && pageCount === 0 && (
+            <div className="pdf-state"><strong>此 PDF 没有页面</strong><p>请选择包含页面的其他文档。</p></div>
+          )}
+          {!loading && !loadError && pdf && pageCount > 0 && (
+            <div className="pdf-pages">
+              {pageNumbers.map((pageNumber) => (
+                <PdfPage
+                  key={`${document.id}-${pageNumber}`}
+                  pageNumber={pageNumber}
+                  shouldRender={renderPages.has(pageNumber)}
+                  scale={scale}
+                  size={pageSizes[pageNumber] ?? DEFAULT_PAGE_SIZE}
+                  annotations={annotationsByPage[pageNumber] ?? EMPTY_ANNOTATIONS}
+                  excerpts={excerpts}
+                  tool={tool}
+                  recallMode={recallMode}
+                  revealedCardIds={revealedCardIds}
+                  selectedAnnotationId={selectedAnnotationId}
+                  getPage={getPage}
+                  registerPage={registerPage}
+                  onSize={handleSize}
+                  onSelect={(annotation) => setSelectedAnnotationId(annotation.id)}
+                  onCreate={handleCreate}
+                  onMove={handleMove}
+                  onReveal={handleReveal}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <aside className="pdf-inspector">
+          <div className="pdf-inspector-heading">
+            <div>
+              <small>{recallMode ? 'ACTIVE RECALL' : 'ANNOTATION'}</small>
+              <h2>{recallMode ? '文档回忆' : '标注摘录'}</h2>
+            </div>
+            <span>第 {currentPage} 页</span>
+          </div>
+
+          {selectedAnnotation ? (
+            <div className="pdf-selected-card">
+              <div className="pdf-selected-meta">
+                <span>{selectedAnnotation.kind === 'rectangle' ? '矩形标注' : '高亮标注'}</span>
+                <span>第 {selectedAnnotation.page} 页</span>
+              </div>
+              <blockquote>{selectedCard?.excerpt || excerpts[selectedAnnotation.card_id] || '此标注没有文字摘录。'}</blockquote>
+              {recallMode ? (
+                revealedCardIds.has(selectedAnnotation.card_id) ? (
+                  <div className="pdf-rating-panel">
+                    <p>{ratedCardIds.has(selectedAnnotation.card_id) ? '本会话已评分' : '回忆程度如何？'}</p>
+                    <div className="pdf-rating-buttons">
+                      {(['重来', '困难', '良好', '简单'] as const).map((label, index) => (
+                        <button
+                          type="button"
+                          key={label}
+                          onClick={() => void handleRating((index + 1) as Rating)}
+                          disabled={ratingBusy || ratedCardIds.has(selectedAnnotation.card_id) || !selectedCard}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {!selectedCard && <small>卡片信息尚未载入，暂时无法评分。</small>}
+                  </div>
+                ) : <p className="pdf-inspector-hint">点击页面上的遮挡块后再评分。</p>
+              ) : (
+                <button type="button" className="pdf-delete-button" onClick={() => setDeleteTarget(selectedAnnotation)}>删除标注</button>
+              )}
+            </div>
+          ) : (
+            <div className="pdf-inspector-empty">
+              <span className="pdf-inspector-symbol">{recallMode ? '?' : '“”'}</span>
+              <strong>{recallMode ? '先回忆，再揭示' : '选择一条标注'}</strong>
+              <p>{recallMode ? '遮挡块已覆盖当前标注。点击揭示摘录，然后完成一次评分。' : tool === 'select' ? '点击标注查看摘录，或拖拽调整位置。' : '在页面上按下并拖拽，创建一条新标注。'}</p>
+            </div>
+          )}
+
+          <div className="pdf-inspector-footer">
+            <div><span>当前可见标注</span><strong>{visibleAnnotationCount}</strong></div>
+            <p>{recallMode ? '同一会话中，每张卡片仅记录一次评分。' : '拖动时仅更新内存位置，松开鼠标后才写入本地数据库。'}</p>
+          </div>
+        </aside>
+      </div>
+
+      {deleteTarget && (
+        <div className="pdf-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !deleting) setDeleteTarget(null)
+        }}>
+          <div className="pdf-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-delete-title">
+            <small>删除标注</small>
+            <h2 id="pdf-delete-title">是否同时删除关联卡片？</h2>
+            <p>保留卡片会解除它与 PDF 的关联，卡片仍可在复习中使用；彻底删除则不可恢复。</p>
+            <div className="pdf-modal-actions">
+              <button type="button" onClick={() => void confirmDelete(false)} disabled={deleting}>保留卡片，仅删标注</button>
+              <button type="button" className="is-danger" onClick={() => void confirmDelete(true)} disabled={deleting}>彻底删除</button>
+              <button type="button" onClick={() => setDeleteTarget(null)} disabled={deleting}>取消</button>
+            </div>
+            {deleting && <span className="pdf-modal-status">正在删除…</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

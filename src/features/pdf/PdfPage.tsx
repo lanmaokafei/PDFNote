@@ -1,0 +1,332 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { PDFPageProxy, RenderTask } from 'pdfjs-dist'
+import type { Annotation, AnnotationGeometry, NormalizedBBox } from '../../domain/card'
+import {
+  clampRect,
+  displayPointToNormalized,
+  extractTextInRect,
+  fromDisplayPoints,
+  mergeOverlappingRects,
+  moveRects,
+  pageViewBox,
+  rectsOverlap,
+  toDisplayRect,
+  unionRects,
+} from './geometry'
+
+export type PdfTool = 'select' | 'highlight' | 'rectangle'
+export interface PageSize {
+  width: number
+  height: number
+}
+
+type Point = { x: number; y: number }
+type Interaction =
+  | { type: 'create'; pointerId: number; start: Point; rect: NormalizedBBox }
+  | { type: 'move'; pointerId: number; annotation: Annotation; start: Point; startNormalized: Point; rects: NormalizedBBox[] }
+
+interface PdfPageProps {
+  pageNumber: number
+  shouldRender: boolean
+  scale: number
+  size: PageSize
+  annotations: Annotation[]
+  excerpts: Record<string, string>
+  tool: PdfTool
+  recallMode: boolean
+  revealedCardIds: ReadonlySet<string>
+  selectedAnnotationId: string | null
+  getPage: (pageNumber: number) => Promise<PDFPageProxy>
+  registerPage: (pageNumber: number, element: HTMLElement | null) => void
+  onSize: (pageNumber: number, size: PageSize) => void
+  onSelect: (annotation: Annotation) => void
+  onCreate: (page: PDFPageProxy, rect: NormalizedBBox, excerpt: string) => Promise<void>
+  onMove: (annotation: Annotation, geometry: AnnotationGeometry, bbox: NormalizedBBox) => void
+  onReveal: (annotationIds: string[]) => void
+}
+
+export function PdfPage({
+  pageNumber,
+  shouldRender,
+  scale,
+  size,
+  annotations,
+  excerpts,
+  tool,
+  recallMode,
+  revealedCardIds,
+  selectedAnnotationId,
+  getPage,
+  registerPage,
+  onSize,
+  onSelect,
+  onCreate,
+  onMove,
+  onReveal,
+}: PdfPageProps) {
+  const [page, setPage] = useState<PDFPageProxy | null>(null)
+  const [pageError, setPageError] = useState('')
+  const [rendering, setRendering] = useState(false)
+  const [retry, setRetry] = useState(0)
+  const [interaction, setInteraction] = useState<Interaction | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+
+  const pageRef = useCallback((element: HTMLElement | null) => {
+    registerPage(pageNumber, element)
+  }, [pageNumber, registerPage])
+
+  useEffect(() => {
+    if (!shouldRender) return
+    let active = true
+    setPageError('')
+    getPage(pageNumber)
+      .then((loadedPage) => {
+        if (!active) return
+        setPage(loadedPage)
+        const viewport = loadedPage.getViewport({ scale: 1 })
+        onSize(pageNumber, { width: viewport.width, height: viewport.height })
+      })
+      .catch((reason: unknown) => {
+        if (active) setPageError(reason instanceof Error ? reason.message : String(reason))
+      })
+    return () => {
+      active = false
+    }
+  }, [getPage, onSize, pageNumber, retry, shouldRender])
+
+  const viewport = useMemo(() => page?.getViewport({ scale: 1 }) ?? null, [page])
+  const view = useMemo(() => (page ? pageViewBox(page.view) : null), [page])
+  const cssWidth = (viewport?.width ?? size.width) * scale
+  const cssHeight = (viewport?.height ?? size.height) * scale
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!page || !viewport || !shouldRender || !canvas) return
+    let active = true
+    let task: RenderTask | null = null
+    setRendering(true)
+    setPageError('')
+
+    const pixelRatio = Math.max(1, window.devicePixelRatio || 1)
+    const renderViewport = page.getViewport({ scale: scale * pixelRatio })
+    canvas.width = Math.max(1, Math.floor(renderViewport.width))
+    canvas.height = Math.max(1, Math.floor(renderViewport.height))
+    canvas.style.width = `${cssWidth}px`
+    canvas.style.height = `${cssHeight}px`
+
+    try {
+      task = page.render({ canvas, viewport: renderViewport })
+      void task.promise
+        .then(() => {
+          if (active) setRendering(false)
+        })
+        .catch((reason: unknown) => {
+          if (!active) return
+          setRendering(false)
+          setPageError(reason instanceof Error ? reason.message : String(reason))
+        })
+    } catch (reason) {
+      setRendering(false)
+      setPageError(reason instanceof Error ? reason.message : String(reason))
+    }
+
+    return () => {
+      active = false
+      task?.cancel()
+      canvas.width = 0
+      canvas.height = 0
+    }
+  }, [cssHeight, cssWidth, page, retry, scale, shouldRender, viewport])
+
+  useEffect(() => {
+    setInteraction(null)
+  }, [recallMode, scale, tool])
+
+  const pointFromEvent = useCallback((event: React.PointerEvent): Point => {
+    const svg = svgRef.current
+    if (!svg || !viewport) return { x: 0, y: 0 }
+    const bounds = svg.getBoundingClientRect()
+    return {
+      x: (event.clientX - bounds.left) * (viewport.width / bounds.width),
+      y: (event.clientY - bounds.top) * (viewport.height / bounds.height),
+    }
+  }, [viewport])
+
+  const displayedAnnotations = useMemo(() => {
+    if (interaction?.type !== 'move') return annotations
+    return annotations.map((annotation) => annotation.id === interaction.annotation.id
+      ? { ...annotation, geometry: { rects: interaction.rects } }
+      : annotation)
+  }, [annotations, interaction])
+
+  const recallMasks = useMemo(() => {
+    if (!recallMode) return []
+    return mergeOverlappingRects(annotations.flatMap((annotation) => annotation.geometry.rects))
+  }, [annotations, recallMode])
+
+  const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (recallMode || tool === 'select' || event.button !== 0 || !viewport || !view) return
+    event.preventDefault()
+    const start = pointFromEvent(event)
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setInteraction({ type: 'create', pointerId: event.pointerId, start, rect: fromDisplayPoints(start, start, viewport, view) })
+  }
+
+  const handleMoveStart = (event: React.PointerEvent<SVGGElement>, annotation: Annotation) => {
+    onSelect(annotation)
+    if (recallMode || tool !== 'select' || event.button !== 0 || !viewport || !view) return
+    event.preventDefault()
+    event.stopPropagation()
+    const start = pointFromEvent(event)
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setInteraction({
+      type: 'move',
+      pointerId: event.pointerId,
+      annotation,
+      start,
+      startNormalized: displayPointToNormalized(start, viewport, view),
+      rects: annotation.geometry.rects.map(clampRect),
+    })
+  }
+
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (!interaction || interaction.pointerId !== event.pointerId || !viewport || !view) return
+    const point = pointFromEvent(event)
+    if (interaction.type === 'create') {
+      setInteraction({ ...interaction, rect: fromDisplayPoints(interaction.start, point, viewport, view) })
+      return
+    }
+    const normalized = displayPointToNormalized(point, viewport, view)
+    setInteraction({
+      ...interaction,
+      rects: moveRects(
+        interaction.annotation.geometry.rects,
+        normalized.x - interaction.startNormalized.x,
+        normalized.y - interaction.startNormalized.y,
+      ),
+    })
+  }
+
+  const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (!interaction || interaction.pointerId !== event.pointerId || !page || !view) return
+    if (interaction.type === 'create') {
+      const rect = interaction.rect
+      if (rect.width * view.width >= 3 && rect.height * view.height >= 3) {
+        void page.getTextContent()
+          .then((content) => onCreate(page, rect, extractTextInRect(content, rect, view)))
+          .catch(() => onCreate(page, rect, ''))
+      }
+    } else {
+      onMove(interaction.annotation, { rects: interaction.rects }, unionRects(interaction.rects))
+    }
+    setInteraction(null)
+  }
+
+  const revealMask = (mask: NormalizedBBox) => {
+    const ids = annotations
+      .filter((annotation) => annotation.geometry.rects.some((rect) => rectsOverlap(mask, rect)))
+      .map((annotation) => annotation.id)
+    onReveal(ids)
+  }
+
+  const showSurface = shouldRender && page && viewport && view
+  return (
+    <section
+      ref={pageRef}
+      className={`pdf-page ${tool !== 'select' && !recallMode ? 'is-drawing' : ''}`}
+      style={{ width: cssWidth, height: cssHeight }}
+      data-page={pageNumber}
+      aria-label={`第 ${pageNumber} 页`}
+    >
+      {!showSurface && (
+        <div className="pdf-page-placeholder">
+          <span>第 {pageNumber} 页</span>
+          {shouldRender && !pageError && <small>正在载入页面…</small>}
+          {pageError && (
+            <div className="pdf-page-error">
+              <small>页面载入失败</small>
+              <button type="button" onClick={() => setRetry((value) => value + 1)}>重试</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {showSurface && (
+        <>
+          <canvas ref={canvasRef} className="pdf-canvas" aria-hidden="true" />
+          <svg
+            ref={svgRef}
+            className={`pdf-annotation-layer ${recallMode ? 'is-recall' : ''}`}
+            viewBox={`0 0 ${viewport.width} ${viewport.height}`}
+            width={cssWidth}
+            height={cssHeight}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={() => setInteraction(null)}
+          >
+            {displayedAnnotations.map((annotation) => (
+              <g
+                key={annotation.id}
+                className={`pdf-annotation is-${annotation.kind} ${selectedAnnotationId === annotation.id ? 'is-selected' : ''}`}
+                onPointerDown={(event) => handleMoveStart(event, annotation)}
+              >
+                <title>{excerpts[annotation.card_id] || '无文字摘录'}</title>
+                {annotation.geometry.rects.map((sourceRect, index) => {
+                  const rect = toDisplayRect(clampRect(sourceRect), viewport, view)
+                  return (
+                    <rect
+                      key={`${annotation.id}-${index}`}
+                      x={rect.left}
+                      y={rect.top}
+                      width={rect.width}
+                      height={rect.height}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )
+                })}
+              </g>
+            ))}
+
+            {interaction?.type === 'create' && (() => {
+              const rect = toDisplayRect(interaction.rect, viewport, view)
+              return <rect className={`pdf-draft is-${tool}`} x={rect.left} y={rect.top} width={rect.width} height={rect.height} vectorEffect="non-scaling-stroke" />
+            })()}
+
+            {recallMasks.map((mask, index) => {
+              const rect = toDisplayRect(mask, viewport, view)
+              const maskAnnotations = annotations.filter((annotation) => annotation.geometry.rects.some((item) => rectsOverlap(mask, item)))
+              const allRevealed = maskAnnotations.every((annotation) => revealedCardIds.has(annotation.card_id))
+              if (allRevealed) return null
+              return (
+                <g
+                  key={`mask-${index}`}
+                  className="pdf-recall-mask"
+                  role="button"
+                  tabIndex={0}
+                  aria-label="点击揭示标注"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => revealMask(mask)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') revealMask(mask)
+                  }}
+                >
+                  <rect x={rect.left} y={rect.top} width={rect.width} height={rect.height} />
+                  {rect.width > 70 && rect.height > 24 && (
+                    <text x={rect.left + rect.width / 2} y={rect.top + rect.height / 2} textAnchor="middle" dominantBaseline="central">
+                      点击回忆
+                    </text>
+                  )}
+                </g>
+              )
+            })}
+          </svg>
+          {rendering && <div className="pdf-render-status">正在渲染…</div>}
+          {pageError && <div className="pdf-render-error">渲染失败：{pageError}</div>}
+        </>
+      )}
+      <span className="pdf-page-number">{pageNumber}</span>
+    </section>
+  )
+}

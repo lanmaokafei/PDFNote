@@ -29,3 +29,5 @@ src-tauri/gen/schemas/
 *.pdf
 *.pdfnote
 *.zip
+
+release/

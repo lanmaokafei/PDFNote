@@ -72,6 +72,17 @@ scripts/ui-smoke.mjs     Playwright 界面冒烟脚本（需 dev server）
 - 评分采用 `expected_updated_at` 乐观锁 + `client_event_id` 唯一约束，避免重复计分与并发覆盖。
 - PDF 副本按内容哈希命名，备份恢复前后校验每个 PDF 的 SHA-256。
 
+## macOS 安装包
+
+已生成并校验：
+
+```text
+release/PDFNote_0.1.0_aarch64.dmg
+release/PDFNote_0.1.0_aarch64.dmg.sha256
+```
+
+该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
+
 ## 文档
 
 - [架构基线](docs/architecture.md)

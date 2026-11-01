@@ -11,8 +11,9 @@
 | 前端单元 | `npm run test` | 7 passed（2 files） |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
-| 原生编译 | `npx tauri build --debug --bundles app` | 通过，生成 PDFNote.app |
-| 启动初始化 | 启动 `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=1`，`quick_check=ok` |
+| 原生编译 | `npx tauri build --bundles app` | 通过，生成 20.2 MB release PDFNote.app |
+| DMG | 手动 `hdiutil` 打包 | 通过，12 MB，`hdiutil verify` 校验有效 |
+| 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=1`，`quick_check=ok` |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
 
 Rust 测试覆盖：

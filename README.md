@@ -1,65 +1,81 @@
 # PDFNote
 
-本地优先、卡片轴心的 PDF 学习应用。技术栈为 Tauri v2 + React + TypeScript + SQLite；无后端、无登录，目标为完全离线运行。
+本地优先、卡片轴心的 PDF 学习应用：在 PDF 上框选摘录即生成卡片，同一张卡片同时作为脑图节点和 FSRS 闪卡使用。
 
-## 当前进度
+技术栈：Tauri v2 + React 19 + TypeScript + Vite + SQLite + PDF.js + ts-fsrs + React Flow。
 
-阶段 1（数据模型与工程骨架）已落地：
+## 已实现
 
-- Card / documents / annotations / mindmap_layout / review_logs schema v1。
-- Rust 统一 SQLite 边界，建卡、脑图移除、删除卡片命令。
-- Zustand 规范化 `cardsById`，三视图共享同一 Card 类型和内存数据源。
-- Tauri 最小权限、WAL、外键、应用数据目录初始化。
-- React 基础工作台与数据库自检。
+- **本地资料库**：PDF 选择导入、SHA-256 去重、应用数据目录副本、断链检测、哈希一致性校验、重新定位、删除时保留或级联删除卡片。
+- **PDF 工作区**：PDF.js 连续滚动与页级虚拟化、缩放、页码跳转、高亮/矩形框选建卡、区域文字近似提取、标注拖拽、标注删除语义选择、文档遮挡主动回忆。
+- **知识脑图**：React Flow 自定义卡片节点、折叠/展开、拖拽改父级、连线改父级、防环、多选、布局持久化、独立建卡、卡片编辑、脑图逐级主动回忆。
+- **FSRS 复习**：ts-fsrs 四档评分、到期队列、立即持久化、幂等事件、复习审计、每日统计、14 日趋势、正反面内容编辑。
+- **备份与恢复**：ZIP 完整备份、manifest + SQLite 一致性快照 + PDF 副本、哈希与 schema 校验、merge/overwrite 导入、自动备份保留 5 份、防 zip slip。
+- **本地优先**：无账号、无云同步、业务功能不发起网络请求；最小 Tauri 权限，前端不直接执行 SQL。
 
-详细决策见 [架构基线](docs/architecture.md)，排期和验收见 [实施计划](docs/implementation-plan.md)。
-
-## 运行前端
+## 运行
 
 ```bash
 npm install
-npm run dev
-```
-
-浏览器打开 `http://localhost:1420`。纯浏览器模式仅用于 UI 预览，数据库自检会显示“浏览器预览”，不会创建本地数据库。
-
-## 运行桌面应用
-
-先安装 Rust（stable）及对应平台的 Tauri 系统依赖，然后：
-
-```bash
 npm run tauri dev
 ```
 
-原生验证命令：
+浏览器 UI 预览（无数据库与导入能力）：
 
 ```bash
+npm run dev
+```
+
+原生依赖：Rust stable、Node.js 20+、各平台 Tauri 系统依赖。
+
+## 验证
+
+```bash
+npm run build      # TypeScript + Vite 生产构建
+npm run lint       # Oxlint，0 warning
+npm run test       # Vitest 前端单测
 cargo test --manifest-path src-tauri/Cargo.toml
-npm run build
-npm run lint
+npm run tauri build
 ```
 
-## 验证与构建
+2026-11-02 本地验证结果：
 
-```bash
-npm run build       # TypeScript + Vite 生产构建
-npm run lint        # Oxlint
-npm run tauri build # 生成平台安装包，需要 Rust 工具链
-```
+- Rust：12 项测试通过（迁移、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、坏包保护等）。
+- 前端：7 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射）。
+- Tauri：debug 原生编译与 `.app` 打包通过；首次启动自动建库 `quick_check=ok`。
+- 界面：资料库、脑图、复习、备份四视图无头浏览器冒烟无 console error。
 
-## 关键目录
+## 目录
 
 ```text
-src/domain/             前端共享领域类型
-src/services/           类型化 Tauri invoke 边界
-src/store/              单一 Card 内存 store
-src-tauri/src/          Rust commands / models / db
-src-tauri/migrations/   SQLite 顺序迁移
-src-tauri/capabilities/ 主窗口最小权限
-public/pdfjs/           后续 PDF.js 离线 worker / fonts / cmaps
-docs/                   架构与实施验收文档
+src/domain/              Card / Document / Review 领域类型
+src/services/            类型化 Tauri invoke 边界
+src/store/               单一 Card 规范化的 Zustand 内存态
+src/features/library/    资料库与导入
+src/features/pdf/        PDF 渲染、标注、文档回忆
+src/features/mindmap/    脑图与脑图回忆
+src/features/review/     FSRS 调度与复习界面
+src/features/backup/     备份与恢复
+src-tauri/src/           Rust 命令、数据访问、备份、文件管理
+src-tauri/migrations/    SQLite schema v1
+src-tauri/capabilities/  主窗口最小权限
+public/pdfjs/            离线 PDF.js worker / fonts / cmaps
+docs/                    架构、实施、数据恢复与已知限制
+scripts/ui-smoke.mjs     Playwright 界面冒烟脚本（需 dev server）
 ```
 
-## 数据访问原则
+## 关键设计
 
-业务代码不使用 `tauri-plugin-sql`，不在 React 中拼接 SQL。跨表写入必须通过 Rust command 的显式事务；PDF 文件、哈希和备份压缩同样放在 Rust 侧。
+- Card 是唯一知识原子。PDF 高亮、脑图节点、复习闪卡只是同一 Card 的 projection。
+- 内容与语义树在 `cards`，标注几何在 `annotations`，自由布局在 `mindmap_layout`，评分审计在 `review_logs`。
+- 所有 SQL 在 Rust 侧执行；建卡、脑图移动、评分、文档删除和备份导入均使用显式事务。
+- 评分采用 `expected_updated_at` 乐观锁 + `client_event_id` 唯一约束，避免重复计分与并发覆盖。
+- PDF 副本按内容哈希命名，备份恢复前后校验每个 PDF 的 SHA-256。
+
+## 文档
+
+- [架构基线](docs/architecture.md)
+- [实施与验收计划](docs/implementation-plan.md)
+- [数据目录与备份格式](docs/data-and-backup.md)
+- [已知限制](docs/known-limits.md)
+- [实际验收记录](docs/acceptance.md)

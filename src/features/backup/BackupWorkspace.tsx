@@ -37,7 +37,11 @@ function resultFromBackup(title: string, result: BackupResult, detail: string): 
   }
 }
 
-export function BackupWorkspace() {
+interface BackupWorkspaceProps {
+  onRestored?: () => void
+}
+
+export function BackupWorkspace({ onRestored }: BackupWorkspaceProps = {}) {
   const [mode, setMode] = useState<ImportMode>('merge')
   const [busy, setBusy] = useState<Operation>(null)
   const [result, setResult] = useState<CompletedOperation | null>(null)
@@ -105,6 +109,7 @@ export function BackupWorkspace() {
       }
       const backup = await importBackup(sourcePath, 'merge')
       setResult(resultFromBackup('合并导入已完成', backup, '现有数据未被预先清空，备份内容已按合并模式导入。请核对文档和卡片数量。'))
+      onRestored?.()
     } catch (reason) {
       setError(`导入备份失败：${errorMessage(reason)}`)
     } finally {
@@ -122,6 +127,7 @@ export function BackupWorkspace() {
     try {
       const backup = await importBackup(sourcePath, 'overwrite')
       setResult(resultFromBackup('覆盖恢复已完成', backup, '当前数据已由备份内容替换。请核对文档、卡片及 PDF 文件是否完整。'))
+      onRestored?.()
     } catch (reason) {
       setError(`覆盖恢复失败：${errorMessage(reason)}`)
     } finally {

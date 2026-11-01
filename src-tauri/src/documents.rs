@@ -330,7 +330,7 @@ mod tests {
         write_pdf(&source, b"%PDF-1.7 keep cards");
         let document = import_document(&state, source.to_string_lossy().to_string()).unwrap();
 
-        let mut database = state.db().unwrap();
+        let database = state.db().unwrap();
         database
             .execute(
                 "INSERT INTO cards (id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height, excerpt, due, created_at, updated_at)

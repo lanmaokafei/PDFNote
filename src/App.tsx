@@ -1,155 +1,235 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import {
+  ArchiveRestore,
+  ArrowLeft,
+  BookOpen,
+  CloudOff,
+  Network,
+  Plus,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react'
 import './App.css'
-import type { BootstrapStatus } from './domain/card'
-import { getBootstrapStatus } from './services/pdfnote'
+import type { BootstrapStatus, Document } from './domain/card'
+import { LibraryWorkspace } from './features/library/LibraryWorkspace'
 
-type IconName = 'document' | 'mindmap' | 'review' | 'backup'
+const PdfWorkspace = lazy(() =>
+  import('./features/pdf/PdfWorkspace').then((module) => ({ default: module.PdfWorkspace })),
+)
+const MindmapWorkspace = lazy(() =>
+  import('./features/mindmap/MindmapWorkspace').then((module) => ({ default: module.MindmapWorkspace })),
+)
+const ReviewWorkspace = lazy(() =>
+  import('./features/review/ReviewWorkspace').then((module) => ({ default: module.ReviewWorkspace })),
+)
+const BackupWorkspace = lazy(() =>
+  import('./features/backup/BackupWorkspace').then((module) => ({ default: module.BackupWorkspace })),
+)
 
-function Icon({ name }: { name: IconName }) {
-  const paths: Record<IconName, string> = {
-    document: 'M7 3h7l4 4v14H7V3Zm7 0v5h4M10 12h5m-5 4h5',
-    mindmap: 'M12 5v4m-6 5v-3h12v3M6 18v2m6-7v7m6-2v2M4 18h4v4H4v-4Zm6-2h4v4h-4v-4Zm6 2h4v4h-4v-4ZM9 2h6v6H9V2Z',
-    review: 'M5 4h14v16H5V4Zm4 5h6m-6 4h4m-5 5 2 2 4-5',
-    backup: 'M12 3v12m0 0 4-4m-4 4-4-4M5 15v5h14v-5',
-  }
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d={paths[name]} />
-    </svg>
-  )
+function ViewLoading({ label }: { label: string }) {
+  return <div className="app-view-loading"><span /><strong>{label}</strong></div>
 }
+import {
+  getBootstrapStatus,
+  isTauriRuntime,
+  updateDocumentMetadata,
+} from './services/pdfnote'
+import { useCardStore } from './store/cardStore'
 
-const milestones = [
-  ['01', '卡片模型与工程骨架', '当前阶段'],
-  ['02', 'PDF 导入与标注渲染', '下一阶段'],
-  ['03', '三视图与 FSRS 闭环', '已规划'],
-  ['04', '备份与崩溃恢复', '已提前'],
-  ['05', '主动回忆与离线交付', '已规划'],
+type View = 'library' | 'mindmap' | 'review' | 'backup'
+
+const navigation = [
+  { id: 'library' as const, label: '文档', icon: BookOpen, hint: 'PDF 与卡片' },
+  { id: 'mindmap' as const, label: '脑图', icon: Network, hint: '知识结构' },
+  { id: 'review' as const, label: '复习', icon: Sparkles, hint: 'FSRS 调度' },
+  { id: 'backup' as const, label: '备份', icon: ArchiveRestore, hint: '本地安全' },
 ]
 
-function App() {
-  const [status, setStatus] = useState<BootstrapStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+const viewMeta: Record<View, { title: string; eyebrow: string }> = {
+  library: { title: '本地资料库', eyebrow: 'LIBRARY' },
+  mindmap: { title: '知识脑图', eyebrow: 'MINDMAP' },
+  review: { title: '主动复习', eyebrow: 'FSRS REVIEW' },
+  backup: { title: '数据安全', eyebrow: 'BACKUP' },
+}
 
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    setError('')
+function App() {
+  const [view, setView] = useState<View>('library')
+  const [activeDocument, setActiveDocument] = useState<Document | null>(null)
+  const [status, setStatus] = useState<BootstrapStatus | null>(null)
+  const [fatalError, setFatalError] = useState('')
+  const loadCards = useCardStore((state) => state.loadCards)
+  const cardsById = useCardStore((state) => state.cardsById)
+  const desktop = isTauriRuntime()
+
+  const refreshStatus = useCallback(async () => {
     try {
       setStatus(await getBootstrapStatus())
+      await loadCards()
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      setLoading(false)
+      setFatalError(reason instanceof Error ? reason.message : String(reason))
     }
-  }, [])
+  }, [loadCards])
 
   useEffect(() => {
-    let active = true
-    getBootstrapStatus()
-      .then((result) => {
-        if (active) setStatus(result)
-      })
-      .catch((reason) => {
-        if (active) setError(reason instanceof Error ? reason.message : String(reason))
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-    return () => {
-      active = false
+    void refreshStatus()
+  }, [refreshStatus])
+
+  useEffect(() => {
+    function handleBeforeUnload() {
+      // 所有写操作都在评分/拖拽结束时立即落盘；这里不阻塞退出。
     }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [])
 
-  return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark"><span>P</span></div>
-          <div><strong>PDFNote</strong><small>LOCAL LIBRARY</small></div>
-        </div>
+  function goTo(next: View) {
+    setActiveDocument(null)
+    setView(next)
+  }
 
-        <nav className="navigation" aria-label="主要模块">
-          <p className="nav-label">学习空间</p>
-          <div className="nav-item active"><Icon name="document" /><span>文档</span><i>01</i></div>
-          <div className="nav-item"><Icon name="mindmap" /><span>脑图</span><i>03</i></div>
-          <div className="nav-item"><Icon name="review" /><span>复习</span><i>03</i></div>
-          <p className="nav-label secondary">数据</p>
-          <div className="nav-item"><Icon name="backup" /><span>备份与恢复</span><i>04</i></div>
+  async function handlePageCount(count: number) {
+    if (!activeDocument || activeDocument.page_count === count) return
+    try {
+      await updateDocumentMetadata(activeDocument.id, activeDocument.title, count)
+      setActiveDocument({ ...activeDocument, page_count: count })
+      setStatus((current) => current)
+    } catch (reason) {
+      setFatalError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  const cardCount = Object.keys(cardsById).length
+  return (
+    <div className={`app-shell ${activeDocument ? 'is-immersive' : ''}`}>
+      <aside className="app-sidebar">
+        <button type="button" className="app-brand" onClick={() => goTo('library')} aria-label="返回资料库">
+          <span className="app-brand-mark">P</span>
+          <span className="app-brand-text"><strong>PDFNote</strong><small>LOCAL STUDY</small></span>
+        </button>
+
+        <nav className="app-nav" aria-label="主要模块">
+          <p className="app-nav-label">学习空间</p>
+          {navigation.slice(0, 3).map((item) => {
+            const Icon = item.icon
+            const active = !activeDocument && view === item.id
+            return (
+              <button
+                type="button"
+                key={item.id}
+                className={`app-nav-item ${active ? 'is-active' : ''}`}
+                onClick={() => goTo(item.id)}
+                aria-current={active ? 'page' : undefined}
+              >
+                <Icon size={17} strokeWidth={1.7} />
+                <span><strong>{item.label}</strong><small>{item.hint}</small></span>
+                {item.id === 'library' && <i>{status?.document_count ?? 0}</i>}
+                {item.id === 'mindmap' && <i>{cardCount}</i>}
+              </button>
+            )
+          })}
+          <p className="app-nav-label is-secondary">数据与交付</p>
+          <button
+            type="button"
+            className={`app-nav-item ${!activeDocument && view === 'backup' ? 'is-active' : ''}`}
+            onClick={() => goTo('backup')}
+          >
+            <ArchiveRestore size={17} strokeWidth={1.7} />
+            <span><strong>备份与恢复</strong><small>导出 · 校验 · 迁移</small></span>
+          </button>
         </nav>
 
-        <div className="local-status">
-          <div className="status-orbit"><span /></div>
-          <div><strong>完全本地运行</strong><small>无账号 · 无云端依赖</small></div>
+        <div className="app-sidebar-note">
+          <ShieldCheck size={15} />
+          <div><strong>完全本地</strong><small>无账号 · 无云端 · 离线可用</small></div>
         </div>
       </aside>
 
-      <main className="main-content">
-        <header className="topbar">
-          <div className="breadcrumb"><span>工作区</span><b>/</b><strong>架构基础</strong></div>
-          <button className="quiet-button" onClick={() => void refresh()} disabled={loading}>
-            {loading ? '检查中…' : '重新自检'}
-          </button>
-        </header>
-
-        <div className="content-wrap">
-          <section className="intro">
-            <div>
-              <p className="eyebrow"><span /> CARD-CENTRIC ARCHITECTURE</p>
-              <h1>一张卡片，<br /><em>三种理解方式。</em></h1>
-              <p className="intro-copy">从 PDF 摘录开始，让知识在文档、脑图与复习之间自然流动。没有副本，没有同步，只有同一个 Card。</p>
+      <main className="app-main">
+        {activeDocument ? (
+          <div className="app-immersive">
+            <header className="app-pdf-bar">
+              <button type="button" className="app-back" onClick={() => { setActiveDocument(null); void refreshStatus() }}>
+                <ArrowLeft size={15} /> 资料库
+              </button>
+              <div className="app-pdf-title">
+                <small>PDF · {activeDocument.page_count || '—'} 页</small>
+                <strong>{activeDocument.title}</strong>
+              </div>
+              <span className="app-pdf-badge"><CloudOff size={12} /> 本地副本</span>
+            </header>
+            <div className="app-pdf-canvas">
+              <Suspense fallback={<ViewLoading label="正在加载 PDF 引擎…" />}>
+                <PdfWorkspace
+                  document={activeDocument}
+                  onPageCount={(count) => void handlePageCount(count)}
+                  onCardsChanged={() => void refreshStatus()}
+                />
+              </Suspense>
             </div>
-            <button className="import-button" disabled title="PDF 导入将在阶段二实现">
-              <span>＋</span> 导入 PDF <small>阶段二开放</small>
-            </button>
-          </section>
-
-          <section className="metrics" aria-label="本地数据状态">
-            <div><span>文档</span><strong>{status?.document_count ?? '—'}</strong><small>DOCUMENTS</small></div>
-            <div><span>知识卡片</span><strong>{status?.card_count ?? '—'}</strong><small>CARDS</small></div>
-            <div><span>数据结构</span><strong>v{status?.schema_version ?? 1}</strong><small>SQLITE SCHEMA</small></div>
-            <div className="connection-metric"><span>存储引擎</span><strong><i className={status?.database_ready ? 'online' : ''} />{status?.database_ready ? '已连接' : '浏览器预览'}</strong><small>RUSQLITE · WAL</small></div>
-          </section>
-          {error && <p className="error-banner">数据库自检失败：{error}</p>}
-
-          <section className="projection-section">
-            <div className="section-heading">
-              <div><p className="eyebrow">ONE SOURCE OF TRUTH</p><h2>同一份数据，三个投影</h2></div>
-              <span className="schema-pill">CARD AXIS · 001</span>
+          </div>
+        ) : (
+          <>
+            <header className="app-topbar">
+              <div className="app-breadcrumb">
+                <span>PDFNote</span><b>/</b><strong>{viewMeta[view].title}</strong>
+              </div>
+              <div className="app-topbar-right">
+                <span className={`app-runtime ${desktop ? 'is-online' : ''}`}>
+                  <i /> {desktop ? 'SQLite 已连接' : '浏览器预览'}
+                </span>
+                <span className="app-schema">SCHEMA v{status?.schema_version ?? 1}</span>
+              </div>
+            </header>
+            {fatalError && (
+              <div className="app-fatal" role="alert">
+                本地数据访问异常：{fatalError}
+                <button type="button" onClick={() => { setFatalError(''); void refreshStatus() }}>重试</button>
+              </div>
+            )}
+            <div className="app-view">
+              {view === 'library' && (
+                <LibraryWorkspace
+                  onOpenDocument={(document) => { setFatalError(''); setActiveDocument(document) }}
+                  onChanged={() => void refreshStatus()}
+                />
+              )}
+              {view === 'mindmap' && (
+                <Suspense fallback={<ViewLoading label="正在加载脑图…" />}>
+                  <MindmapWorkspace onCardsChanged={() => void refreshStatus()} />
+                </Suspense>
+              )}
+              {view === 'review' && (
+                <Suspense fallback={<ViewLoading label="正在加载复习队列…" />}>
+                  <ReviewWorkspace onCardsChanged={() => void refreshStatus()} />
+                </Suspense>
+              )}
+              {view === 'backup' && (
+                <Suspense fallback={<ViewLoading label="正在加载备份模块…" />}>
+                  <BackupWorkspace onRestored={() => void refreshStatus()} />
+                </Suspense>
+              )}
             </div>
-            <div className="projection-grid">
-              <article className="projection-card pdf-card">
-                <div className="card-top"><span className="projection-icon"><Icon name="document" /></span><small>PDF PROJECTION</small><b>01</b></div>
-                <div className="pdf-preview"><i /><i /><i className="highlighted" /><i /><i /></div>
-                <h3>文档高亮</h3><p>source_ref 指向页码与归一化坐标，让卡片回到知识发生的位置。</p>
-              </article>
-              <article className="projection-card map-card">
-                <div className="card-top"><span className="projection-icon"><Icon name="mindmap" /></span><small>MINDMAP PROJECTION</small><b>02</b></div>
-                <div className="map-preview"><span>核心概念</span><i /><span>子节点</span></div>
-                <h3>脑图节点</h3><p>parent_id 与 sort_order 描述结构，节点永不保存内容副本。</p>
-              </article>
-              <article className="projection-card review-card">
-                <div className="card-top"><span className="projection-icon"><Icon name="review" /></span><small>REVIEW PROJECTION</small><b>03</b></div>
-                <div className="review-preview"><span>Q</span><i /><i /><b>显示答案</b></div>
-                <h3>复习闪卡</h3><p>FSRS 状态直接属于 Card，评分在任何视图都更新同一条记录。</p>
-              </article>
-            </div>
-          </section>
-
-          <section className="roadmap-section">
-            <div className="section-heading"><div><p className="eyebrow">DELIVERY SEQUENCE</p><h2>从架构到完整学习闭环</h2></div><span className="progress-label">1 / 6 阶段进行中</span></div>
-            <div className="milestone-list">
-              {milestones.map(([number, title, label], index) => (
-                <div className={`milestone ${index === 0 ? 'current' : ''}`} key={number}>
-                  <span>{number}</span><strong>{title}</strong><small>{label}</small>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <footer className="foundation-note"><span>✓</span><p><strong>数据边界已锁定</strong>　前端不直接执行 SQL；建卡、视图移除与删除由 Rust 事务保证一致性。</p></footer>
-        </div>
+          </>
+        )}
       </main>
+
+      <nav className="app-mobile-nav" aria-label="移动端导航">
+        {navigation.map((item) => {
+          const Icon = item.icon
+          const active = !activeDocument && view === item.id
+          return (
+            <button type="button" key={item.id} className={active ? 'is-active' : ''} onClick={() => goTo(item.id)}>
+              <Icon size={18} /><span>{item.label}</span>
+            </button>
+          )
+        })}
+      </nav>
+
+      {!desktop && (
+        <button type="button" className="app-floating-hint" onClick={() => goTo('library')}>
+          <Plus size={14} /> 桌面模式下可导入 PDF
+        </button>
+      )}
     </div>
   )
 }

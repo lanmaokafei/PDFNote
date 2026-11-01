@@ -1,27 +1,11 @@
-import { createContext, memo, useContext } from 'react'
+import { memo, useContext } from 'react'
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import type { Card, Rating } from '../../domain/card'
 import { useCardStore } from '../../store/cardStore'
 
 export type MindmapFlowNode = Node<{ card_id: string }, 'mindmapCard'>
 
-interface MindmapNodeContextValue {
-  busy: boolean
-  collapsedIds: ReadonlySet<string>
-  recallActive: boolean
-  revealedIds: ReadonlySet<string>
-  ratedIds: ReadonlySet<string>
-  ratingPendingIds: ReadonlySet<string>
-  recallErrors: Readonly<Record<string, string>>
-  onEdit: (id: string) => void
-  onToggle: (id: string) => void
-  onReveal: (id: string) => void
-  onRate: (id: string, rating: Rating) => void
-  onRemove: (id: string) => void
-  onDelete: (id: string) => void
-}
-
-export const MindmapNodeContext = createContext<MindmapNodeContextValue | null>(null)
+import { MindmapNodeContext } from './MindmapContext'
 
 const ratings: Array<{ value: Rating; label: string }> = [
   { value: 1, label: '重来' },

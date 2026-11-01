@@ -18,9 +18,11 @@ struct Manifest {
 }
 
 struct ManifestDocument {
+    #[allow(dead_code)]
     id: String,
     stored_path: String,
     content_hash: String,
+    #[allow(dead_code)]
     file_size: i64,
 }
 
@@ -80,11 +82,7 @@ fn export_to(state: &AppState, destination: &Path) -> Result<BackupResult, Strin
             .pragma_update(None, "wal_checkpoint", "TRUNCATE")
             .map_err(|error| error.to_string())?;
         connection
-            .query_row(
-                "VACUUM INTO ?1",
-                params![snapshot_path.to_string_lossy()],
-                |_| Ok(()),
-            )
+            .execute("VACUUM INTO ?1", params![snapshot_path.to_string_lossy()])
             .map_err(|error| error.to_string())?;
         drop(connection);
     }
@@ -323,11 +321,11 @@ fn import_overwrite(
         }
         Ok(())
     })();
-    transaction
-        .execute("DETACH DATABASE import_src", [])
-        .map_err(|error| error.to_string())?;
     result?;
     transaction.commit().map_err(|error| error.to_string())?;
+    // 事务提交后再解除挂载；即使驱动缓存语句导致 DETACH 失败，数据已安全提交。
+    let _ = connection.execute("DETACH DATABASE import_src", []);
+    drop(connection);
     sync_pdf_files(state, staging, manifest)
 }
 
@@ -376,7 +374,7 @@ fn import_merge(
             .map_err(|error| error.to_string())?;
         transaction
             .execute(
-                "UPDATE cards SET
+                "UPDATE cards AS c SET
                     excerpt = s.excerpt, user_note = s.user_note, question = s.question,
                     parent_id = CASE WHEN c.parent_id IS NULL THEN s.parent_id ELSE c.parent_id END,
                     sort_order = CASE WHEN c.updated_at < s.updated_at THEN s.sort_order ELSE c.sort_order END,
@@ -395,7 +393,7 @@ fn import_merge(
                     surface_mindmap = MAX(c.surface_mindmap, s.surface_mindmap),
                     surface_review = MAX(c.surface_review, s.surface_review),
                     updated_at = CASE WHEN c.updated_at < s.updated_at THEN s.updated_at ELSE c.updated_at END
-                 FROM import_src.cards s WHERE cards.id = s.id",
+                 FROM import_src.cards s WHERE c.id = s.id",
                 [],
             )
             .map_err(|error| error.to_string())?;
@@ -429,11 +427,11 @@ fn import_merge(
             .map_err(|error| error.to_string())?;
         Ok(())
     })();
-    transaction
-        .execute("DETACH DATABASE import_src", [])
-        .map_err(|error| error.to_string())?;
     result?;
     transaction.commit().map_err(|error| error.to_string())?;
+    // 事务提交后再解除挂载；即使驱动缓存语句导致 DETACH 失败，数据已安全提交。
+    let _ = connection.execute("DETACH DATABASE import_src", []);
+    drop(connection);
     sync_pdf_files(state, staging, manifest)
 }
 
@@ -452,7 +450,11 @@ fn sync_pdf_files(
             .to_string();
         let source = staging.join("pdfs").join(&file_name);
         let destination = pdfs_dir.join(&file_name);
-        if source.exists() && !destination.exists() {
+        let destination_valid = destination.exists()
+            && crate::documents::sha256_file(&destination)
+                .map(|hash| hash == document.content_hash)
+                .unwrap_or(false);
+        if source.exists() && !destination_valid {
             fs::copy(&source, &destination).map_err(|error| error.to_string())?;
         }
         if destination.exists() {
@@ -536,4 +538,125 @@ pub fn auto_backup(state: &AppState) -> Result<String, String> {
         let _ = fs::remove_file(oldest);
     }
     Ok(result.path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        cards::create_card,
+        documents::import_document,
+        models::{AnnotationGeometry, AnnotationInput, CreateCardInput, NormalizedBBox},
+        state::test_state,
+    };
+
+    fn prepare_state() -> (std::path::PathBuf, AppState) {
+        let (directory, state) = test_state();
+        let pdf_path = directory.join("source.pdf");
+        fs::write(&pdf_path, b"%PDF-1.7 backup roundtrip").unwrap();
+        let document = import_document(&state, pdf_path.to_string_lossy().to_string()).unwrap();
+        let bbox = NormalizedBBox {
+            x: 0.1,
+            y: 0.2,
+            width: 0.3,
+            height: 0.1,
+        };
+        create_card(
+            &state,
+            CreateCardInput {
+                source_ref: Some(crate::models::SourceRef {
+                    document_id: document.id,
+                    page: 1,
+                    bbox: bbox.clone(),
+                }),
+                excerpt: "备份测试摘录".into(),
+                user_note: "笔记".into(),
+                question: "问题".into(),
+                parent_id: None,
+                sort_order: 0,
+                annotation: Some(AnnotationInput {
+                    kind: "highlight".into(),
+                    geometry: AnnotationGeometry { rects: vec![bbox] },
+                    style: serde_json::json!({}),
+                }),
+            },
+        )
+        .unwrap();
+        (directory, state)
+    }
+
+    #[test]
+    fn export_import_roundtrip_restores_data_and_pdf() {
+        let (source_dir, source_state) = prepare_state();
+        let archive = source_dir.join("backup.zip");
+        let exported = export_backup(&source_state, archive.to_string_lossy().to_string()).unwrap();
+        assert_eq!(exported.documents, 1);
+        assert_eq!(exported.cards, 1);
+        assert!(archive.exists());
+
+        let (_target_dir, target_state) = test_state();
+        let imported = import_backup(
+            &target_state,
+            archive.to_string_lossy().to_string(),
+            "merge".into(),
+        )
+        .unwrap();
+        assert_eq!(imported.documents, 1);
+        assert_eq!(imported.cards, 1);
+
+        let database = target_state.db().unwrap();
+        let cards: i64 = database
+            .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
+            .unwrap();
+        let annotations: i64 = database
+            .query_row("SELECT COUNT(*) FROM annotations", [], |row| row.get(0))
+            .unwrap();
+        let documents: i64 = database
+            .query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!((documents, cards, annotations), (1, 1, 1));
+        drop(database);
+        let document = crate::documents::list_documents(&target_state)
+            .unwrap()
+            .remove(0);
+        assert!(target_state.data_dir.join(document.stored_path).exists());
+
+        let reimported = import_backup(
+            &target_state,
+            archive.to_string_lossy().to_string(),
+            "merge".into(),
+        )
+        .unwrap();
+        assert_eq!(reimported.cards, 1, "重复导入必须幂等");
+        let _ = fs::remove_dir_all(&source_dir);
+    }
+
+    #[test]
+    fn import_rejects_unknown_schema_without_touching_data() {
+        let (directory, state) = prepare_state();
+        let bad_archive = directory.join("bad.zip");
+        {
+            let file = fs::File::create(&bad_archive).unwrap();
+            let mut zip = ZipWriter::new(file);
+            zip.start_file("manifest.json", SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(br#"{"app":"pdfnote","schema_version":999,"documents":[]}"#)
+                .unwrap();
+            zip.finish().unwrap();
+        }
+        let error = import_backup(
+            &state,
+            bad_archive.to_string_lossy().to_string(),
+            "overwrite".into(),
+        )
+        .unwrap_err();
+        assert!(error.contains("schema") || error.contains("版本"));
+        let database = state.db().unwrap();
+        let cards: i64 = database
+            .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(cards, 1, "失败导入不能破坏现有数据");
+        drop(database);
+        let _ = fs::remove_dir_all(&directory);
+    }
 }

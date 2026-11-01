@@ -104,6 +104,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
     documentGenerationRef.current = generation
     let active = true
     let loadingTask: PDFDocumentLoadingTask | null = null
+    const pageCache = pageCacheRef.current
 
     setPdf(null)
     setLoading(true)
@@ -172,9 +173,11 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
     return () => {
       active = false
       if (loadingTask) void loadingTask.destroy()
-      pageCacheRef.current.clear()
+      pageCache.clear()
     }
-  }, [document.file_status, document.id, document.page_count, loadAttempt])
+    // page_count 只是持久化元数据，不应触发 PDF 重新加载。
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [document.file_status, document.id, loadAttempt])
 
   useEffect(() => {
     void loadCards().catch((reason: unknown) => {

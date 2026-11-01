@@ -11,7 +11,7 @@ import {
   type Connection,
   type Edge,
   type NodeChange,
-  type NodeDragHandler,
+  type OnNodeDrag,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { Card, MindmapLayoutInput, Rating } from '../../domain/card'
@@ -25,7 +25,8 @@ import {
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
 import { CardEditor, ConfirmationDialog, type CardDraft, type ConfirmationKind } from './CardEditor'
-import { MindmapNode, MindmapNodeContext, type MindmapFlowNode } from './MindmapNode'
+import { MindmapNodeContext } from './MindmapContext'
+import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
 import {
   TREE_Y_GAP,
   buildTreeLayout,
@@ -235,7 +236,7 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
     void changeParent(connection.target, connection.source)
   }, [changeParent])
 
-  const handleNodeDragStop: NodeDragHandler<MindmapFlowNode> = useCallback((_event, draggedNode, draggedNodes) => {
+  const handleNodeDragStop: OnNodeDrag<MindmapFlowNode> = useCallback((_event, draggedNode, draggedNodes) => {
     const batch = draggedNodes.length
       ? draggedNodes
       : nodes.filter((node) => node.id === draggedNode.id || node.selected)

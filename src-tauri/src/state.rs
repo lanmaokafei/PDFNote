@@ -6,6 +6,7 @@ use std::{
 
 pub struct AppState {
     pub database: Mutex<Connection>,
+    #[allow(dead_code)]
     pub database_path: PathBuf,
     pub data_dir: PathBuf,
 }

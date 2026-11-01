@@ -75,6 +75,7 @@ function App() {
     void refreshStatus()
   }, [refreshStatus])
 
+
   useEffect(() => {
     if (!desktop) return
     // 启动后在后台触发智能备份；数据未变化时后端立即跳过，不会反复复制大 PDF。

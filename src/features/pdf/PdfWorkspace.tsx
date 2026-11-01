@@ -204,6 +204,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
     })
   }, [document.id, loadCards])
 
+
   const getPage = useCallback((pageNumber: number): Promise<PDFPageProxy> => {
     if (!pdf) return Promise.reject(new Error('PDF 尚未载入'))
     const cached = pageCacheRef.current.get(pageNumber)

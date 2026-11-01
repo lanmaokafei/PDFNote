@@ -69,3 +69,26 @@ PDF.js 首次请求不带 `Range`。Tauri asset 协议只在收到 Range 请求�
 2. 不得移除 `disableStream` / `disableAutoFetch` / `PDFDataRangeTransport` 的组合。
 3. 不得对 PDF 恢复 deflate 压缩；大教材备份会重新阻塞。
 4. 大文件相关重任务必须保持 async command，不得回到 WebView 主线程。
+
+## 后续修复：顶端导航栏随滚动移走
+
+现象：打开 PDF 后滚动页面，应用顶部栏与 PDF 工具栏一起离开视口。
+
+原因：应用外层仍使用页面级滚动，`.app-shell` / `#root` 只是设置 `min-height`，内容增长时 `body` 可以滚动；PDF 内部虚拟化滚动并未成为唯一的滚动源。
+
+修复：
+
+```css
+html, body, #root { height: 100%; }
+body { overflow: hidden; overscroll-behavior: none; }
+.app-shell { height: 100vh; overflow: hidden; }
+.app-main { height: 100%; min-height: 0; overflow: hidden; }
+.app-view { flex: 1; min-height: 0; overflow-y: auto; }
+```
+
+PDF 沉浸视图的高度链继续保持 `100% → flex → pdf-scroll`，滚动只发生在 `.pdf-scroll`。已验证：
+
+- `body` clientHeight = scrollHeight = 800px，窗口滚动量始终为 0。
+- 资料库内容滚动发生在 `.app-view` 内（78px）。
+- `.app-topbar` 在滚动前后 top 均为 `0`。
+- 移动端使用 `100dvh`，沉浸模式隐藏底部导航。

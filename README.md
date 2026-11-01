@@ -77,13 +77,15 @@ scripts/ui-smoke.mjs     Playwright 界面冒烟脚本（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.1.1_aarch64.dmg
-release/PDFNote_0.1.1_aarch64.dmg.sha256
+release/PDFNote_0.1.2_aarch64.dmg
+release/PDFNote_0.1.2_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
 
 ## 重要修复
+
+- 修复打开 PDF 后滚动会导致顶端导航栏移走：应用外壳锁定 100vh，PDF 内部 `.pdf-scroll` 成为唯一滚动容器。
 
 - 修复 526MB / 752 页教材打开时假死：高度链导致全页渲染、备份重复压缩 PDF、asset 协议整本拉取三个根因均已处理。详见 [大文件复盘](docs/large-pdf-regression.md)。
 

@@ -9,7 +9,8 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; }
+html, body, #root { height: 100%; }
+body { margin: 0; min-width: 320px; overflow: hidden; overscroll-behavior: none; }
 button { font: inherit; }
 button:focus-visible { outline: 3px solid rgba(79, 109, 79, .25); outline-offset: 3px; }
-#root { min-height: 100vh; }
+#root { height: 100%; }

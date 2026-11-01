@@ -59,7 +59,7 @@ export async function listCards(limit = 500): Promise<Card[]> {
   return invoke('list_cards', { limit })
 }
 export async function listDueCards(now: string, limit = 200): Promise<Card[]> {
-  desktopOnly()
+  if (!isTauriRuntime()) return []
   return invoke('list_due_cards', { now, limit })
 }
 export async function createCard(input: CreateCardInput): Promise<Card> {

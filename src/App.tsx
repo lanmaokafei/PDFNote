@@ -92,7 +92,6 @@ function App() {
     try {
       await updateDocumentMetadata(activeDocument.id, activeDocument.title, count)
       setActiveDocument({ ...activeDocument, page_count: count })
-      setStatus((current) => current)
     } catch (reason) {
       setFatalError(reason instanceof Error ? reason.message : String(reason))
     }

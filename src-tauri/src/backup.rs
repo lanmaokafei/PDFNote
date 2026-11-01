@@ -660,3 +660,75 @@ mod tests {
         let _ = fs::remove_dir_all(&directory);
     }
 }
+
+#[cfg(test)]
+mod overwrite_tests {
+    use super::*;
+    use crate::{
+        cards::create_card,
+        documents::import_document,
+        models::CreateCardInput,
+        state::{test_state, AppState},
+    };
+
+    fn seed(state: &AppState, directory: &Path, name: &str, content: &[u8]) {
+        let pdf_path = directory.join(format!("{name}.pdf"));
+        fs::write(&pdf_path, content).unwrap();
+        let document = import_document(state, pdf_path.to_string_lossy().to_string()).unwrap();
+        create_card(
+            state,
+            CreateCardInput {
+                source_ref: None,
+                excerpt: format!("{name}-card"),
+                user_note: String::new(),
+                question: String::new(),
+                parent_id: None,
+                sort_order: 0,
+                annotation: None,
+            },
+        )
+        .unwrap();
+        assert!(!document.id.is_empty());
+    }
+
+    #[test]
+    fn overwrite_replaces_existing_logical_data() {
+        let (source_dir, source_state) = test_state();
+        seed(&source_state, &source_dir, "source", b"%PDF-1.7 source");
+        let archive = source_dir.join("source-backup.zip");
+        export_backup(&source_state, archive.to_string_lossy().to_string()).unwrap();
+
+        let (target_dir, target_state) = test_state();
+        seed(
+            &target_state,
+            &target_dir,
+            "target-one",
+            b"%PDF-1.7 target one",
+        );
+        seed(
+            &target_state,
+            &target_dir,
+            "target-two",
+            b"%PDF-1.7 target two",
+        );
+
+        let imported = import_backup(
+            &target_state,
+            archive.to_string_lossy().to_string(),
+            "overwrite".into(),
+        )
+        .unwrap();
+        assert_eq!(imported.cards, 1, "覆盖模式只应保留备份中的卡片");
+        let database = target_state.db().unwrap();
+        let cards: i64 = database
+            .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
+            .unwrap();
+        let documents: i64 = database
+            .query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!((documents, cards), (1, 1));
+        drop(database);
+        let _ = fs::remove_dir_all(&source_dir);
+        let _ = fs::remove_dir_all(&target_dir);
+    }
+}

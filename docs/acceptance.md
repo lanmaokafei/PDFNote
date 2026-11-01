@@ -7,7 +7,7 @@
 
 | 项目 | 命令 | 结果 |
 | --- | --- | --- |
-| Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml` | 12 passed |
+| Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml` | 13 passed |
 | 前端单元 | `npm run test` | 7 passed（2 files） |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
@@ -27,7 +27,8 @@ Rust 测试覆盖：
 8. 评分幂等、乐观锁冲突拒绝、Card 与日志同事务。
 9. 备份导出/导入完整往返（DB + PDF + 标注）。
 10. 高版本备份拒绝且不修改现有数据。
-11. bbox 约束。
+11. 覆盖恢复只保留备份中的逻辑数据。
+12. bbox 约束。
 
 前端测试覆盖：
 

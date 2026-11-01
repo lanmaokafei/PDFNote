@@ -83,7 +83,10 @@ PDFNote-backup-YYYYMMDD-HHMMSS.zip
 
 ## 自动备份
 
-- 成功导入 PDF 后触发一次自动备份。
+- 应用启动 60 秒后在后台触发；运行期间每 30 分钟检查一次。
+- 只有 documents / cards / review_logs 的最新更新时间晚于最近备份开始时才创建新包，否则立即跳过。
+- 备份任务运行在 Tauri 线程池，不占用 WebView 主线程。
+- PDF 在 ZIP 中使用 Stored 模式，避免对已压缩的 500MB 教材重复 deflate；数据库才使用压缩。
 - 写入 `backups/auto-*.pdfnote.zip`，只保留最新 5 份。
 - 评分、编辑、拖动等高频操作不触发完整备份，避免阻塞交互；它们已在单一事务内落盘。
 

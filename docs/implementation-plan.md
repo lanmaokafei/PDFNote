@@ -71,7 +71,7 @@
 ## 5. 当前状态（2026-11-02）
 
 - 阶段 1–5 的源码闭环已落地：数据层、PDF 导入/渲染/标注、三视图联动、脑图、FSRS、文档/脑图回忆、备份恢复。
-- Rust 12 项测试、前端 7 项测试、TypeScript 构建、Oxlint 0 warning 全部通过。
+- Rust 16 项测试、前端 7 项测试、TypeScript 构建、Oxlint 0 warning 全部通过。
 - Tauri debug `.app` 已成功生成，首次启动建库且 `quick_check=ok`。
 - 阶段 6 进行中：macOS 本地构建已通过；Windows/Linux 构建、签名、公证和完整性能基准仍需对应环境。
 - 详细逐项证据见 `docs/acceptance.md`。

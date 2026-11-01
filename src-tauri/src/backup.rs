@@ -52,13 +52,21 @@ fn read_documents(connection: &rusqlite::Connection) -> Result<Vec<Document>, St
         .map_err(|error| error.to_string())
 }
 
-fn add_file_to_zip(zip: &mut ZipWriter<fs::File>, path: &Path, name: &str) -> Result<(), String> {
+fn add_file_to_zip(
+    zip: &mut ZipWriter<fs::File>,
+    path: &Path,
+    name: &str,
+    compress: bool,
+) -> Result<(), String> {
     let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
-    zip.start_file(
-        name,
-        SimpleFileOptions::default().compression_level(Some(6)),
-    )
-    .map_err(|error| error.to_string())?;
+    // PDF 本身已是压缩格式，再 deflate 会让 500MB 教材消耗数分钟 CPU；直接存储即可。
+    let options = if compress {
+        SimpleFileOptions::default().compression_level(Some(6))
+    } else {
+        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored)
+    };
+    zip.start_file(name, options)
+        .map_err(|error| error.to_string())?;
     std::io::copy(&mut file, zip).map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -117,10 +125,10 @@ fn export_to(state: &AppState, destination: &Path) -> Result<BackupResult, Strin
                     .file_name()
                     .and_then(|value| value.to_str())
                     .ok_or("非法的 PDF 文件名")?;
-                add_file_to_zip(&mut zip, &pdf_path, &format!("pdfs/{name}"))?;
+                add_file_to_zip(&mut zip, &pdf_path, &format!("pdfs/{name}"), false)?;
             }
         }
-        add_file_to_zip(&mut zip, &snapshot_path, "data/pdfnote.db")?;
+        add_file_to_zip(&mut zip, &snapshot_path, "data/pdfnote.db", true)?;
         let manifest_bytes =
             serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
         zip.start_file("manifest.json", SimpleFileOptions::default())
@@ -507,32 +515,70 @@ pub fn import_backup(
     result
 }
 
+fn latest_data_change(state: &AppState) -> Result<Option<i64>, String> {
+    let connection = state.db()?;
+    let value: Option<String> = connection
+        .query_row(
+            "SELECT MAX(value) FROM (
+                SELECT MAX(updated_at) AS value FROM documents
+                UNION ALL SELECT MAX(updated_at) FROM cards
+                UNION ALL SELECT MAX(reviewed_at) FROM review_logs
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(value.and_then(|value| {
+        chrono::DateTime::parse_from_rfc3339(&value)
+            .ok()
+            .map(|date| date.timestamp_millis())
+    }))
+}
+
+fn backup_start_millis(path: &Path) -> Option<i64> {
+    use chrono::TimeZone;
+    let name = path.file_name()?.to_str()?;
+    let raw = name.strip_prefix("auto-")?.strip_suffix(".pdfnote.zip")?;
+    let naive = chrono::NaiveDateTime::parse_from_str(raw, "%Y%m%d-%H%M%S").ok()?;
+    chrono::Local
+        .from_local_datetime(&naive)
+        .single()
+        .map(|date| date.timestamp_millis())
+}
+
 pub fn auto_backup(state: &AppState) -> Result<String, String> {
+    let _guard = state.backup_lock.lock().map_err(|_| "备份锁不可用")?;
     let backups_dir = state.data_dir.join("backups");
     fs::create_dir_all(&backups_dir).map_err(|error| error.to_string())?;
-    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let destination = backups_dir.join(format!("auto-{timestamp}.pdfnote.zip"));
-    let result = export_to(&state, &destination)?;
 
     let mut backups: Vec<PathBuf> = fs::read_dir(&backups_dir)
         .map_err(|error| error.to_string())?
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .and_then(|value| value.to_str())
-                .map(|value| value == "zip")
-                .unwrap_or(false)
-                && entry
-                    .file_name()
-                    .to_str()
-                    .map(|value| value.starts_with("auto-"))
-                    .unwrap_or(false)
-        })
         .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .map(|value| value.starts_with("auto-") && value.ends_with(".zip"))
+                .unwrap_or(false)
+        })
         .collect();
     backups.sort();
+
+    // 数据没有变化时复用最近备份，避免每次启动或每次打开大 PDF 都复制数百 MB。
+    if let (Some(latest), Some(latest_change)) = (backups.last(), latest_data_change(state)?) {
+        if backup_start_millis(latest)
+            .map(|value| value >= latest_change)
+            .unwrap_or(false)
+        {
+            return Ok(latest.to_string_lossy().into_owned());
+        }
+    }
+
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let destination = backups_dir.join(format!("auto-{timestamp}.pdfnote.zip"));
+    let result = export_to(state, &destination)?;
+    backups.push(destination);
+
     while backups.len() > KEEP_AUTO_BACKUPS {
         let oldest = backups.remove(0);
         let _ = fs::remove_file(oldest);
@@ -730,5 +776,68 @@ mod overwrite_tests {
         drop(database);
         let _ = fs::remove_dir_all(&source_dir);
         let _ = fs::remove_dir_all(&target_dir);
+    }
+}
+
+#[cfg(test)]
+mod backup_freshness_tests {
+    use super::*;
+    use crate::{
+        cards::create_card,
+        models::CreateCardInput,
+        state::{test_state, AppState},
+    };
+
+    fn card(state: &AppState, title: &str) {
+        create_card(
+            state,
+            CreateCardInput {
+                source_ref: None,
+                excerpt: String::new(),
+                user_note: String::new(),
+                question: title.into(),
+                parent_id: None,
+                sort_order: 0,
+                annotation: None,
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn auto_backup_skips_unchanged_data() {
+        let (directory, state) = test_state();
+        card(&state, "first");
+        let first = auto_backup(&state).unwrap();
+        let second = auto_backup(&state).unwrap();
+        assert_eq!(first, second, "数据未变化时不应重复复制备份");
+
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        card(&state, "second");
+        let third = auto_backup(&state).unwrap();
+        assert_ne!(first, third, "数据变化后应生成新的备份");
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn pdf_is_stored_without_recompression() {
+        let (directory, state) = test_state();
+        let pdf_path = directory.join("large.pdf");
+        fs::write(&pdf_path, b"%PDF-1.7 payload").unwrap();
+        crate::documents::import_document(&state, pdf_path.to_string_lossy().to_string()).unwrap();
+        let archive_path = directory.join("backup.zip");
+        export_backup(&state, archive_path.to_string_lossy().to_string()).unwrap();
+
+        let mut archive = ZipArchive::new(fs::File::open(&archive_path).unwrap()).unwrap();
+        let name = archive
+            .file_names()
+            .find(|name| name.starts_with("pdfs/"))
+            .unwrap()
+            .to_string();
+        let entry = archive.by_name(&name).unwrap();
+        assert_eq!(entry.compression(), zip::CompressionMethod::Stored);
+        drop(entry);
+        drop(archive);
+        let _ = fs::remove_dir_all(&directory);
     }
 }

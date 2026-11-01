@@ -169,7 +169,9 @@
 .app-fatal { margin: 18px 34px 0; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #eed6ce; border-radius: 7px; color: #8d4b3d; background: #f9ebe6; font-size: 11px; }
 .app-fatal button { border: 0; background: none; color: inherit; font-size: 10px; text-decoration: underline; cursor: pointer; }
 
-.app-immersive { flex: 1; min-height: 100vh; display: flex; flex-direction: column; }
+/* 沉浸视图必须有确定高度，否则 pdf-scroll 会被内容撑高，页级虚拟化会失效。 */
+.app-shell.is-immersive .app-main { height: 100vh; min-height: 0; overflow: hidden; }
+.app-immersive { flex: 1; height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .app-pdf-bar { height: 56px; flex: 0 0 56px; display: flex; align-items: center; gap: 18px; padding: 0 20px; border-bottom: 1px solid #dfe4dc; background: #f9faf6; }
 .app-back { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border: 0; border-radius: 5px; color: #717b6d; background: transparent; font-size: 10px; cursor: pointer; }
 .app-back:hover { background: #eef1e8; }
@@ -177,7 +179,7 @@
 .app-pdf-title small { display: block; color: #9aa194; font-size: 8px; letter-spacing: .4px; }
 .app-pdf-title strong { display: block; overflow: hidden; margin-top: 2px; color: #3c493e; font-size: 12px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 .app-pdf-badge { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: 12px; color: #6e7d66; background: #edf2e7; font-size: 8px; }
-.app-pdf-canvas { flex: 1; min-height: 0; height: calc(100vh - 56px); }
+.app-pdf-canvas { flex: 1; min-height: 0; height: auto; overflow: hidden; }
 
 .app-mobile-nav { display: none; }
 
@@ -219,6 +221,8 @@
   .app-mobile-nav button.is-active { color: #3f5744; }
   .app-pdf-bar { padding: 0 12px; gap: 10px; }
   .app-pdf-badge { display: none; }
+  .app-shell.is-immersive .app-main { height: 100dvh; }
+  .app-shell.is-immersive .app-mobile-nav { display: none; }
   .app-floating-hint { display: none; }
 }
 

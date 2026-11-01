@@ -1,5 +1,5 @@
 use crate::{backup, cards, documents, models, review, state::AppState};
-use tauri::State;
+use tauri::{ipc::Response, State};
 
 #[tauri::command]
 pub fn get_bootstrap_status(state: State<'_, AppState>) -> Result<models::BootstrapStatus, String> {
@@ -140,7 +140,7 @@ pub fn get_review_stats(
     review::get_review_stats(&state, day_start)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_document(
     state: State<'_, AppState>,
     source_path: String,
@@ -151,6 +151,16 @@ pub fn import_document(
 #[tauri::command]
 pub fn list_documents(state: State<'_, AppState>) -> Result<Vec<models::Document>, String> {
     documents::list_documents(&state)
+}
+
+#[tauri::command(async)]
+pub fn read_pdf_chunk(
+    state: State<'_, AppState>,
+    id: String,
+    begin: u64,
+    end: u64,
+) -> Result<Response, String> {
+    documents::read_pdf_chunk(&state, id, begin, end).map(Response::new)
 }
 
 #[tauri::command]
@@ -168,12 +178,12 @@ pub fn update_document_metadata(
     documents::update_document_metadata(&state, id, title, page_count)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn verify_document(state: State<'_, AppState>, id: String) -> Result<models::Document, String> {
     documents::verify_document(&state, id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn relocate_document(
     state: State<'_, AppState>,
     id: String,
@@ -182,7 +192,7 @@ pub fn relocate_document(
     documents::relocate_document(&state, id, source_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_document(
     state: State<'_, AppState>,
     id: String,
@@ -191,7 +201,7 @@ pub fn delete_document(
     documents::delete_document(&state, id, keep_cards)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_backup(
     state: State<'_, AppState>,
     destination_path: String,
@@ -199,7 +209,7 @@ pub fn export_backup(
     backup::export_backup(&state, destination_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_backup(
     state: State<'_, AppState>,
     source_path: String,
@@ -208,7 +218,7 @@ pub fn import_backup(
     backup::import_backup(&state, source_path, mode)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn auto_backup(state: State<'_, AppState>) -> Result<String, String> {
     backup::auto_backup(&state)
 }

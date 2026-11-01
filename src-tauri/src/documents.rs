@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::Read,
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
@@ -360,6 +360,19 @@ mod tests {
     }
 
     #[test]
+    fn ranged_read_returns_exact_slice_and_clamps_eof() {
+        let (directory, _state) = test_state();
+        let path = directory.join("range.pdf");
+        fs::write(&path, b"0123456789").unwrap();
+        assert_eq!(read_file_range(&path, 2, 6).unwrap(), b"2345");
+        assert_eq!(read_file_range(&path, 8, 20).unwrap(), b"89");
+        assert!(read_file_range(&path, 20, 30).unwrap().is_empty());
+        assert!(read_file_range(&path, 5, 5).is_err());
+        assert!(read_file_range(&path, 0, 9 * 1024 * 1024).is_err());
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
     fn verify_detects_missing_file() {
         let (directory, state) = test_state();
         let source = directory.join("sample.pdf");
@@ -376,4 +389,45 @@ mod tests {
         assert_eq!(mismatched.file_status, "mismatch");
         let _ = fs::remove_dir_all(&directory);
     }
+}
+
+/// PDF.js 通过自有 Range 传输按块读取，避免 WebView 整本拉取 500MB 级教材。
+pub fn read_pdf_chunk(
+    state: &AppState,
+    id: String,
+    begin: u64,
+    end: u64,
+) -> Result<Vec<u8>, String> {
+    let path = {
+        let database = state.db()?;
+        let document = get_document_by_id(&database, &id)?.ok_or("文档不存在")?;
+        if document.file_status != "ready" {
+            return Err("PDF 文件未就绪".into());
+        }
+        state.data_dir.join(document.stored_path)
+    };
+    read_file_range(&path, begin, end)
+}
+
+fn read_file_range(path: &Path, begin: u64, end: u64) -> Result<Vec<u8>, String> {
+    const MAX_CHUNK: u64 = 8 * 1024 * 1024;
+    if end <= begin {
+        return Err("非法的读取范围".into());
+    }
+    if end - begin > MAX_CHUNK {
+        return Err("单次读取范围过大".into());
+    }
+    let mut file = fs::File::open(path).map_err(|error| format!("无法打开 PDF: {error}"))?;
+    let length = file.metadata().map_err(|error| error.to_string())?.len();
+    let start = begin.min(length);
+    let finish = end.min(length);
+    if start >= finish {
+        return Ok(Vec::new());
+    }
+    file.seek(SeekFrom::Start(start))
+        .map_err(|error| error.to_string())?;
+    let mut buffer = vec![0_u8; (finish - start) as usize];
+    file.read_exact(&mut buffer)
+        .map_err(|error| format!("读取 PDF 分块失败: {error}"))?;
+    Ok(buffer)
 }

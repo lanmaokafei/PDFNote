@@ -7,12 +7,12 @@
 
 | 项目 | 命令 | 结果 |
 | --- | --- | --- |
-| Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml` | 13 passed |
+| Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml` | 16 passed |
 | 前端单元 | `npm run test` | 7 passed（2 files） |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
 | 原生编译 | `npx tauri build --bundles app` | 通过，生成 20.2 MB release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 通过，12 MB，`hdiutil verify` 校验有效 |
+| DMG | 手动 `hdiutil` 打包 | 0.1.1 已通过 `hdiutil verify`，约 21 MB |
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=1`，`quick_check=ok` |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
 
@@ -45,10 +45,10 @@ Rust 测试覆盖：
 | 编号 | 状态 | 说明 |
 | --- | --- | --- |
 | A01 导入去重/失败清理 | 自动化通过 | 哈希去重、非 PDF 拒绝、临时文件清理路径已实现；未做 100MB 人工耗时记录 |
-| A02 200 页首屏 3 秒 | 未基准测试 | 页级虚拟化已实现；缺少固定测试机与 200 页基准文件 |
+| A02 200 页首屏 3 秒 | 大文件实测通过（浏览器） | 526MB / 752 页元数据加载 140ms，首屏仅读 1 页；实际文件读取约 4.2MB |
 | A03 建卡 100ms / 脑图 200ms | 部分验证 | 建卡单事务和前端即时刷新已实现；未做人工延迟采样 |
 | A04 三视图内容一致性 | 设计保证 | 三视图订阅同一 Card store；浏览器冒烟无错误，未做多视图人工操作 |
-| A05 500 标注拖拽帧率 | 未基准测试 | 内存态/持久态分离与 pointerup 落盘已实现；未采集帧率 |
+| A05 500 标注拖拽帧率 | 未采集 | 内存态/持久态分离与 pointerup 落盘已实现；仍需 500 标注帧率采样 |
 | A06 脑图语义/防环 | 自动化通过 | 防环、移除保留、子节点上移均有测试 |
 | A07 评分一致与幂等 | 自动化通过 | 幂等键、乐观锁、同事务写入有测试 |
 | A08 中途退出恢复 | 部分验证 | 每次评分立即提交，无内存待刷队列；未做系统强退演练 |
@@ -56,6 +56,15 @@ Rust 测试覆盖：
 | A10 损坏包保护 | 自动化通过 | 高 schema 版本包被拒绝，现有数据不变；另有 zip 路径校验 |
 | A11 完全离线 | 设计验证 | PDF.js worker/fonts/cmaps 打入 dist；业务代码无外部请求 |
 | A12 全新启动 | 自动化 + 运行通过 | 首次启动建库；权限/目录不可写场景仍需人工验证 |
+| 大文件 | 原生 + 浏览器实测 | 526MB / 752 页 PDF 打开不崩溃，仅请求可视页；备份改为 Stored 且后台执行 |
+
+## 大文件回归证据
+
+- 修复后诊断版：滚动容器 664px，752 个占位页仅 1 页相交，首屏只 `getPage(1)`。
+- 浏览器 Range 压测：元数据 140ms，14 个 Range 请求共 4.2MB，第 1/376/752 页可渲染。
+- 自动备份：PDF 使用 Stored；无数据变化时复用最近备份。
+
+详见 `docs/large-pdf-regression.md`。
 
 ## 尚未完成的人工验收
 

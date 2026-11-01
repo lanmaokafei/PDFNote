@@ -146,6 +146,6 @@ app-data/               运行时生成，不随安装包写入
 
 ## 8. 当前落地范围
 
-已实现：Vite/React/TS、Tauri v2 配置、最小 capabilities、SQLite WAL/外键/busy timeout、schema v1、建卡事务、卡片查询、脑图移除、彻底删除、Zustand 单一 Card store、前端类型与基础工作台。
+已实现：完整资料库与 PDF 工作区、三视图共享 Card、脑图与主动回忆、FSRS 复习、ZIP 备份恢复、崩溃边界、macOS Release 安装包。
 
-尚未实现：PDF 导入、PDF.js 实际渲染、FSRS 计算、脑图库、备份 zip、安装包原生编译验证。
+大数据文件策略：PDF 不再经 asset 协议整本读取，而是由 Rust `read_pdf_chunk` 提供受控 Range 分块，PDF.js 使用 `PDFDataRangeTransport` 按需拉取；页面代理使用 16 项 LRU 上限。备份与文件哈希等重任务在 Tauri 线程池执行。

@@ -33,6 +33,11 @@ export async function importDocument(sourcePath: string): Promise<Document> {
   desktopOnly()
   return invoke('import_document', { sourcePath })
 }
+export async function readPdfChunk(id: string, begin: number, end: number): Promise<ArrayBuffer> {
+  desktopOnly()
+  const result = await invoke<ArrayBuffer | number[]>('read_pdf_chunk', { id, begin, end })
+  return result instanceof ArrayBuffer ? result : new Uint8Array(result).buffer
+}
 export async function resolveDocumentPath(id: string): Promise<string> {
   desktopOnly()
   return invoke('resolve_document_path', { id })

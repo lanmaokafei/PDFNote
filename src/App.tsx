@@ -30,6 +30,7 @@ function ViewLoading({ label }: { label: string }) {
   return <div className="app-view-loading"><span /><strong>{label}</strong></div>
 }
 import {
+  autoBackup,
   getBootstrapStatus,
   isTauriRuntime,
   updateDocumentMetadata,
@@ -75,12 +76,19 @@ function App() {
   }, [refreshStatus])
 
   useEffect(() => {
-    function handleBeforeUnload() {
-      // 所有写操作都在评分/拖拽结束时立即落盘；这里不阻塞退出。
+    if (!desktop) return
+    // 启动后在后台触发智能备份；数据未变化时后端立即跳过，不会反复复制大 PDF。
+    const timer = window.setTimeout(() => {
+      void autoBackup().catch(() => undefined)
+    }, 60_000)
+    const interval = window.setInterval(() => {
+      void autoBackup().catch(() => undefined)
+    }, 30 * 60_000)
+    return () => {
+      window.clearTimeout(timer)
+      window.clearInterval(interval)
     }
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [])
+  }, [desktop])
 
   function goTo(next: View) {
     setActiveDocument(null)

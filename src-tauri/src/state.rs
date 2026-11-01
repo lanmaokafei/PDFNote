@@ -9,6 +9,7 @@ pub struct AppState {
     #[allow(dead_code)]
     pub database_path: PathBuf,
     pub data_dir: PathBuf,
+    pub backup_lock: Mutex<()>,
 }
 
 impl AppState {
@@ -17,6 +18,7 @@ impl AppState {
             database: Mutex::new(database),
             database_path,
             data_dir,
+            backup_lock: Mutex::new(()),
         }
     }
 

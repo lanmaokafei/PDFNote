@@ -12,7 +12,6 @@ import {
 } from 'lucide-react'
 import type { BootstrapStatus, Document } from '../../domain/card'
 import {
-  autoBackup,
   deleteDocument,
   getBootstrapStatus,
   importDocument,
@@ -113,7 +112,6 @@ export function LibraryWorkspace({ onOpenDocument, onChanged }: LibraryWorkspace
       setNotice(`《${document.title}》已加入本地资料库`)
       await refresh()
       onChanged()
-      void autoBackup().catch(() => undefined)
       onOpenDocument(document)
     } catch (reason) {
       setError(errorMessage(reason))

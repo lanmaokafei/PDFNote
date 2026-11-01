@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { convertFileSrc } from '@tauri-apps/api/core'
 import {
   getDocument,
   GlobalWorkerOptions,
+  PDFDataRangeTransport,
   type PDFDocumentLoadingTask,
   type PDFDocumentProxy,
   type PDFPageProxy,
@@ -17,8 +17,8 @@ import type {
 } from '../../domain/card'
 import {
   listAnnotations,
+  readPdfChunk,
   removeAnnotation,
-  resolveDocumentPath,
   updateAnnotationGeometry,
 } from '../../services/pdfnote'
 import { useCardStore } from '../../store/cardStore'
@@ -29,6 +29,7 @@ import './PdfWorkspace.css'
 GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs'
 
 const DEFAULT_PAGE_SIZE: PageSize = { width: 612, height: 792 }
+const PAGE_PROXY_CACHE_LIMIT = 16
 const MIN_SCALE = 0.5
 const MAX_SCALE = 3
 const EMPTY_ANNOTATIONS: Annotation[] = []
@@ -104,6 +105,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
     documentGenerationRef.current = generation
     let active = true
     let loadingTask: PDFDocumentLoadingTask | null = null
+    let rangeTransport: PDFDataRangeTransport | null = null
     const pageCache = pageCacheRef.current
 
     setPdf(null)
@@ -145,13 +147,29 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
 
     const openDocument = async () => {
       try {
-        const path = await resolveDocumentPath(document.id)
         if (!active) return
+        rangeTransport = new PDFDataRangeTransport(document.file_size, null)
+        rangeTransport.requestDataRange = (begin, end) => {
+          void readPdfChunk(document.id, begin, end)
+            .then((buffer) => {
+              if (!active || documentGenerationRef.current !== generation) return
+              rangeTransport?.onDataRange(begin, new Uint8Array(buffer))
+            })
+            .catch((reason: unknown) => {
+              if (!active || documentGenerationRef.current !== generation) return
+              setLoading(false)
+              setLoadError(`PDF 分块读取失败：${errorMessage(reason)}`)
+            })
+        }
         loadingTask = getDocument({
-          url: convertFileSrc(path),
+          range: rangeTransport,
           cMapUrl: '/pdfjs/cmaps/',
           cMapPacked: true,
           standardFontDataUrl: '/pdfjs/standard_fonts/',
+          // 500MB 级教材不能整本预取；自有 Range 传输确保只读取当前需要的分块。
+          disableStream: true,
+          disableAutoFetch: true,
+          rangeChunkSize: 256 * 1024,
         })
         const loadedPdf = await loadingTask.promise
         if (!active) {
@@ -172,6 +190,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
 
     return () => {
       active = false
+      rangeTransport?.abort()
       if (loadingTask) void loadingTask.destroy()
       pageCache.clear()
     }
@@ -194,6 +213,14 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
       throw reason instanceof Error ? reason : new Error(String(reason))
     })
     pageCacheRef.current.set(pageNumber, request)
+    // 只保留最近访问的页面代理，避免翻阅数百页后累计解码图像与 PDF 对象。
+    while (pageCacheRef.current.size > PAGE_PROXY_CACHE_LIMIT) {
+      const oldest = pageCacheRef.current.keys().next().value
+      if (oldest === undefined) break
+      const evicted = pageCacheRef.current.get(oldest)
+      pageCacheRef.current.delete(oldest)
+      void evicted?.then((page) => page.cleanup()).catch(() => undefined)
+    }
     return request
   }, [pdf])
 
@@ -220,13 +247,13 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
         const page = Number((entry.target as HTMLElement).dataset.page)
         return Number.isFinite(page) ? updateSet(pages, page, entry.isIntersecting) : pages
       }, previous))
-    }, { root, rootMargin: '100% 0px', threshold: 0 })
+    }, { root: null, rootMargin: '100% 0px', threshold: 0 })
     const visibleObserver = new IntersectionObserver((entries) => {
       setVisiblePages((previous) => entries.reduce((pages, entry) => {
         const page = Number((entry.target as HTMLElement).dataset.page)
         return Number.isFinite(page) ? updateSet(pages, page, entry.isIntersecting) : pages
       }, previous))
-    }, { root, threshold: 0.01 })
+    }, { root: null, threshold: 0.01 })
     renderObserverRef.current = renderObserver
     visibleObserverRef.current = visibleObserver
     pageElementsRef.current.forEach((element) => {
@@ -481,7 +508,8 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
 
   const pageNumbers = useMemo(() => Array.from({ length: Math.max(0, pageCount) }, (_, index) => index + 1), [pageCount])
   const visibleAnnotationCount = [...visiblePages].reduce((count, page) => count + (annotationsByPage[page]?.length ?? 0), 0)
-  const loadingMessage = document.file_status === 'importing' ? '文档正在导入，请稍候…' : '正在打开 PDF 文档…'
+  const largeDocument = document.file_size > 200 * 1024 * 1024
+  const loadingMessage = document.file_status === 'importing' ? '文档正在导入，请稍候…' : largeDocument ? '正在按需读取大型 PDF…' : '正在打开 PDF 文档…'
 
   return (
     <div className="pdf-workspace">
@@ -539,7 +567,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
             <div className="pdf-state" role="status">
               <span className="pdf-spinner" />
               <strong>{loadingMessage}</strong>
-              <p>正在准备连续滚动工作区。</p>
+              <p>{largeDocument ? '文档超过 200MB，仅加载当前可视页面；首次打开可能需要几秒。' : '正在准备连续滚动工作区。'}</p>
             </div>
           )}
           {!loading && loadError && (

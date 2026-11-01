@@ -35,6 +35,7 @@ pub fn run() {
             commands::import_document,
             commands::list_documents,
             commands::resolve_document_path,
+            commands::read_pdf_chunk,
             commands::update_document_metadata,
             commands::verify_document,
             commands::relocate_document,

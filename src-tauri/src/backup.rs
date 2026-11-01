@@ -1,5 +1,5 @@
 use crate::{
-    models::{now, BackupResult, Document},
+    models::{document_from_row, now, BackupResult, Document, DOCUMENT_COLUMNS},
     state::AppState,
 };
 use rusqlite::params;
@@ -27,26 +27,12 @@ struct ManifestDocument {
 }
 
 fn read_documents(connection: &rusqlite::Connection) -> Result<Vec<Document>, String> {
+    let query = format!("SELECT {DOCUMENT_COLUMNS} FROM documents");
     let mut statement = connection
-        .prepare(
-            "SELECT id, title, stored_path, original_path, content_hash, file_size, page_count, file_status, created_at, updated_at FROM documents",
-        )
+        .prepare(&query)
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map([], |row| {
-            Ok(Document {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                stored_path: row.get(2)?,
-                original_path: row.get(3)?,
-                content_hash: row.get(4)?,
-                file_size: row.get(5)?,
-                page_count: row.get(6)?,
-                file_status: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
-            })
-        })
+        .query_map([], document_from_row)
         .map_err(|error| error.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())
@@ -288,6 +274,28 @@ fn verify_extracted(state: &AppState, staging: &Path, manifest: &Manifest) -> Re
     Ok(())
 }
 
+/// 旧备份（schema v1）没有 last_page 列，导入时必须显式列出列名，避免 `SELECT *` 列数不匹配。
+fn document_copy_sql(schema_version: u32, only_missing: bool) -> String {
+    let columns = if schema_version >= 2 {
+        "id, title, stored_path, original_path, content_hash, file_size, page_count, file_status, created_at, updated_at, last_page"
+    } else {
+        "id, title, stored_path, original_path, content_hash, file_size, page_count, file_status, created_at, updated_at"
+    };
+    let selected = columns
+        .split(", ")
+        .map(|column| format!("s.{column}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let condition = if only_missing {
+        " WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.content_hash = s.content_hash)"
+    } else {
+        ""
+    };
+    format!(
+        "INSERT INTO documents ({columns}) SELECT {selected} FROM import_src.documents s{condition}"
+    )
+}
+
 fn import_overwrite(
     state: &AppState,
     staging: &Path,
@@ -316,8 +324,9 @@ fn import_overwrite(
         )
         .map_err(|error| error.to_string())?;
     let result = (|| -> Result<(), String> {
+        let documents_statement = document_copy_sql(manifest.schema_version, false);
         for statement in [
-            "INSERT INTO documents SELECT * FROM import_src.documents",
+            documents_statement.as_str(),
             "INSERT INTO cards SELECT * FROM import_src.cards",
             "INSERT INTO annotations SELECT * FROM import_src.annotations",
             "INSERT INTO mindmap_layout SELECT * FROM import_src.mindmap_layout",
@@ -355,12 +364,7 @@ fn import_merge(
         .map_err(|error| error.to_string())?;
     let result = (|| -> Result<(), String> {
         transaction
-            .execute(
-                "INSERT INTO documents
-                 SELECT s.* FROM import_src.documents s
-                 WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.content_hash = s.content_hash)",
-                [],
-            )
+            .execute(&document_copy_sql(manifest.schema_version, true), [])
             .map_err(|error| error.to_string())?;
         // 新导入的卡片需要修正文档引用：备份里的 document_id 在本库中可能属于另一个同内容文档。
         transaction
@@ -566,8 +570,9 @@ pub fn auto_backup(state: &AppState) -> Result<String, String> {
 
     // 数据没有变化时复用最近备份，避免每次启动或每次打开大 PDF 都复制数百 MB。
     if let (Some(latest), Some(latest_change)) = (backups.last(), latest_data_change(state)?) {
+        // 备份文件名只精确到秒，两边毫秒截断后再比较，避免同一秒内的写入反复触发备份。
         if backup_start_millis(latest)
-            .map(|value| value >= latest_change)
+            .map(|value| latest_change / 1000 <= value / 1000)
             .unwrap_or(false)
         {
             return Ok(latest.to_string_lossy().into_owned());
@@ -629,6 +634,16 @@ mod tests {
         )
         .unwrap();
         (directory, state)
+    }
+
+    #[test]
+    fn document_copy_sql_is_compatible_with_legacy_backups() {
+        let legacy = document_copy_sql(1, false);
+        assert!(!legacy.contains("last_page"));
+        assert!(legacy.contains("s.content_hash"));
+        let current = document_copy_sql(2, true);
+        assert!(current.contains("last_page"));
+        assert!(current.contains("NOT EXISTS"));
     }
 
     #[test]

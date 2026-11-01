@@ -81,6 +81,12 @@ PDFNote-backup-YYYYMMDD-HHMMSS.zip
 
 清空当前逻辑数据后导入备份快照，并补齐缺失 PDF 副本。必须二次确认。PDF 副本按内容哈希复用，不会产生重复。
 
+## 阅读进度
+
+- `documents.last_page` 记录上次停留页，schema v2 新增，默认 1。
+- 翻页停止 700ms 后写入，关闭文档时再补一次；不更新 `updated_at`，避免资料库排序与备份新鲜度被翻页触发。
+- 备份导入时按清单 `schema_version` 选择列：schema v1 旧包没有 `last_page`，导入后为 1；schema v2 包会一并恢复。
+
 ## 自动备份
 
 - 应用启动 60 秒后在后台触发；运行期间每 30 分钟检查一次。

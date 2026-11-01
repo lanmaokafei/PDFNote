@@ -20,6 +20,7 @@ import {
   readPdfChunk,
   removeAnnotation,
   updateAnnotationGeometry,
+  updateDocumentProgress,
 } from '../../services/pdfnote'
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
@@ -66,6 +67,8 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
   const [visiblePages, setVisiblePages] = useState<Set<number>>(new Set())
   const [renderPages, setRenderPages] = useState<Set<number>>(new Set())
   const [pageSizes, setPageSizes] = useState<Record<number, PageSize>>({})
+  // 用第 1 页的真实尺寸作为未测量占位页的高度，否则数百页后跳转会累计明显偏差。
+  const [defaultPageSize, setDefaultPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE)
   const [annotationsByPage, setAnnotationsByPage] = useState<Record<number, Annotation[]>>({})
   const [annotationVersion, setAnnotationVersion] = useState(0)
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
@@ -97,6 +100,12 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
   const scrollFrameRef = useRef<number | null>(null)
   const moveRequestsRef = useRef<Map<string, number>>(new Map())
   const callbacksRef = useRef({ onPageCount, onCardsChanged })
+  const restoredDocumentRef = useRef<string | null>(null)
+  const userNavigatedRef = useRef(false)
+  const progressPageRef = useRef(document.last_page || 1)
+  const visiblePagesRef = useRef<Set<number>>(new Set())
+  // 恢复阅读位置期间，观察器仍持有滚动前的可见页，先暂停页码同步避免把页码改回 1。
+  const restoringRef = useRef(false)
 
   useEffect(() => {
     callbacksRef.current = { onPageCount, onCardsChanged }
@@ -121,6 +130,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
     setVisiblePages(new Set())
     setRenderPages(new Set())
     setPageSizes({})
+    setDefaultPageSize(DEFAULT_PAGE_SIZE)
     setAnnotationsByPage({})
     setSelectedAnnotationId(null)
     setDeleteTarget(null)
@@ -129,6 +139,10 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
     setRevealedCardIds(new Set())
     setRatedCardIds(new Set())
     setReviewedCards({})
+    restoredDocumentRef.current = null
+    restoringRef.current = false
+    userNavigatedRef.current = false
+    progressPageRef.current = document.last_page || 1
     pageCacheRef.current.clear()
     loadedAnnotationPagesRef.current.clear()
     pendingAnnotationPagesRef.current.clear()
@@ -178,6 +192,10 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
           await loadingTask.destroy()
           return
         }
+        const firstPage = await loadedPdf.getPage(1)
+        if (!active) return
+        const firstViewport = firstPage.getViewport({ scale: 1 })
+        setDefaultPageSize({ width: firstViewport.width, height: firstViewport.height })
         setPdf(loadedPdf)
         setPageCount(loadedPdf.numPages)
         callbacksRef.current.onPageCount(loadedPdf.numPages)
@@ -313,6 +331,64 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
       })
   }, [annotationVersion, document.id, pdf, visiblePages])
 
+  /**
+   * 打开文档后回到上次阅读位置。占位页高度依赖页尺寸，测量会带来轻微位移，
+   * 因此在首帧后做几次对齐，用户一旦主动滚动就不再强行拉回。
+   */
+  useEffect(() => {
+    if (!pdf || loading) return
+    if (restoredDocumentRef.current === document.id) return
+    restoredDocumentRef.current = document.id
+    if (userNavigatedRef.current) return
+    const target = Math.min(Math.max(document.last_page || 1, 1), pageCount || 1)
+    progressPageRef.current = target
+    if (target <= 1) return
+
+    setCurrentPage(target)
+    setPageInput(String(target))
+    restoringRef.current = true
+    const jump = () => {
+      if (userNavigatedRef.current) return
+      const element = pageElementsRef.current.get(target)
+      const root = scrollRef.current
+      if (!element || !root) return
+      root.scrollTop = Math.max(0, element.offsetTop - 12)
+    }
+    const timers = [60, 400, 1_200].map((delay) => window.setTimeout(jump, delay))
+    const release = window.setTimeout(() => {
+      restoringRef.current = false
+    }, 1_500)
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer))
+      window.clearTimeout(release)
+    }
+  }, [document.id, document.last_page, loading, pageCount, pdf])
+
+  useEffect(() => {
+    progressPageRef.current = currentPage
+    // 滚动时保持页码输入框与当前页一致；输入框编辑本身不会改变 currentPage。
+    setPageInput(String(currentPage))
+  }, [currentPage])
+
+  // 翻页后延迟写库，避免连续滚动产生大量 UPDATE。
+  useEffect(() => {
+    if (!userNavigatedRef.current) return
+    if (restoredDocumentRef.current !== document.id) return
+    const timer = window.setTimeout(() => {
+      void updateDocumentProgress(document.id, currentPage).catch(() => undefined)
+    }, 700)
+    return () => window.clearTimeout(timer)
+  }, [currentPage, document.id])
+
+  // 关闭文档或退出时补一次写入，保证最后停留页不丢失。
+  useEffect(() => {
+    const id = document.id
+    return () => {
+      if (!userNavigatedRef.current) return
+      void updateDocumentProgress(id, progressPageRef.current).catch(() => undefined)
+    }
+  }, [document.id])
+
   const invalidateAnnotations = useCallback((page: number) => {
     loadedAnnotationPagesRef.current.delete(page)
     pendingAnnotationPagesRef.current.delete(page)
@@ -328,29 +404,43 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
     })
   }, [])
 
+  // 用 ref 读取最新可见页，避免滚动节流里拿到过期集合导致页码滞后。
+  const syncCurrentPage = useCallback(() => {
+    if (restoringRef.current) return
+    const root = scrollRef.current
+    if (!root) return
+    const rootBounds = root.getBoundingClientRect()
+    const center = rootBounds.top + rootBounds.height / 2
+    let nearestPage = 1
+    let nearestDistance = Number.POSITIVE_INFINITY
+    let matched = false
+    visiblePagesRef.current.forEach((page) => {
+      const element = pageElementsRef.current.get(page)
+      if (!element) return
+      const bounds = element.getBoundingClientRect()
+      const distance = Math.abs(bounds.top + bounds.height / 2 - center)
+      if (distance < nearestDistance) {
+        nearestDistance = distance
+        nearestPage = page
+        matched = true
+      }
+    })
+    if (matched) setCurrentPage(nearestPage)
+  }, [])
+
   const handleScroll = useCallback(() => {
     if (scrollFrameRef.current !== null) return
     scrollFrameRef.current = requestAnimationFrame(() => {
       scrollFrameRef.current = null
-      const root = scrollRef.current
-      if (!root) return
-      const rootBounds = root.getBoundingClientRect()
-      const center = rootBounds.top + rootBounds.height / 2
-      let nearestPage = 1
-      let nearestDistance = Number.POSITIVE_INFINITY
-      visiblePages.forEach((page) => {
-        const element = pageElementsRef.current.get(page)
-        if (!element) return
-        const bounds = element.getBoundingClientRect()
-        const distance = Math.abs(bounds.top + bounds.height / 2 - center)
-        if (distance < nearestDistance) {
-          nearestDistance = distance
-          nearestPage = page
-        }
-      })
-      setCurrentPage(nearestPage)
+      syncCurrentPage()
     })
-  }, [visiblePages])
+  }, [syncCurrentPage])
+
+  useEffect(() => {
+    visiblePagesRef.current = visiblePages
+    // 可见页集合更新后重新计算当前页，处理“最后一次滚动事件早于观察器回调”的情况。
+    if (userNavigatedRef.current) syncCurrentPage()
+  }, [syncCurrentPage, visiblePages])
 
   useEffect(() => () => {
     if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current)
@@ -366,6 +456,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
     const root = scrollRef.current
     if (!element || !root) return
     setOperationError('')
+    userNavigatedRef.current = true
     setCurrentPage(page)
     root.scrollTo({ top: Math.max(0, element.offsetTop - 20), behavior: 'smooth' })
   }
@@ -601,7 +692,13 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
       )}
 
       <div className="pdf-workspace-body">
-        <div className="pdf-scroll" ref={scrollRef} onScroll={handleScroll}>
+        <div
+          className="pdf-scroll"
+          ref={scrollRef}
+          onScroll={handleScroll}
+          onWheel={() => { userNavigatedRef.current = true }}
+          onPointerDown={() => { userNavigatedRef.current = true }}
+        >
           {loading && (
             <div className="pdf-state" role="status">
               <span className="pdf-spinner" />
@@ -627,7 +724,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
                   pageNumber={pageNumber}
                   shouldRender={renderPages.has(pageNumber)}
                   scale={scale}
-                  size={pageSizes[pageNumber] ?? DEFAULT_PAGE_SIZE}
+                  size={pageSizes[pageNumber] ?? defaultPageSize}
                   annotations={annotationsByPage[pageNumber] ?? EMPTY_ANNOTATIONS}
                   excerpts={excerpts}
                   tool={tool}

@@ -1,8 +1,9 @@
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
+const DOCUMENT_PROGRESS_SQL: &str = include_str!("../../migrations/002_document_progress.sql");
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
@@ -39,21 +40,25 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
     match version {
-        SCHEMA_VERSION => Ok(()),
-        0 => apply_migration(connection, INIT_SQL),
+        version if version == SCHEMA_VERSION => Ok(()),
+        0 => {
+            apply_migration(connection, INIT_SQL, 1)?;
+            apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2)
+        }
+        1 => apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2),
         newer => Err(format!(
             "数据库 schema 版本 {newer} 高于当前应用支持的版本 {SCHEMA_VERSION}"
         )),
     }
 }
 
-fn apply_migration(connection: &Connection, sql: &str) -> Result<(), String> {
+fn apply_migration(connection: &Connection, sql: &str, target_version: u32) -> Result<(), String> {
     connection
         .execute_batch("BEGIN IMMEDIATE")
         .map_err(|error| error.to_string())?;
     let result = connection
         .execute_batch(sql)
-        .and_then(|_| connection.execute(&format!("PRAGMA user_version = {SCHEMA_VERSION}"), []))
+        .and_then(|_| connection.execute(&format!("PRAGMA user_version = {target_version}"), []))
         .map(|_| ());
     match result {
         Ok(()) => connection
@@ -90,6 +95,7 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
+        assert!(columns(&connection, "documents").contains(&"last_page".to_string()));
         for field in ["elapsed_days", "scheduled_days", "learning_steps"] {
             assert!(columns(&connection, "cards").contains(&field.to_string()));
         }
@@ -103,6 +109,30 @@ mod tests {
         ] {
             assert!(columns(&connection, "review_logs").contains(&field.to_string()));
         }
+        quick_check(&connection).unwrap();
+    }
+
+    #[test]
+    fn upgrades_v1_database_with_default_progress() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(INIT_SQL).unwrap();
+        connection.execute("PRAGMA user_version = 1", []).unwrap();
+        migrate(&connection).unwrap();
+
+        let version: u32 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
+        let last_page: i64 = connection
+            .query_row(
+                "INSERT INTO documents (id, title, stored_path, content_hash, created_at, updated_at)
+                 VALUES ('legacy', '旧文档', 'pdfs/a.pdf', 'hash', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
+                 RETURNING last_page",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(last_page, 1);
         quick_check(&connection).unwrap();
     }
 

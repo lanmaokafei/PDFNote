@@ -165,6 +165,33 @@ pub fn update_document_metadata(
     Ok(())
 }
 
+/// 保存阅读位置。刻意不更新 updated_at：资料库排序、备份新鲜度判断都不应被翻页触发。
+pub fn update_document_progress(
+    state: &AppState,
+    id: String,
+    last_page: i64,
+) -> Result<i64, String> {
+    let database = state.db()?;
+    let page_count: i64 = database
+        .query_row(
+            "SELECT page_count FROM documents WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => "文档不存在".to_string(),
+            other => other.to_string(),
+        })?;
+    let clamped = last_page.clamp(1, page_count.max(1));
+    database
+        .execute(
+            "UPDATE documents SET last_page = ?1 WHERE id = ?2",
+            params![clamped, id],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(clamped)
+}
+
 pub fn list_documents(state: &AppState) -> Result<Vec<Document>, String> {
     let database = state.db()?;
     let query = format!("SELECT {DOCUMENT_COLUMNS} FROM documents ORDER BY updated_at DESC");
@@ -310,6 +337,41 @@ mod tests {
         let stored = state.data_dir.join(first.stored_path);
         assert!(stored.exists(), "PDF 副本必须存在");
         assert_eq!(first.file_status, "ready");
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn reading_progress_is_clamped_and_does_not_touch_updated_at() {
+        let (directory, state) = test_state();
+        let source = directory.join("progress.pdf");
+        write_pdf(&source, b"%PDF-1.7 progress");
+        let document = import_document(&state, source.to_string_lossy().to_string()).unwrap();
+        update_document_metadata(&state, document.id.clone(), "进度测试".into(), 120).unwrap();
+        let before = list_documents(&state).unwrap().remove(0);
+
+        assert_eq!(
+            update_document_progress(&state, document.id.clone(), 42).unwrap(),
+            42
+        );
+        assert_eq!(
+            update_document_progress(&state, document.id.clone(), 9_999).unwrap(),
+            120,
+            "超出页数必须截断"
+        );
+        assert_eq!(
+            update_document_progress(&state, document.id.clone(), -3).unwrap(),
+            1,
+            "非法页码必须回落到第一页"
+        );
+        update_document_progress(&state, document.id.clone(), 37).unwrap();
+
+        let after = list_documents(&state).unwrap().remove(0);
+        assert_eq!(after.last_page, 37);
+        assert_eq!(
+            after.updated_at, before.updated_at,
+            "翻页不应改变文档更新时间"
+        );
+        assert!(update_document_progress(&state, "missing".into(), 2).is_err());
         let _ = fs::remove_dir_all(&directory);
     }
 

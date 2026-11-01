@@ -183,6 +183,15 @@ pub fn update_document_metadata(
     documents::update_document_metadata(&state, id, title, page_count)
 }
 
+#[tauri::command]
+pub fn update_document_progress(
+    state: State<'_, AppState>,
+    id: String,
+    last_page: i64,
+) -> Result<i64, String> {
+    documents::update_document_progress(&state, id, last_page)
+}
+
 #[tauri::command(async)]
 pub fn verify_document(state: State<'_, AppState>, id: String) -> Result<models::Document, String> {
     documents::verify_document(&state, id)

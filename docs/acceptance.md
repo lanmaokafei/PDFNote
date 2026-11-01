@@ -12,13 +12,13 @@
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
 | 原生编译 | `npx tauri build --bundles app` | 通过，生成 20.2 MB release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.2.1 已通过 `hdiutil verify`，约 53 MB |
-| 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=1`，`quick_check=ok` |
+| DMG | 手动 `hdiutil` 打包 | 0.3.0 已通过 `hdiutil verify`，约 56 MB |
+| 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=2`，`quick_check=ok` |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
 
 Rust 测试覆盖：
 
-1. schema v1 迁移与外键/索引。
+1. schema v1 → v2 迁移（新增 last_page）、外键与索引。
 2. WAL、foreign_keys 安全设置。
 3. 同内容 PDF 去重、非 PDF 拒绝、缺失/哈希不一致检测。
 4. 删除文档时保留卡片、清理标注与 PDF。
@@ -60,6 +60,7 @@ Rust 测试覆盖：
 | 顶部栏固定 | 浏览器布局实测 | body 无滚动，内容区独立滚动，topbar top 始终为 0 |
 | OCR 建卡 | Rust + 浏览器实测 | 标注-only 建卡通过；macOS Vision 中文页约 1.1 秒；Tesseract 离线模型可加载 |
 | 脑图稳定性 | Chromium + IPC 模拟 | 进入脑图、选中、拖拽、PDF 建卡后切换均无 React #185 |
+| 继续阅读 | Chromium + IPC 模拟 | 5 页文档记录第 4 页，重开落在第 4 页；滚到第 3 页后返回重开仍为第 3 页 |
 
 ## 大文件回归证据
 

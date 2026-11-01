@@ -279,7 +279,10 @@ export function LibraryWorkspace({ onOpenDocument, onChanged }: LibraryWorkspace
               <div className="document-info">
                 <div>
                   <h3 title={document.title}>{document.title}</h3>
-                  <p>{document.page_count ? `${document.page_count} 页` : '页数待读取'} · {formatBytes(document.file_size)}</p>
+                  <p>
+                    {document.page_count ? `${document.page_count} 页` : '页数待读取'} · {formatBytes(document.file_size)}
+                    {document.last_page > 1 ? ` · 读到第 ${document.last_page} 页` : ''}
+                  </p>
                 </div>
                 <div className="document-actions">
                   {document.file_status !== 'ready' && (

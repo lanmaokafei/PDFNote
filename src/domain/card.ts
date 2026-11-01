@@ -84,6 +84,8 @@ export interface Document {
   file_size: number
   page_count: number
   file_status: 'importing' | 'ready' | 'missing' | 'mismatch'
+  /** 上次阅读到的页码，重新打开时用于恢复位置。 */
+  last_page: number
   created_at: string
   updated_at: string
 }

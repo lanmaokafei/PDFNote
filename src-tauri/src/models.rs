@@ -120,11 +120,13 @@ pub struct Document {
     pub file_size: i64,
     pub page_count: i64,
     pub file_status: String,
+    /// 上次阅读到的页码，重新打开文档时用于恢复位置。
+    pub last_page: i64,
     pub created_at: String,
     pub updated_at: String,
 }
 
-pub const DOCUMENT_COLUMNS: &str = "id, title, stored_path, original_path, content_hash, file_size, page_count, file_status, created_at, updated_at";
+pub const DOCUMENT_COLUMNS: &str = "id, title, stored_path, original_path, content_hash, file_size, page_count, file_status, created_at, updated_at, last_page";
 
 pub fn document_from_row(row: &Row<'_>) -> Result<Document, Error> {
     Ok(Document {
@@ -138,6 +140,7 @@ pub fn document_from_row(row: &Row<'_>) -> Result<Document, Error> {
         file_status: row.get(7)?,
         created_at: row.get(8)?,
         updated_at: row.get(9)?,
+        last_page: row.get(10)?,
     })
 }
 

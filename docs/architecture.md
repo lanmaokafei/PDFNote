@@ -1,7 +1,7 @@
 # PDFNote 架构基线（阶段 01 + 02）
 
-版本：0.1.0  
-状态：已落地工程骨架与 schema v1
+版本：0.3.0  
+状态：已落地工程骨架与 schema v2
 
 ## 1. 不可破坏的架构约束
 
@@ -29,6 +29,7 @@ erDiagram
 - `stored_path`：相对应用数据目录的路径，不保存用户提供的文件名作为实际文件名。
 - `original_path`：可空，仅用于断链提示；不能作为正常读取路径。
 - `file_status`：importing / ready / missing / mismatch。
+- `last_page`：上次阅读页码（schema v2），只影响打开时的定位，不参与排序；翻页不写 `updated_at`。
 - 标题、大小、页数、创建与更新时间。
 
 ### cards

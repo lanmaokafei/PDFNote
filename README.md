@@ -7,7 +7,7 @@
 ## 已实现
 
 - **本地资料库**：PDF 选择导入、SHA-256 去重、应用数据目录副本、断链检测、哈希一致性校验、重新定位、删除时保留或级联删除卡片。
-- **PDF 工作区**：PDF.js 连续滚动与页级虚拟化、256KB Range 分块读取、缩放、页码跳转、高亮/矩形框选建卡、文字层提取、离线中文 OCR、标注拖拽、标注删除语义选择、文档遮挡主动回忆。
+- **PDF 工作区**：PDF.js 连续滚动与页级虚拟化、256KB Range 分块读取、缩放、页码跳转、自动回到上次阅读页、高亮/矩形框选建卡、文字层提取、离线中文 OCR、标注拖拽、标注删除语义选择、文档遮挡主动回忆。
 - **中文 OCR**：macOS Vision / Windows 原生 OCR 优先，内置 Tesseract chi_sim+eng 离线兜底；扫描页无文字层时自动识别选区并建卡。
 - **知识脑图**：React Flow 自定义卡片节点、折叠/展开、拖拽改父级、连线改父级、防环、多选、布局持久化、独立建卡、卡片编辑、脑图逐级主动回忆。
 - **FSRS 复习**：ts-fsrs 四档评分、到期队列、立即持久化、幂等事件、复习审计、每日统计、14 日趋势、正反面内容编辑。
@@ -58,7 +58,7 @@ src/features/mindmap/    脑图与脑图回忆
 src/features/review/     FSRS 调度与复习界面
 src/features/backup/     备份与恢复
 src-tauri/src/           Rust 命令、数据访问、备份、文件管理
-src-tauri/migrations/    SQLite schema v1
+src-tauri/migrations/    SQLite schema v2（001 初始化 + 002 阅读进度）
 src-tauri/capabilities/  主窗口最小权限
 public/pdfjs/            离线 PDF.js worker / fonts / cmaps
 docs/                    架构、实施、数据恢复与已知限制
@@ -78,13 +78,15 @@ scripts/ui-smoke.mjs     Playwright 界面冒烟脚本（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.2.1_aarch64.dmg
-release/PDFNote_0.2.1_aarch64.dmg.sha256
+release/PDFNote_0.3.0_aarch64.dmg
+release/PDFNote_0.3.0_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
 
 ## 重要修复
+
+- 新增“继续阅读”：每份 PDF 记录上次停留页，重新打开自动定位；旧版备份仍可导入。
 
 - 修复进入脑图视图后 React #185（Maximum update depth）导致界面中断：选择回调改为内容比较，节点补齐 measured 尺寸。详见 [脑图崩溃复盘](docs/react-185-regression.md)。
 

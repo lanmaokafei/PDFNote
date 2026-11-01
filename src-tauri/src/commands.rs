@@ -1,6 +1,11 @@
 use crate::{backup, cards, documents, models, review, state::AppState};
 use tauri::{ipc::Response, State};
 
+#[tauri::command(async)]
+pub fn ocr_image(image_data: String) -> Result<String, String> {
+    crate::ocr::recognize_image(image_data)
+}
+
 #[tauri::command]
 pub fn get_bootstrap_status(state: State<'_, AppState>) -> Result<models::BootstrapStatus, String> {
     let database = state.db()?;

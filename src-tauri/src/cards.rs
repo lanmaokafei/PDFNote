@@ -26,14 +26,16 @@ pub fn get_card(connection: &Connection, id: &str) -> Result<Card, String> {
 }
 
 pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, String> {
+    // 扫描版 PDF 没有文字层，允许先以标注创建卡片，之后由 OCR 或用户补充内容。
     if input.excerpt.trim().is_empty()
         && input.user_note.trim().is_empty()
         && input.question.trim().is_empty()
+        && input.annotation.is_none()
     {
-        return Err("a card needs an excerpt, note, or question".into());
+        return Err("卡片需要摘录、笔记、问题或有效的 PDF 标注".into());
     }
     if input.annotation.is_some() && input.source_ref.is_none() {
-        return Err("an annotation requires a PDF source_ref".into());
+        return Err("标注需要 PDF 来源".into());
     }
     if let Some(annotation) = &input.annotation {
         validate_annotation(annotation)?;
@@ -433,6 +435,51 @@ mod tests {
         assert_eq!(card.scheduled_days, 0);
         assert_eq!(card.learning_steps, 0);
         assert_eq!(list_mindmap_layout(&state, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn annotation_only_card_is_allowed_for_scanned_pdf() {
+        let (directory, state) = test_state();
+        {
+            let database = state.db().unwrap();
+            database
+                .execute(
+                    "INSERT INTO documents (id, title, stored_path, content_hash, created_at, updated_at)
+                     VALUES ('doc-scan', '扫描教材', 'pdfs/scan.pdf', 'scan-hash', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                    [],
+                )
+                .unwrap();
+        }
+        let bbox = NormalizedBBox {
+            x: 0.1,
+            y: 0.1,
+            width: 0.4,
+            height: 0.1,
+        };
+        let card = create_card(
+            &state,
+            CreateCardInput {
+                source_ref: Some(crate::models::SourceRef {
+                    document_id: "doc-scan".into(),
+                    page: 1,
+                    bbox: bbox.clone(),
+                }),
+                excerpt: String::new(),
+                user_note: String::new(),
+                question: String::new(),
+                parent_id: None,
+                sort_order: 0,
+                annotation: Some(AnnotationInput {
+                    kind: "highlight".into(),
+                    geometry: AnnotationGeometry { rects: vec![bbox] },
+                    style: serde_json::json!({}),
+                }),
+            },
+        )
+        .unwrap();
+        assert_eq!(card.source_ref.as_ref().map(|source| source.page), Some(1));
+        assert!(card.excerpt.is_empty());
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]

@@ -24,6 +24,7 @@ import {
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
 import { PdfPage, type PageSize, type PdfTool } from './PdfPage'
+import { recognizeText } from './ocr'
 import './PdfWorkspace.css'
 
 GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs'
@@ -69,6 +70,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
   const [annotationVersion, setAnnotationVersion] = useState(0)
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
   const [operationError, setOperationError] = useState('')
+  const [ocrMessage, setOcrMessage] = useState('')
   const [notice, setNotice] = useState('')
   const [creating, setCreating] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Annotation | null>(null)
@@ -368,15 +370,45 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
     root.scrollTo({ top: Math.max(0, element.offsetTop - 20), behavior: 'smooth' })
   }
 
-  const handleCreate = useCallback(async (page: PDFPageProxy, rect: NormalizedBBox, excerpt: string) => {
+  const handleCreate = useCallback(async (
+    page: PDFPageProxy,
+    rect: NormalizedBBox,
+    excerpt: string,
+    ocrImage?: string,
+  ) => {
     if (creating || recallMode || tool === 'select') return
     setCreating(true)
     setOperationError('')
     setNotice('')
+    setOcrMessage('')
+    let finalExcerpt = excerpt.trim()
+    let ocrError = ''
+    let usedOcr = false
+
+    if (!finalExcerpt && ocrImage) {
+      setOcrMessage('正在识别选中区域的中文文字…')
+      try {
+        finalExcerpt = await recognizeText(ocrImage, (progress, status) => {
+          const phase = status.includes('loading language')
+            ? '正在加载中文模型'
+            : status.includes('recognizing')
+              ? '正在识别中文'
+              : '正在准备 OCR'
+          setOcrMessage(`${phase} ${progress}%`)
+        })
+        usedOcr = Boolean(finalExcerpt)
+      } catch (reason) {
+        ocrError = errorMessage(reason)
+      } finally {
+        setOcrMessage('')
+      }
+    }
+
     try {
       await createCard({
         source_ref: { document_id: document.id, page: page.pageNumber, bbox: rect },
-        excerpt,
+        excerpt: finalExcerpt,
+        question: finalExcerpt ? '' : `第 ${page.pageNumber} 页图像摘录`,
         annotation: {
           kind: tool === 'rectangle' ? 'rectangle' : 'highlight',
           geometry: { rects: [rect] },
@@ -384,7 +416,13 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
       })
       invalidateAnnotations(page.pageNumber)
       callbacksRef.current.onCardsChanged()
-      setNotice(excerpt ? '已创建卡片与标注。' : '已创建标注；此区域未提取到文字。')
+      if (ocrError) {
+        setOperationError(`OCR 识别失败：${ocrError}。卡片已创建，可编辑摘录补充文字。`)
+      } else if (finalExcerpt) {
+        setNotice(usedOcr ? '中文 OCR 已完成，卡片与标注已创建。' : '已创建卡片与标注。')
+      } else {
+        setNotice('未识别到文字，已创建空白摘录卡片，可稍后补充。')
+      }
     } catch (reason) {
       setOperationError(`创建失败：${errorMessage(reason)}`)
     } finally {
@@ -555,9 +593,9 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
         </button>
       </header>
 
-      {(operationError || notice || creating) && (
+      {(operationError || notice || creating || ocrMessage) && (
         <div className={`pdf-operation-bar ${operationError ? 'is-error' : ''}`} role={operationError ? 'alert' : 'status'}>
-          <span>{operationError || (creating ? '正在创建卡片与标注…' : notice)}</span>
+          <span>{operationError || ocrMessage || (creating ? '正在创建卡片与标注…' : notice)}</span>
           {(operationError || notice) && <button type="button" onClick={() => { setOperationError(''); setNotice('') }} aria-label="关闭提示">×</button>}
         </div>
       )}

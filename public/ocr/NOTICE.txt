@@ -1,0 +1,10 @@
+PDFNote offline OCR assets
+
+- tesseract.js (Apache-2.0): https://github.com/naptha/tesseract.js
+- tesseract.js-core WebAssembly builds (Apache-2.0): https://github.com/naptha/tesseract.js-core
+- chi_sim / eng traineddata from tessdata.projectnaptha.com 4.0.0 (Apache-2.0):
+  https://github.com/tesseract-ocr/tessdata
+
+On macOS and Windows, PDFNote prefers the operating system OCR engine
+(Apple Vision / Windows.Media.Ocr). Tesseract.js is the offline fallback,
+including Linux. No OCR request leaves the device.

@@ -20,6 +20,11 @@ const desktopOnly = () => {
   if (!isTauriRuntime()) throw new Error('此操作需要在 PDFNote 桌面应用中运行')
 }
 
+export async function recognizeNativeImage(imageData: string): Promise<string> {
+  desktopOnly()
+  return invoke('ocr_image', { imageData })
+}
+
 export async function getBootstrapStatus(): Promise<BootstrapStatus> {
   if (!isTauriRuntime()) return { database_ready: false, schema_version: 1, document_count: 0, card_count: 0 }
   return invoke('get_bootstrap_status')

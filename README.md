@@ -7,7 +7,8 @@
 ## 已实现
 
 - **本地资料库**：PDF 选择导入、SHA-256 去重、应用数据目录副本、断链检测、哈希一致性校验、重新定位、删除时保留或级联删除卡片。
-- **PDF 工作区**：PDF.js 连续滚动与页级虚拟化、256KB Range 分块读取、缩放、页码跳转、高亮/矩形框选建卡、区域文字近似提取、标注拖拽、标注删除语义选择、文档遮挡主动回忆。
+- **PDF 工作区**：PDF.js 连续滚动与页级虚拟化、256KB Range 分块读取、缩放、页码跳转、高亮/矩形框选建卡、文字层提取、离线中文 OCR、标注拖拽、标注删除语义选择、文档遮挡主动回忆。
+- **中文 OCR**：macOS Vision / Windows 原生 OCR 优先，内置 Tesseract chi_sim+eng 离线兜底；扫描页无文字层时自动识别选区并建卡。
 - **知识脑图**：React Flow 自定义卡片节点、折叠/展开、拖拽改父级、连线改父级、防环、多选、布局持久化、独立建卡、卡片编辑、脑图逐级主动回忆。
 - **FSRS 复习**：ts-fsrs 四档评分、到期队列、立即持久化、幂等事件、复习审计、每日统计、14 日趋势、正反面内容编辑。
 - **备份与恢复**：ZIP 完整备份、manifest + SQLite 一致性快照 + PDF 副本、哈希与 schema 校验、merge/overwrite 导入、自动备份保留 5 份、防 zip slip。
@@ -40,7 +41,7 @@ npm run tauri build
 
 2026-11-02 本地验证结果：
 
-- Rust：16 项测试通过（迁移、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、坏包保护等）。
+- Rust：17 项测试通过 + 1 项 Vision 集成测试（迁移、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、坏包保护等）。
 - 前端：7 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射）。
 - Tauri：debug 原生编译与 `.app` 打包通过；首次启动自动建库 `quick_check=ok`。
 - 界面：资料库、脑图、复习、备份四视图无头浏览器冒烟无 console error。
@@ -77,19 +78,23 @@ scripts/ui-smoke.mjs     Playwright 界面冒烟脚本（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.1.2_aarch64.dmg
-release/PDFNote_0.1.2_aarch64.dmg.sha256
+release/PDFNote_0.2.0_aarch64.dmg
+release/PDFNote_0.2.0_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
 
 ## 重要修复
 
+- 修复扫描版 PDF 框选后“创建失败”：允许标注-only 建卡，并自动 OCR。
+
 - 修复打开 PDF 后滚动会导致顶端导航栏移走：应用外壳锁定 100vh，PDF 内部 `.pdf-scroll` 成为唯一滚动容器。
 
 - 修复 526MB / 752 页教材打开时假死：高度链导致全页渲染、备份重复压缩 PDF、asset 协议整本拉取三个根因均已处理。详见 [大文件复盘](docs/large-pdf-regression.md)。
 
 ## 文档
+
+- [离线中文 OCR](docs/ocr.md)
 
 - [架构基线](docs/architecture.md)
 - [实施与验收计划](docs/implementation-plan.md)

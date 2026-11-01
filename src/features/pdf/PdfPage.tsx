@@ -40,7 +40,7 @@ interface PdfPageProps {
   registerPage: (pageNumber: number, element: HTMLElement | null) => void
   onSize: (pageNumber: number, size: PageSize) => void
   onSelect: (annotation: Annotation) => void
-  onCreate: (page: PDFPageProxy, rect: NormalizedBBox, excerpt: string) => Promise<void>
+  onCreate: (page: PDFPageProxy, rect: NormalizedBBox, excerpt: string, ocrImage?: string) => Promise<void>
   onMove: (annotation: Annotation, geometry: AnnotationGeometry, bbox: NormalizedBBox) => void
   onReveal: (annotationIds: string[]) => void
 }
@@ -208,14 +208,61 @@ export function PdfPage({
     })
   }
 
+  const cropSelection = (rect: NormalizedBBox): string | undefined => {
+    const canvas = canvasRef.current
+    if (!canvas || !viewport || !view) return undefined
+    const display = toDisplayRect(rect, viewport, view)
+    const ratioX = canvas.width / Math.max(viewport.width, 1)
+    const ratioY = canvas.height / Math.max(viewport.height, 1)
+    const padding = 4
+    const sourceX = Math.max(0, Math.floor((display.left - padding) * ratioX))
+    const sourceY = Math.max(0, Math.floor((display.top - padding) * ratioY))
+    const sourceWidth = Math.min(canvas.width - sourceX, Math.ceil((display.width + padding * 2) * ratioX))
+    const sourceHeight = Math.min(canvas.height - sourceY, Math.ceil((display.height + padding * 2) * ratioY))
+    if (sourceWidth <= 0 || sourceHeight <= 0) return undefined
+
+    const upscale = Math.min(3, Math.max(1, 90 / Math.max(sourceHeight, 1)))
+    let outputWidth = Math.max(1, Math.round(sourceWidth * upscale))
+    let outputHeight = Math.max(1, Math.round(sourceHeight * upscale))
+    const maxDimension = 2400
+    if (outputWidth > maxDimension || outputHeight > maxDimension) {
+      const shrink = maxDimension / Math.max(outputWidth, outputHeight)
+      outputWidth = Math.max(1, Math.round(outputWidth * shrink))
+      outputHeight = Math.max(1, Math.round(outputHeight * shrink))
+    }
+    const output = window.document.createElement('canvas')
+    output.width = outputWidth
+    output.height = outputHeight
+    const context = output.getContext('2d')
+    if (!context) return undefined
+    context.imageSmoothingEnabled = true
+    context.imageSmoothingQuality = 'high'
+    context.drawImage(
+      canvas,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      output.width,
+      output.height,
+    )
+    // JPEG 足以支撑文字识别，且能显著降低 IPC 传输体积。
+    return output.toDataURL('image/jpeg', 0.92)
+  }
+
   const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
     if (!interaction || interaction.pointerId !== event.pointerId || !page || !view) return
     if (interaction.type === 'create') {
       const rect = interaction.rect
       if (rect.width * view.width >= 3 && rect.height * view.height >= 3) {
         void page.getTextContent()
-          .then((content) => onCreate(page, rect, extractTextInRect(content, rect, view)))
-          .catch(() => onCreate(page, rect, ''))
+          .then((content) => {
+            const excerpt = extractTextInRect(content, rect, view)
+            onCreate(page, rect, excerpt, excerpt ? undefined : cropSelection(rect))
+          })
+          .catch(() => onCreate(page, rect, '', cropSelection(rect)))
       }
     } else {
       onMove(interaction.annotation, { rects: interaction.rects }, unionRects(interaction.rects))

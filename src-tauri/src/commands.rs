@@ -6,6 +6,34 @@ pub fn ocr_image(image_data: String) -> Result<String, String> {
     crate::ocr::recognize_image(image_data)
 }
 
+/// Whole-page recognition with per-line geometry, used to build a selectable
+/// text layer over scanned pages. Runs on the async command pool because Vision
+/// can take seconds on a dense page.
+#[tauri::command(async)]
+pub fn ocr_page_lines(image_data: String) -> Result<Vec<crate::ocr::OcrLinePayload>, String> {
+    crate::ocr::recognize_lines(image_data)
+}
+
+#[tauri::command]
+pub fn get_page_ocr(
+    state: State<'_, AppState>,
+    document_id: String,
+    page: i64,
+) -> Result<Option<crate::page_text::PageOcrRecord>, String> {
+    crate::page_text::get(&state, &document_id, page)
+}
+
+#[tauri::command]
+pub fn save_page_ocr(
+    state: State<'_, AppState>,
+    document_id: String,
+    page: i64,
+    lines_json: String,
+    engine: String,
+) -> Result<(), String> {
+    crate::page_text::save(&state, &document_id, page, &lines_json, &engine)
+}
+
 #[tauri::command]
 pub fn get_bootstrap_status(state: State<'_, AppState>) -> Result<models::BootstrapStatus, String> {
     let database = state.db()?;

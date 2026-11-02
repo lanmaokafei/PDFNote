@@ -360,6 +360,7 @@ fn import_overwrite(
         .transaction()
         .map_err(|error| error.to_string())?;
     for table in [
+        "page_ocr",
         "review_logs",
         "mindmap_layout",
         "annotations",
@@ -392,7 +393,8 @@ fn import_overwrite(
                 .execute(statement, [])
                 .map_err(|error| error.to_string())?;
         }
-        for table in ["card_tags", "card_links", "page_inks"] {
+        // page_ocr 是纯派生缓存：旧备份没有该表时跳过，页面首次打开会自动重建。
+        for table in ["card_tags", "card_links", "page_inks", "page_ocr"] {
             copy_table_if_present(&transaction, table)?;
         }
         Ok(())

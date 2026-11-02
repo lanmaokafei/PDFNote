@@ -9,6 +9,7 @@
 - **本地资料库**：PDF 选择导入、SHA-256 去重、应用数据目录副本、断链检测、哈希一致性校验、重新定位、删除时保留或级联删除卡片。
 - **同屏工作台**：左 PDF、右脑图，顶部悬浮分段栏，底部工具坞；分栏可拖动，脑图可一键收起。
 - **PDF 工作区**：PDF.js 连续滚动与页级虚拟化、256KB Range 分块读取、缩放、页码跳转、自动回到上次阅读页、高亮/矩形框选建卡、文字层提取、Apple Vision OCR、标注拖拽、标注删除语义选择、文档遮挡主动回忆。
+- **可选文字层（0.9.0）**：切到「文字」工具后可像 Word 一样在页面上随手拖选文字，选中即复制或直接建卡。页面打开时后台整页识别一次（有 PDF 文字层则用精确字形坐标，扫描页用 Apple Vision 行级 OCR），结果带每行坐标并缓存到 SQLite，之后所有点选/框选零延迟。详见 [Apple Vision OCR](docs/ocr.md)。
 - **Apple Vision OCR**：macOS 原生单引擎（`VNRecognizeTextRequest` accurate / revision 3 / 自动语言检测），不打包离线模型；扫描页无文字层时自动识别选区并建卡，公式与图表保留选区原图。详见 [Apple Vision OCR](docs/ocr.md)。
 - **知识脑图**：React Flow 自定义卡片节点、折叠/展开、拖拽改父级、连线改父级、防环、多选、布局持久化、独立建卡、卡片编辑、脑图逐级主动回忆。
 - **FSRS 复习**：ts-fsrs 四档评分、到期队列、立即持久化、幂等事件、复习审计、每日统计、14 日趋势、正反面内容编辑。
@@ -44,8 +45,9 @@ npm run tauri build
 
 2026-11-02 本地验证结果：
 
-- Rust：26 项测试通过 + 1 项 Vision 真机集成测试（中文识别，需 `OCR_TEST_IMAGE`）；覆盖迁移至 v4、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、旧备份列兼容、坏包保护等。
-- 前端：13 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、公式特征检测）。
+- Rust：29 项测试通过（含 2 项 Vision 真机集成：`OCR_TEST_IMAGE` 中文识别、`OCR_PAGE_TEST_IMAGE` 行级坐标）；覆盖迁移至 v5、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、旧备份列兼容、页面文字缓存、坏包保护等。
+- 前端：19 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、公式特征检测、文字层行提取与选区文本）。
+- 文字层冒烟：`node scripts/textlayer-smoke.mjs`，用无头 Chrome 验证透明 DOM 文字可原生拖选并换算出归一化选区。
 - Tauri：release 原生编译与 `.app` 打包通过；首次启动自动建库 `quick_check=ok`。
 - 界面：资料库、脑图、复习、备份四视图无头浏览器冒烟无 console error。
 
@@ -61,7 +63,7 @@ src/features/mindmap/    脑图与脑图回忆
 src/features/review/     FSRS 调度与复习界面
 src/features/backup/     备份与恢复
 src-tauri/src/           Rust 命令、数据访问、备份、文件管理
-src-tauri/migrations/    SQLite schema v4（001 初始化 → 002 阅读进度 → 003 协作能力 → 004 摘录图像）
+src-tauri/migrations/    SQLite schema v5（001 初始化 → 002 阅读进度 → 003 协作能力 → 004 摘录图像 → 005 页面文字缓存）
 src-tauri/capabilities/  主窗口最小权限
 public/pdfjs/            离线 PDF.js worker / fonts / cmaps
 docs/                    架构、实施、数据恢复与已知限制
@@ -81,14 +83,15 @@ scripts/ui-smoke.mjs     Playwright 界面冒烟脚本（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.8.0_aarch64.dmg
-release/PDFNote_0.8.0_aarch64.dmg.sha256
+release/PDFNote_0.9.0_aarch64.dmg
+release/PDFNote_0.9.0_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
 
 ## 重要修复
 
+- 0.9.0 加入**可选文字层**：Apple Vision 返回的每行坐标不再丢弃，整页识别一次后铺成透明 DOM 文字层并缓存到 SQLite（`page_ocr`，schema v5）。「文字」工具下可像 Word 一样拖选、复制、建卡；框选建卡也优先读缓存文字，不再每次等待 OCR。有 PDF 文字层的页面直接用精确字形坐标，完全不走 OCR。
 - 0.8.0 把 OCR 切换为 **Apple Vision 单引擎**：移除 Tesseract.js、WASM core 与约 63MB 离线语言模型，安装包大幅缩小；原生引擎失败时明确报错并保留选区图像，不再静默降级。详见 [Apple Vision OCR](docs/ocr.md)。
 
 - 0.7.0 处理公式选区：纯文字 OCR 无法识别公式结构，检测到公式特征时保留选区原图（`cards.excerpt_image`），不写入乱码文本；扫描页图像摘录同样随卡片存档，脑图节点、复习闪卡与编辑器均可查看。schema 升至 v4。崩溃时错误与 React 组件栈写入 app 数据目录 `logs/crash-*.log`。
@@ -111,7 +114,7 @@ release/PDFNote_0.8.0_aarch64.dmg.sha256
 
 ## 文档
 
-- [Apple Vision OCR](docs/ocr.md)
+- [Apple Vision OCR 与可选文字层](docs/ocr.md)
 - [脑图 React #185 复盘](docs/react-185-regression.md)
 - [学习工作台布局](docs/workspace-layout.md)
 - [大纲模式与 Markdown 导出](docs/outline-export.md)

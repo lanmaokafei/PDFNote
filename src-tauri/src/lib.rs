@@ -5,6 +5,7 @@ mod db;
 mod documents;
 mod models;
 mod ocr;
+mod page_text;
 mod review;
 mod state;
 
@@ -18,6 +19,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::ocr_image,
+            commands::ocr_page_lines,
+            commands::get_page_ocr,
+            commands::save_page_ocr,
             commands::get_bootstrap_status,
             commands::create_card,
             commands::list_cards,

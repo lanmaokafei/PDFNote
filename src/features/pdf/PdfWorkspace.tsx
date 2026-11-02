@@ -39,6 +39,7 @@ import {
   Square,
   Tag,
   Trash2,
+  Type,
 } from 'lucide-react'
 import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { useCardStore } from '../../store/cardStore'
@@ -776,6 +777,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
           <button type="button" className={tool === 'select' ? 'is-active' : ''} aria-pressed={tool === 'select'} onClick={() => setTool('select')} disabled={recallMode}>选择</button>
           <button type="button" className={tool === 'highlight' ? 'is-active' : ''} aria-pressed={tool === 'highlight'} onClick={() => setTool('highlight')} disabled={recallMode}>高亮</button>
           <button type="button" className={tool === 'rectangle' ? 'is-active' : ''} aria-pressed={tool === 'rectangle'} onClick={() => setTool('rectangle')} disabled={recallMode}>矩形</button>
+          <button type="button" className={tool === 'text' ? 'is-active' : ''} aria-pressed={tool === 'text'} onClick={() => setTool('text')} disabled={recallMode}>文字</button>
         </div>
 
         <div className="pdf-zoom-group" aria-label="缩放">
@@ -843,6 +845,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
                 <PdfPage
                   key={`${document.id}-${pageNumber}`}
                   pageNumber={pageNumber}
+                  documentId={document.id}
                   shouldRender={renderPages.has(pageNumber)}
                   scale={scale}
                   size={pageSizes[pageNumber] ?? defaultPageSize}
@@ -915,7 +918,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
             <div className="pdf-inspector-empty">
               <span className="pdf-inspector-symbol">{recallMode ? '?' : '“”'}</span>
               <strong>{recallMode ? '先回忆，再揭示' : '选择一条标注'}</strong>
-              <p>{recallMode ? '遮挡块已覆盖当前标注。点击揭示摘录，然后完成一次评分。' : tool === 'select' ? '点击标注查看摘录，或拖拽调整位置。' : '在页面上按下并拖拽，创建一条新标注。'}</p>
+              <p>{recallMode ? '遮挡块已覆盖当前标注。点击揭示摘录，然后完成一次评分。' : tool === 'text' ? '像 Word 一样拖选文字，选中后可复制或直接建卡。' : tool === 'select' ? '点击标注查看摘录，或拖拽调整位置。' : '在页面上按下并拖拽，创建一条新标注。'}</p>
             </div>
           )}
 
@@ -958,6 +961,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
           <div className="pdf-dock" role="toolbar" aria-label="标注与阅读工具">
             <button type="button" disabled title="剪切（暂未支持）"><Scissors size={17} /><span>剪切</span></button>
             <button type="button" className={tool === 'select' ? 'is-active' : ''} onClick={() => setTool('select')} disabled={recallMode} aria-pressed={tool === 'select'} title="套索选择"><MousePointer2 size={17} /><span>套索</span></button>
+            <button type="button" className={tool === 'text' ? 'is-active' : ''} onClick={() => setTool('text')} disabled={recallMode} aria-pressed={tool === 'text'} title="文字选择：像 Word 一样拖选文字，可复制或建卡"><Type size={17} /><span>文字</span></button>
             <button type="button" className={tool === 'highlight' ? 'is-active' : ''} onClick={() => setTool('highlight')} disabled={recallMode} aria-pressed={tool === 'highlight'} title="高亮颜色"><Highlighter size={17} /><span>颜色</span></button>
             <button type="button" onClick={() => { if (selectedAnnotation) setTagTarget(selectedAnnotation.card_id) }} disabled={!selectedAnnotation} title="给选中标注的卡片加标签"><Tag size={17} /><span>标签</span></button>
             <button type="button" onClick={() => { if (selectedAnnotation) setLinkTarget(selectedAnnotation.card_id) }} disabled={!selectedAnnotation} title="把选中卡片关联到其他卡片"><Link2 size={17} /><span>链接</span></button>

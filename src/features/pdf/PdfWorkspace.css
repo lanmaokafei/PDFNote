@@ -1035,3 +1035,85 @@
 .pdf-ink-palette > button.is-active { border-color: #405943; color: #f4f6ef; background: #405943; }
 .pdf-ink-palette > button:hover:not(.is-active),
 .pdf-ink-widths button:hover:not(.is-active) { background: #eff3e9; }
+
+/* ---------- 扫描页可选文字层（Apple Vision 整页识别后铺成 DOM 文本） ---------- */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+.pdf-text-layer.is-active { pointer-events: auto; }
+.pdf-text-line {
+  position: absolute;
+  white-space: pre;
+  line-height: 1;
+  color: transparent;
+  transform-origin: left top;
+}
+.pdf-text-layer.is-active .pdf-text-line { user-select: text; }
+.pdf-text-line > span {
+  display: inline-block;
+  white-space: pre;
+  vertical-align: top;
+  transform-origin: left top;
+}
+.pdf-text-layer.is-active .pdf-text-line::selection,
+.pdf-text-layer.is-active .pdf-text-line > span::selection {
+  color: #16261c;
+  background: rgba(86, 156, 204, .38);
+}
+.pdf-page.is-text-mode { cursor: text; }
+.pdf-page.is-text-mode .pdf-annotation-layer { pointer-events: none; }
+
+.pdf-text-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  padding: 5px 10px;
+  border-radius: 999px;
+  color: #3c4a3f;
+  background: rgba(255, 255, 255, .94);
+  box-shadow: 0 2px 8px rgba(24, 30, 24, .12);
+  font-size: 10px;
+  pointer-events: none;
+}
+.pdf-text-status.is-error { color: #8b3b2f; }
+
+.pdf-text-action {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(360px, calc(100% - 24px));
+  padding: 6px;
+  border: 1px solid rgba(26, 32, 26, .09);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(22, 28, 22, .18);
+}
+.pdf-text-action .pdf-text-preview {
+  max-width: 170px;
+  overflow: hidden;
+  color: #5f665f;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdf-text-action button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  color: #f5f7f2;
+  background: #3a5240;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pdf-text-action button.is-secondary { color: #3c4a3f; background: #edf0ea; }
+.pdf-text-action button:hover { filter: brightness(1.08); }

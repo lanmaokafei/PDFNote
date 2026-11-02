@@ -1,11 +1,12 @@
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
 const DOCUMENT_PROGRESS_SQL: &str = include_str!("../../migrations/002_document_progress.sql");
 const COLLABORATION_SQL: &str = include_str!("../../migrations/003_collaboration.sql");
 const EXCERPT_IMAGE_SQL: &str = include_str!("../../migrations/004_card_excerpt_image.sql");
+const PAGE_TEXT_SQL: &str = include_str!("../../migrations/005_page_text.sql");
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
@@ -47,18 +48,25 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
             apply_migration(connection, INIT_SQL, 1)?;
             apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2)?;
             apply_migration(connection, COLLABORATION_SQL, 3)?;
-            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)
+            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)?;
+            apply_migration(connection, PAGE_TEXT_SQL, 5)
         }
         1 => {
             apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2)?;
             apply_migration(connection, COLLABORATION_SQL, 3)?;
-            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)
+            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)?;
+            apply_migration(connection, PAGE_TEXT_SQL, 5)
         }
         2 => {
             apply_migration(connection, COLLABORATION_SQL, 3)?;
-            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)
+            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)?;
+            apply_migration(connection, PAGE_TEXT_SQL, 5)
         }
-        3 => apply_migration(connection, EXCERPT_IMAGE_SQL, 4),
+        3 => {
+            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)?;
+            apply_migration(connection, PAGE_TEXT_SQL, 5)
+        }
+        4 => apply_migration(connection, PAGE_TEXT_SQL, 5),
         newer => Err(format!(
             "数据库 schema 版本 {newer} 高于当前应用支持的版本 {SCHEMA_VERSION}"
         )),
@@ -110,7 +118,7 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
         assert!(columns(&connection, "documents").contains(&"last_page".to_string()));
         assert!(columns(&connection, "cards").contains(&"excerpt_image".to_string()));
-        for table in ["card_tags", "card_links", "page_inks"] {
+        for table in ["card_tags", "card_links", "page_inks", "page_ocr"] {
             let count: i64 = connection
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -146,7 +154,7 @@ mod tests {
         let version: u32 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, SCHEMA_VERSION);
         let last_page: i64 = connection
             .query_row(
                 "INSERT INTO documents (id, title, stored_path, content_hash, created_at, updated_at)

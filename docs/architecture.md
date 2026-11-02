@@ -1,7 +1,7 @@
 # PDFNote 架构基线（阶段 01 + 02）
 
-版本：0.8.0  
-状态：已落地工程骨架与 schema v4，OCR 为 macOS Apple Vision 单引擎
+版本：0.9.0  
+状态：已落地工程骨架与 schema v5，OCR 为 macOS Apple Vision 单引擎，扫描页提供整页识别后的可选文字层
 
 ## 1. 不可破坏的架构约束
 

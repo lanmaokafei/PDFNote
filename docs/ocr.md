@@ -1,12 +1,57 @@
-# Apple Vision OCR
+# Apple Vision OCR 与可选文字层
 
-版本：0.8.0
+版本：0.9.0
 
-## 目标
+## 为什么需要文字层
 
-扫描版 PDF 没有文字层，框选后 `getTextContent()` 返回空字符串。OCR 纳入建卡主路径：
+扫描版 PDF 只有像素，没有「文字对象」。Word 里点一下就能选中文字，是因为文字本身带位置信息；扫描页必须先 OCR 才能得到文字和坐标。
 
-1. 用户在 PDF 上框选高亮/矩形区域。
+- **0.8.0 及以前**：每次框选 → 裁剪截图 → 等 Vision 识别 → 写入卡片。每框一次都要等 1–3 秒。
+- **0.9.0 起**：页面打开时后台**整页识别一次**，把「每行文字 + 归一化坐标」缓存下来，在 Canvas 上铺一层透明但可选的 DOM 文字层。之后鼠标点选、拖选、复制、建卡全部是原生 DOM 操作，零延迟。
+
+## 整页文字层（0.9.0）
+
+### 数据来源
+
+| 页面类型 | 行坐标来源 | 是否调用 Vision |
+| --- | --- | --- |
+| 有 PDF 文字层 | `page.getTextContent()` 的 `transform` / `width` / `height`，换算成归一化 top-left 坐标 | 否，瞬时 |
+| 扫描页（无文字层） | `ocr_page_lines` → Apple Vision 逐行 `boundingBox` | 是，首次约 2–3 秒 |
+
+`rightkit_ocr::vision::recognize()` 本来就返回 `OcrLine { text, rect, confidence }`，其中 `rect` 是归一化 0..1、左上原点的矩形。0.9.0 之前只取了 `text` 拼成字符串，坐标被丢掉；现在通过 `ocr_page_lines` 命令完整返回。
+
+真机验证（1200×320 的四行中文测试图）：
+
+```
+recognized 4 lines in 2.81s
+  [0.049, 0.114, 0.302, 0.103] conf=1.00 信息系统项目管理师教程
+  [0.049, 0.315, 0.376, 0.104] conf=1.00 信息熵用来度量系统的不确定性
+  [0.051, 0.521, 0.305, 0.104] conf=0.50 H = -SUM P(xi) log2 P(xi)
+  [0.049, 0.717, 0.458, 0.121] conf=1.00 项目管理包括启动、规划、执行与收尾
+```
+
+### 缓存
+
+- 内存 LRU（64 页）保证翻页、缩放不重复识别；同一页的并发请求共享一个 Promise。
+- SQLite `page_ocr(document_id, page, lines_json, engine, created_at)`（schema v5）持久化，**重启后再次打开该页直接可用**。
+- 全局最多 2 个并发 Vision 请求，快速滚动不会堆积。
+- 只处理 `renderPages` 中真正渲染的页；752 页教材不会全库扫描。
+- `page_ocr` 是可重建的派生数据，不设外键；备份 overwrite 导入时若备份含该表则一并恢复，merge 导入跳过（首次打开自动重建）。
+
+### 渲染与交互
+
+- 每行一个绝对定位的透明 `<div>`，内部 `<span>` 用 `transform: scaleX(k)` 把文字拉伸到该行的 OCR 框宽度——与 PDF.js textLayer 相同的做法，因此浏览器原生选区会按字符精确命中。
+- 「文字」工具下标注 SVG 层让出鼠标事件（`pointer-events: none`），文字层接管；`::selection` 显示选中文字与蓝色高亮。
+- 选中后浮出操作条：**复制**（写入系统剪贴板）/ **建卡**（选中文字 + 选区 bbox + 存档图，直接创建卡片与高亮标注）。
+- 框选建卡时若文字层已就绪，也优先用 `extractTextFromLines()` 取文字，不再裁剪大图跑 OCR。
+
+`scripts/textlayer-smoke.mjs` 用无头 Chrome 验证过：拖选得到「信息系统项目管」（精确到字符），选区 bbox 换算正确。
+
+## 选区 OCR 建卡（原有路径）
+
+文字层尚未就绪或用户仍使用高亮/矩形工具时，保留原有流程：
+
+1. 在 PDF 上框选高亮/矩形区域。
 2. 若该区域有文字层，直接使用 PDF 原文。
 3. 若无文字层，从已渲染 Canvas 裁剪选区（OCR 大图 ≤2400px，存档图 ≤1000px）。
 4. 调用 `ocr_image` Tauri 命令，由 Rust 侧 Apple Vision 识别。
@@ -17,7 +62,7 @@
 
 PDFNote 仅在 macOS 运行，OCR 只有一个引擎：**Apple Vision**。
 
-- Rust 命令 `ocr_image`：data URL → base64 解码 → `RgbImage` → `rightkit_ocr::vision::recognize`。
+- Rust 命令 `ocr_image` / `ocr_page_lines`：data URL → base64 解码 → `RgbImage` → `rightkit_ocr::vision::recognize`。
 - 底层是 `VNRecognizeTextRequest`：`accurate` 级别、revision 3、开启语言校正、**自动语言检测**（中文与拉丁文同图时都正确，避免显式语言列表把 ASCII 括号转成全角）。
 - `rightkit-ocr` 通过 `[target.'cfg(target_os = "macos")'.dependencies]` 只在该平台链接。
 - 0.8.0 起移除 Tesseract.js、WASM core 与 `chi_sim` / `eng` 离线模型（原 `public/ocr/` 约 63MB），安装包显著缩小；CSP 也不再需要 `wasm-unsafe-eval`。
@@ -36,14 +81,17 @@ Apple Vision 与所有纯文字 OCR 一样无法识别公式结构（求和、�
 
 ## 验证
 
-- Rust 集成测试 `native_vision_recognizes_chinese_data_url`（默认 ignore，需 `OCR_TEST_IMAGE`）：在真机生成中文图「信息系统项目管理包括信息化和五个过程组」，Vision 成功识别出「信息化」。
+- Rust 集成测试 `native_vision_recognizes_chinese_data_url`（需 `OCR_TEST_IMAGE`）：中文图识别出「信息化」。
+- Rust 集成测试 `native_vision_returns_line_geometry`（需 `OCR_PAGE_TEST_IMAGE`）：返回多行且坐标全部落在 0..1。
+- `node scripts/textlayer-smoke.mjs`：无头 Chrome 验证透明文字层可原生拖选。
 - 浏览器 `npm run dev` 仅预览 UI，不提供 OCR；OCR 必须在 Tauri 桌面应用内运行。
 - 建卡事务测试：仅有标注、无 excerpt/note/question 的扫描页卡片可成功创建。
 
 ## 限制
 
-- 仅识别用户框选区域，不生成整页可搜索 PDF。
+- 文字层是**行级**坐标：选中精度由浏览器拉伸后的字形映射决定，对常规横排文字足够；倾斜、竖排、旋转页面上对齐会偏。
+- 扫描页首次打开仍需一次整页识别（约 2–3 秒，后台进行，界面显示「正在生成可选文字层…」）；之后由缓存命中。
 - 图表、竖排文字、手写体与数学公式的识别质量有限；公式走图像摘录路径。
 - 选区过小、页面未渲染完成或图像模糊时可能识别为空，此时创建图像摘录卡片。
-- 首次调用 Vision 需要加载系统模型，真机测试首次约 28 秒，后续调用明显更快；界面显示「正在使用 Apple Vision 识别选中区域…」。
-- OCR 文本与摘录图随数据库备份，不会上传到任何服务。
+- 首次调用 Vision 需要加载系统模型，后续调用明显更快。
+- OCR 文本、行坐标与摘录图都保存在本地数据库并随备份恢复，不会上传到任何服务。

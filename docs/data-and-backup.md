@@ -87,6 +87,13 @@ PDFNote-backup-YYYYMMDD-HHMMSS.zip
 - 翻页停止 700ms 后写入，关闭文档时再补一次；不更新 `updated_at`，避免资料库排序与备份新鲜度被翻页触发。
 - 备份导入时按清单 `schema_version` 选择列：schema v1 旧包没有 `last_page`，导入后为 1；schema v2 包会一并恢复。
 
+## 页面文字缓存（schema v5）
+
+- `page_ocr(document_id, page, lines_json, engine, created_at)` 保存扫描页整页 OCR 的行级文字与归一化坐标，使页面再次打开时无需重新识别。
+- 这是**可重建的派生数据**：不设外键、不参与卡片语义，清空该表只会让页面下次打开时重新识别一次。
+- 备份导出由 `VACUUM INTO` 自动包含该表；overwrite 导入时若备份含该表则恢复，旧备份无该表则跳过；merge 导入不恢复（自动重建）。
+- 行坐标与摘录图像一样都保存在本地，不产生任何网络请求。
+
 ## 自动备份
 
 - 应用启动 60 秒后在后台触发；运行期间每 30 分钟检查一次。

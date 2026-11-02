@@ -23,9 +23,48 @@ const desktopOnly = () => {
   if (!isTauriRuntime()) throw new Error('此操作需要在 PDFNote 桌面应用中运行')
 }
 
+/** One Vision line with a normalized (0..1, top-left origin) bounding box. */
+export interface OcrLine {
+  text: string
+  x: number
+  y: number
+  width: number
+  height: number
+  confidence: number
+}
+
+export interface PageOcrRecord {
+  documentId: string
+  page: number
+  linesJson: string
+  engine: string
+  createdAt: string
+}
+
 export async function recognizeNativeImage(imageData: string): Promise<string> {
   desktopOnly()
   return invoke('ocr_image', { imageData })
+}
+
+/** Whole-page recognition with per-line geometry (used for the selectable text layer). */
+export async function recognizePageLines(imageData: string): Promise<OcrLine[]> {
+  desktopOnly()
+  return invoke('ocr_page_lines', { imageData })
+}
+
+export async function getPageOcr(documentId: string, page: number): Promise<PageOcrRecord | null> {
+  if (!isTauriRuntime()) return null
+  return invoke('get_page_ocr', { documentId, page })
+}
+
+export async function savePageOcr(
+  documentId: string,
+  page: number,
+  linesJson: string,
+  engine: string,
+): Promise<void> {
+  if (!isTauriRuntime()) return
+  return invoke('save_page_ocr', { documentId, page, linesJson, engine })
 }
 
 export async function getBootstrapStatus(): Promise<BootstrapStatus> {

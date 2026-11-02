@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PDFPageProxy, RenderTask } from 'pdfjs-dist'
 import type { Annotation, AnnotationGeometry, NormalizedBBox, PageInk } from '../../domain/card'
+import type { OcrLine } from '../../services/pdfnote'
 import {
   clampRect,
   displayPointToNormalized,
@@ -13,8 +14,16 @@ import {
   toDisplayRect,
   unionRects,
 } from './geometry'
+import {
+  cachePageLines,
+  ensurePageLines,
+  extractTextFromLines,
+  getCachedLines,
+  linesFromTextContent,
+} from './pageText'
+import { PageTextLayer, type TextSelectionInfo } from './PageTextLayer'
 
-export type PdfTool = 'select' | 'highlight' | 'rectangle' | 'ink'
+export type PdfTool = 'select' | 'highlight' | 'rectangle' | 'ink' | 'text'
 export interface PageSize {
   width: number
   height: number
@@ -27,6 +36,7 @@ type Interaction =
 
 interface PdfPageProps {
   pageNumber: number
+  documentId: string
   shouldRender: boolean
   scale: number
   size: PageSize
@@ -53,6 +63,7 @@ interface PdfPageProps {
 
 export function PdfPage({
   pageNumber,
+  documentId,
   shouldRender,
   scale,
   size,
@@ -82,6 +93,10 @@ export function PdfPage({
   const [retry, setRetry] = useState(0)
   const [interaction, setInteraction] = useState<Interaction | null>(null)
   const [stroke, setStroke] = useState<Array<[number, number]> | null>(null)
+  const [lines, setLines] = useState<OcrLine[]>([])
+  const [textStatus, setTextStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [textError, setTextError] = useState('')
+  const [selection, setSelection] = useState<TextSelectionInfo | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -152,6 +167,84 @@ export function PdfPage({
     }
   }, [cssHeight, cssWidth, page, retry, scale, shouldRender, viewport])
 
+  /** 导出整页图给 Vision 做一次性行级识别；上限 1600px 与原生库内部降采样一致。 */
+  const renderPageImage = useCallback((): string | undefined => {
+    const canvas = canvasRef.current
+    if (!canvas || canvas.width === 0 || canvas.height === 0) return undefined
+    const ratio = Math.min(1, 1600 / Math.max(canvas.width, canvas.height))
+    const output = window.document.createElement('canvas')
+    output.width = Math.max(1, Math.round(canvas.width * ratio))
+    output.height = Math.max(1, Math.round(canvas.height * ratio))
+    const context = output.getContext('2d')
+    if (!context) return undefined
+    // JPEG 没有 alpha 通道，先铺白底，避免透明区域变黑影响识别。
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, output.width, output.height)
+    context.drawImage(canvas, 0, 0, output.width, output.height)
+    return output.toDataURL('image/jpeg', 0.9)
+  }, [])
+
+  /**
+   * 页面渲染完成后建立可选文字层：有 PDF 文字层时直接用精确字形坐标，
+   * 扫描页则整页识别一次并缓存。之后所有点选 / 框选都不再触发 OCR。
+   */
+  useEffect(() => {
+    if (!page || !viewport || !view || !shouldRender || rendering) return
+    const cached = getCachedLines(documentId, pageNumber)
+    if (cached) {
+      setLines(cached)
+      setTextStatus('ready')
+      return
+    }
+    let active = true
+    const run = async () => {
+      let content: Awaited<ReturnType<PDFPageProxy['getTextContent']>> | null = null
+      try {
+        content = await page.getTextContent()
+      } catch {
+        content = null
+      }
+      if (!active) return
+      if (content) {
+        const fromPdf = linesFromTextContent(content, view)
+        if (fromPdf.length > 0) {
+          cachePageLines(documentId, pageNumber, fromPdf)
+          setLines(fromPdf)
+          setTextStatus('ready')
+          return
+        }
+      }
+      const image = renderPageImage()
+      if (!image) {
+        if (active) setTextStatus('error')
+        return
+      }
+      if (active) {
+        setTextStatus('loading')
+        setTextError('')
+      }
+      try {
+        const recognized = await ensurePageLines(documentId, pageNumber, image)
+        if (!active) return
+        setLines(recognized)
+        setTextStatus(recognized.length > 0 ? 'ready' : 'error')
+        if (recognized.length === 0) setTextError('此页未识别到文字')
+      } catch (reason) {
+        if (!active) return
+        setTextStatus('error')
+        setTextError(reason instanceof Error ? reason.message : String(reason))
+      }
+    }
+    void run()
+    return () => { active = false }
+  }, [documentId, page, pageNumber, renderPageImage, rendering, shouldRender, view, viewport])
+
+  useEffect(() => {
+    if (tool === 'text') return
+    setSelection(null)
+    window.getSelection()?.removeAllRanges()
+  }, [tool])
+
   useEffect(() => {
     setInteraction(null)
   }, [recallMode, scale, tool])
@@ -188,7 +281,7 @@ export function PdfPage({
       setStroke([[point.x, point.y]])
       return
     }
-    if (tool === 'select') return
+    if (tool === 'select' || tool === 'text') return
     event.preventDefault()
     const start = pointFromEvent(event)
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -329,17 +422,24 @@ export function PdfPage({
     if (interaction.type === 'create') {
       const rect = interaction.rect
       if (rect.width * view.width >= 3 && rect.height * view.height >= 3) {
-        void page.getTextContent()
-          .then((content) => {
-            const excerpt = extractTextInRect(content, rect, view)
-            // 文字层文本也可能来自公式版式，始终生成存档图；只有无文字层才需要 OCR 大图。
-            const crops = cropSelection(rect, !excerpt)
-            onCreate(page, rect, excerpt, crops.ocr, crops.archive)
-          })
-          .catch(() => {
-            const crops = cropSelection(rect)
-            onCreate(page, rect, '', crops.ocr, crops.archive)
-          })
+        const fromLayer = extractTextFromLines(lines, rect)
+        if (fromLayer) {
+          // 文字层已就绪：直接取文字，零延迟建卡，不再调用 OCR。
+          const crops = cropSelection(rect, false)
+          onCreate(page, rect, fromLayer, undefined, crops.archive)
+        } else {
+          void page.getTextContent()
+            .then((content) => {
+              const excerpt = extractTextInRect(content, rect, view)
+              // 文字层文本也可能来自公式版式，始终生成存档图；只有无文字层才需要 OCR 大图。
+              const crops = cropSelection(rect, !excerpt)
+              onCreate(page, rect, excerpt, crops.ocr, crops.archive)
+            })
+            .catch(() => {
+              const crops = cropSelection(rect)
+              onCreate(page, rect, '', crops.ocr, crops.archive)
+            })
+        }
       }
     } else {
       onMove(interaction.annotation, { rects: interaction.rects }, unionRects(interaction.rects))
@@ -354,11 +454,33 @@ export function PdfPage({
     onReveal(ids)
   }
 
+  const clearTextSelection = () => {
+    setSelection(null)
+    window.getSelection()?.removeAllRanges()
+  }
+
+  const copySelectedText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // 剪贴板不可用时保留原生选区，用户仍可用系统快捷键复制。
+    }
+    clearTextSelection()
+  }
+
+  const createCardFromSelection = (info: TextSelectionInfo) => {
+    if (!page) return
+    const crops = cropSelection(info.bbox, false)
+    onCreate(page, info.bbox, info.text, undefined, crops.archive)
+    clearTextSelection()
+  }
+
   const showSurface = shouldRender && page && viewport && view
+  const textMode = tool === 'text' && !recallMode
   return (
     <section
       ref={pageRef}
-      className={`pdf-page ${tool !== 'select' && !recallMode ? 'is-drawing' : ''}`}
+      className={`pdf-page ${tool !== 'select' && tool !== 'text' && !recallMode ? 'is-drawing' : ''} ${textMode ? 'is-text-mode' : ''}`}
       style={{ width: cssWidth, height: cssHeight }}
       data-page={pageNumber}
       aria-label={`第 ${pageNumber} 页`}
@@ -379,6 +501,26 @@ export function PdfPage({
       {showSurface && (
         <>
           <canvas ref={canvasRef} className="pdf-canvas" aria-hidden="true" />
+          <PageTextLayer
+            lines={lines}
+            width={cssWidth}
+            height={cssHeight}
+            active={textMode}
+            onSelection={setSelection}
+          />
+          {textMode && textStatus === 'loading' && (
+            <div className="pdf-text-status" role="status">正在生成可选文字层…</div>
+          )}
+          {textMode && textStatus === 'error' && (
+            <div className="pdf-text-status is-error" role="alert">{textError || '文字层生成失败'}</div>
+          )}
+          {textMode && selection && (
+            <div className="pdf-text-action" style={{ left: selection.left, top: selection.top }}>
+              <span className="pdf-text-preview" title={selection.text}>{selection.text}</span>
+              <button type="button" className="is-secondary" onClick={() => void copySelectedText(selection.text)}>复制</button>
+              <button type="button" onClick={() => createCardFromSelection(selection)}>建卡</button>
+            </div>
+          )}
           <svg
             ref={svgRef}
             className={`pdf-annotation-layer ${recallMode ? 'is-recall' : ''}`}

@@ -7,19 +7,20 @@
 
 | 项目 | 命令 | 结果 |
 | --- | --- | --- |
-| Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml` | 26 passed + 1 ignored（Vision 真机集成，已跑通） |
-| 前端单元 | `npm run test` | 13 passed（4 files，含公式检测与大纲导出） |
+| Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml -- --include-ignored` | 29 passed（含 2 项 Vision 真机：中文识别 + 行级坐标） |
+| 前端单元 | `npm run test` | 19 passed（5 files，含文字层行提取与选区文本） |
+| 文字层冒烟 | `node scripts/textlayer-smoke.mjs` | 通过：透明 DOM 文字可原生拖选「信息系统项目管」，选区 bbox 换算正确 |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
-| 原生编译 | `npx tauri build --bundles app` | 通过，0.8.0 生成 17.07 MB release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.8.0 已通过 `hdiutil verify`，约 8.2 MB，SHA-256 见 `release/*.sha256` |
-| 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=4`，`quick_check=ok` |
-| schema 迁移 | 真实数据库副本执行 v3 → v4 | `excerpt_image` 列存在，5 张卡片保留，`quick_check=ok` |
+| 原生编译 | `npx tauri build --bundles app` | 通过，0.9.0 生成 17.11 MiB release PDFNote.app |
+| DMG | 手动 `hdiutil` 打包 | 0.9.0 已通过 `hdiutil verify`，约 8.2 MB，SHA-256 见 `release/*.sha256` |
+| 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
+| schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
 
 Rust 测试覆盖：
 
-1. schema v1 → v2 → v3 → v4 迁移（阅读进度、标签/链接/墨迹、摘录图像）、外键与索引。
+1. schema v1 → v2 → v3 → v4 → v5 迁移（阅读进度、标签/链接/墨迹、摘录图像、页面文字缓存）、外键与索引。
 2. WAL、foreign_keys 安全设置。
 3. 同内容 PDF 去重、非 PDF 拒绝、缺失/哈希不一致检测。
 4. 删除文档时保留卡片、清理标注与 PDF。
@@ -60,6 +61,7 @@ Rust 测试覆盖：
 | 大文件 | 原生 + 浏览器实测 | 526MB / 752 页 PDF 打开不崩溃，仅请求可视页；备份改为 Stored 且后台执行 |
 | 顶部栏固定 | 浏览器布局实测 | body 无滚动，内容区独立滚动，topbar top 始终为 0 |
 | OCR 建卡 | Rust 真机 + 浏览器实测 | 标注-only 建卡通过；0.8.0 起为 Apple Vision 单引擎，真机中文图识别出「信息化」；已移除 Tesseract 与 63MB 离线模型 |
+| 可选文字层（0.9.0） | Rust 真机 + 无头 Chrome | 4 行中文图返回归一化行坐标（2.81s）；缓存往返与旧备份兼容测试通过；透明 DOM 文字拖选精确到字符，可复制/建卡 |
 | 脑图稳定性 | Chromium + IPC 模拟 | 进入脑图、选中、拖拽、PDF 建卡后切换均无 React #185 |
 | 继续阅读 | Chromium + IPC 模拟 | 5 页文档记录第 4 页，重开落在第 4 页；滚到第 3 页后返回重开仍为第 3 页 |
 | 分栏工作台 | Chromium + IPC 模拟 | 左 PDF 右脑图、11 个工具槽、拖动分隔条、脑图收起、工具坞建卡均通过 |

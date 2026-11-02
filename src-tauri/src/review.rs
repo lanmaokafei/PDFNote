@@ -21,15 +21,16 @@ pub fn list_due_cards(
     let mut statement = database
         .prepare(&query)
         .map_err(|error| error.to_string())?;
-    let rows = statement
+    let mut cards = statement
         .query_map(
             params![now, limit.unwrap_or(200).clamp(1, 500)],
             card_from_row,
         )
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string());
-    rows
+        .map_err(|error| error.to_string())?;
+    crate::models::attach_tags(&database, &mut cards).map_err(|error| error.to_string())?;
+    Ok(cards)
 }
 
 fn validate_review(input: &ReviewInput) -> Result<(), String> {

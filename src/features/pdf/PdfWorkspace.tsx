@@ -13,10 +13,14 @@ import type {
   Card,
   Document as PdfDocument,
   NormalizedBBox,
+  PageInk,
   Rating,
 } from '../../domain/card'
 import {
+  createPageInk,
+  deletePageInk,
   listAnnotations,
+  listPageInks,
   readPdfChunk,
   removeAnnotation,
   updateAnnotationGeometry,
@@ -35,6 +39,7 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react'
+import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
 import { PdfPage, type PageSize, type PdfTool } from './PdfPage'
@@ -45,6 +50,13 @@ GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs'
 
 const DEFAULT_PAGE_SIZE: PageSize = { width: 612, height: 792 }
 const PAGE_PROXY_CACHE_LIMIT = 16
+const EMPTY_INKS: PageInk[] = []
+const INK_COLORS = ['#d94f3d', '#2f6f8f', '#3f7a4c', '#2f3330']
+const INK_WIDTHS = [
+  { label: '细', value: 0.0018 },
+  { label: '中', value: 0.0028 },
+  { label: '粗', value: 0.0042 },
+]
 const MIN_SCALE = 0.5
 const MAX_SCALE = 3
 const EMPTY_ANNOTATIONS: Annotation[] = []
@@ -100,6 +112,13 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   const [ratingBusy, setRatingBusy] = useState(false)
   const [reviewedCards, setReviewedCards] = useState<Record<string, Card>>({})
   const [dockMenuOpen, setDockMenuOpen] = useState(false)
+  const [tagTarget, setTagTarget] = useState<string | null>(null)
+  const [linkTarget, setLinkTarget] = useState<string | null>(null)
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [inksByPage, setInksByPage] = useState<Record<number, PageInk[]>>({})
+  const [inkColor, setInkColor] = useState(INK_COLORS[0])
+  const [inkWidth, setInkWidth] = useState(INK_WIDTHS[1].value)
+  const [inkErase, setInkErase] = useState(false)
 
   const cardsById = useCardStore((state) => state.cardsById)
   const createCard = useCardStore((state) => state.createCard)
@@ -120,6 +139,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   const userNavigatedRef = useRef(false)
   const progressPageRef = useRef(document.last_page || 1)
   const visiblePagesRef = useRef<Set<number>>(new Set())
+  const loadedInkPagesRef = useRef<Set<number>>(new Set())
   // 恢复阅读位置期间，观察器仍持有滚动前的可见页，先暂停页码同步避免把页码改回 1。
   const restoringRef = useRef(false)
 
@@ -155,6 +175,9 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     setRevealedCardIds(new Set())
     setRatedCardIds(new Set())
     setReviewedCards({})
+    setInksByPage({})
+    setTool('select')
+    loadedInkPagesRef.current.clear()
     restoredDocumentRef.current = null
     restoringRef.current = false
     userNavigatedRef.current = false
@@ -405,6 +428,27 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     }
   }, [document.id])
 
+  useEffect(() => {
+    if (!pdf || visiblePages.size === 0) return
+    const pages = [...visiblePages].filter((page) => !loadedInkPagesRef.current.has(page))
+    if (pages.length === 0) return
+    pages.forEach((page) => loadedInkPagesRef.current.add(page))
+    void listPageInks(document.id, pages)
+      .then((items) => {
+        setInksByPage((previous) => {
+          const next = { ...previous }
+          pages.forEach((page) => {
+            next[page] = items.filter((ink) => ink.page === page)
+          })
+          return next
+        })
+      })
+      .catch((reason: unknown) => {
+        pages.forEach((page) => loadedInkPagesRef.current.delete(page))
+        setOperationError(`墨迹载入失败：${errorMessage(reason)}`)
+      })
+  }, [document.id, pdf, visiblePages])
+
   const invalidateAnnotations = useCallback((page: number) => {
     loadedAnnotationPagesRef.current.delete(page)
     pendingAnnotationPagesRef.current.delete(page)
@@ -482,6 +526,35 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     }
     goToPage(page)
   }
+
+  const handleInk = useCallback(async (page: number, bbox: NormalizedBBox, points: Array<[number, number]>) => {
+    try {
+      const ink = await createPageInk(document.id, page, bbox, { color: inkColor, width: inkWidth, points })
+      setInksByPage((previous) => ({
+        ...previous,
+        [page]: [...(previous[page] ?? []), ink],
+      }))
+      setNotice('墨迹已保存到本页。')
+    } catch (reason) {
+      setOperationError(`墨迹保存失败：${errorMessage(reason)}`)
+    }
+  }, [document.id, inkColor, inkWidth])
+
+  const handleEraseInk = useCallback(async (id: string) => {
+    try {
+      await deletePageInk(id)
+      setInksByPage((previous) => {
+        const next: Record<number, PageInk[]> = {}
+        Object.entries(previous).forEach(([page, items]) => {
+          next[Number(page)] = items.filter((ink) => ink.id !== id)
+        })
+        return next
+      })
+      setNotice('墨迹已删除。')
+    } catch (reason) {
+      setOperationError(`删除墨迹失败：${errorMessage(reason)}`)
+    }
+  }, [])
 
   const handleCreate = useCallback(async (
     page: PDFPageProxy,
@@ -607,6 +680,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   }
 
   const allAnnotations = useMemo(() => Object.values(annotationsByPage).flat(), [annotationsByPage])
+  const cardList = useMemo(() => Object.values(cardsById), [cardsById])
   const selectedAnnotation = allAnnotations.find((annotation) => annotation.id === selectedAnnotationId) ?? null
   const selectedCard = selectedAnnotation
     ? reviewedCards[selectedAnnotation.card_id] ?? cardsById[selectedAnnotation.card_id] ?? null
@@ -750,6 +824,12 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
                   scale={scale}
                   size={pageSizes[pageNumber] ?? defaultPageSize}
                   annotations={annotationsByPage[pageNumber] ?? EMPTY_ANNOTATIONS}
+                  inks={inksByPage[pageNumber] ?? EMPTY_INKS}
+                  inkColor={inkColor}
+                  inkWidth={inkWidth}
+                  inkErase={inkErase}
+                  onInk={(bbox, points) => void handleInk(pageNumber, bbox, points)}
+                  onEraseInk={(id) => void handleEraseInk(id)}
                   excerpts={excerpts}
                   tool={tool}
                   recallMode={recallMode}
@@ -844,7 +924,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
             </div>
           )}
 
-          {pageCount > 0 && (
+          {pageCount > 0 && tool !== 'ink' && (
             <div className="pdf-page-pill">
               <button type="button" onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1} aria-label="上一页">‹</button>
               <span>第 {currentPage} / {pageCount} 页</span>
@@ -856,15 +936,52 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
             <button type="button" disabled title="剪切（暂未支持）"><Scissors size={17} /><span>剪切</span></button>
             <button type="button" className={tool === 'select' ? 'is-active' : ''} onClick={() => setTool('select')} disabled={recallMode} aria-pressed={tool === 'select'} title="套索选择"><MousePointer2 size={17} /><span>套索</span></button>
             <button type="button" className={tool === 'highlight' ? 'is-active' : ''} onClick={() => setTool('highlight')} disabled={recallMode} aria-pressed={tool === 'highlight'} title="高亮颜色"><Highlighter size={17} /><span>颜色</span></button>
-            <button type="button" disabled title="标签（暂未支持）"><Tag size={17} /><span>标签</span></button>
-            <button type="button" disabled title="链接（请直接在脑图中连线）"><Link2 size={17} /><span>链接</span></button>
+            <button type="button" onClick={() => { if (selectedAnnotation) setTagTarget(selectedAnnotation.card_id) }} disabled={!selectedAnnotation} title="给选中标注的卡片加标签"><Tag size={17} /><span>标签</span></button>
+            <button type="button" onClick={() => { if (selectedAnnotation) setLinkTarget(selectedAnnotation.card_id) }} disabled={!selectedAnnotation} title="把选中卡片关联到其他卡片"><Link2 size={17} /><span>链接</span></button>
             <button type="button" className={tool === 'rectangle' ? 'is-active' : ''} onClick={() => setTool('rectangle')} disabled={recallMode} aria-pressed={tool === 'rectangle'} title="矩形框选"><Square size={17} /><span>框架</span></button>
-            <button type="button" disabled title="墨迹（暂未支持）"><PenLine size={17} /><span>墨迹</span></button>
-            <button type="button" disabled title="合并（暂未支持）"><Merge size={17} /><span>合并</span></button>
+            <button type="button" className={tool === 'ink' ? 'is-active' : ''} onClick={() => { setTool(tool === 'ink' ? 'select' : 'ink'); setInkErase(false) }} aria-pressed={tool === 'ink'} title="手写墨迹"><PenLine size={17} /><span>墨迹</span></button>
+            <button type="button" onClick={() => setMergeOpen(true)} disabled={cardList.length < 2} title="合并多张卡片"><Merge size={17} /><span>合并</span></button>
             <button type="button" className={recallMode ? 'is-active' : ''} onClick={toggleRecall} disabled={!pdf} aria-pressed={recallMode} title="文档遮挡回忆"><MessageSquare size={17} /><span>{recallMode ? '退出' : '对话'}</span></button>
             <button type="button" onClick={() => { if (selectedAnnotation) setDeleteTarget(selectedAnnotation) }} disabled={!selectedAnnotation} title="删除选中的标注"><Trash2 size={17} /><span>删除</span></button>
             <button type="button" className={dockMenuOpen ? 'is-active' : ''} onClick={() => setDockMenuOpen((open) => !open)} aria-expanded={dockMenuOpen} title="更多：缩放与跳页"><MoreHorizontal size={17} /><span>更多</span></button>
           </div>
+
+          {tool === 'ink' && (
+            <div className="pdf-ink-palette" role="group" aria-label="墨迹工具">
+              <div className="pdf-ink-colors">
+                {INK_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    className={inkColor === color && !inkErase ? 'is-active' : ''}
+                    style={{ background: color }}
+                    onClick={() => { setInkColor(color); setInkErase(false) }}
+                    aria-label={`墨迹颜色 ${color}`}
+                  />
+                ))}
+              </div>
+              <div className="pdf-ink-widths">
+                {INK_WIDTHS.map((option) => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    className={inkWidth === option.value && !inkErase ? 'is-active' : ''}
+                    onClick={() => { setInkWidth(option.value); setInkErase(false) }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className={inkErase ? 'is-active' : ''}
+                onClick={() => setInkErase((value) => !value)}
+              >
+                橡皮
+              </button>
+              <button type="button" onClick={() => { setTool('select'); setInkErase(false) }}>完成</button>
+            </div>
+          )}
 
           {dockMenuOpen && (
             <div className="pdf-dock-menu" role="dialog" aria-label="缩放与跳页">
@@ -889,6 +1006,38 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
             </div>
           )}
         </>
+      )}
+
+      {tagTarget && cardsById[tagTarget] && (
+        <TagDialog
+          card={cardsById[tagTarget]}
+          onClose={() => setTagTarget(null)}
+          onSaved={() => {
+            callbacksRef.current.onCardsChanged()
+            void loadCards()
+          }}
+        />
+      )}
+
+      {linkTarget && cardsById[linkTarget] && (
+        <LinkDialog
+          card={cardsById[linkTarget]}
+          cards={cardList}
+          onClose={() => setLinkTarget(null)}
+          onChanged={() => callbacksRef.current.onCardsChanged()}
+        />
+      )}
+
+      {mergeOpen && (
+        <MergeDialog
+          cards={cardList}
+          initialSelection={selectedAnnotation ? [selectedAnnotation.card_id] : []}
+          onClose={() => setMergeOpen(false)}
+          onMerged={() => {
+            callbacksRef.current.onCardsChanged()
+            void loadCards()
+          }}
+        />
       )}
 
       {deleteTarget && (

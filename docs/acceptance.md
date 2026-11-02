@@ -12,13 +12,13 @@
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
 | 原生编译 | `npx tauri build --bundles app` | 通过，生成 20.2 MB release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.5.0 已通过 `hdiutil verify`，约 59 MB |
-| 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=2`，`quick_check=ok` |
+| DMG | 手动 `hdiutil` 打包 | 0.6.0 已通过 `hdiutil verify`，约 61 MB |
+| 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=3`，`quick_check=ok` |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
 
 Rust 测试覆盖：
 
-1. schema v1 → v2 迁移（新增 last_page）、外键与索引。
+1. schema v1 → v2 → v3 迁移（阅读进度、标签/链接/墨迹）、外键与索引。
 2. WAL、foreign_keys 安全设置。
 3. 同内容 PDF 去重、非 PDF 拒绝、缺失/哈希不一致检测。
 4. 删除文档时保留卡片、清理标注与 PDF。
@@ -63,6 +63,10 @@ Rust 测试覆盖：
 | 继续阅读 | Chromium + IPC 模拟 | 5 页文档记录第 4 页，重开落在第 4 页；滚到第 3 页后返回重开仍为第 3 页 |
 | 分栏工作台 | Chromium + IPC 模拟 | 左 PDF 右脑图、11 个工具槽、拖动分隔条、脑图收起、工具坞建卡均通过 |
 | 大纲与导出 | 单元 + Rust + Chromium | 5 行大纲、折叠后 2 行；Markdown 层级/摘录/页码正确；`.md` 写入通过、`.txt` 被拒 |
+| 标签 | Rust + Chromium | 去重/长度校验；保存后脑图节点显示标签 |
+| 链接 | Rust + Chromium | 幂等建链、禁自链；脑图出现虚线链接边 |
+| 墨迹 | Rust + Chromium | 笔画归一化落库、橡皮删除；缩放后对齐 |
+| 合并 | Rust + Chromium | 文本/子节点/标注/标签合并，3 张合为 1 张；跨文档合并被拒 |
 
 ## 大文件回归证据
 

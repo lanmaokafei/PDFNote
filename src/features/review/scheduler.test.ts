@@ -10,6 +10,7 @@ function card(overrides: Partial<Card> = {}): Card {
     excerpt: '摘录',
     user_note: '笔记',
     question: '问题',
+  tags: [],
     parent_id: null,
     sort_order: 0,
     collapsed: false,

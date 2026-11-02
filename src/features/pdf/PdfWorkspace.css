@@ -981,3 +981,57 @@
   .pdf-page-pill { bottom: 72px; }
   .pdf-dock-menu { right: 12px; bottom: 70px; }
 }
+
+
+/* ---------- 手写墨迹 ---------- */
+
+.pdf-ink-layer { pointer-events: none; }
+.pdf-ink { pointer-events: none; }
+.pdf-ink.is-erasing { pointer-events: stroke; cursor: not-allowed; }
+.pdf-ink-draft { pointer-events: none; }
+
+.pdf-ink-palette {
+  position: fixed;
+  left: 50%;
+  bottom: 80px;
+  z-index: 46;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(26, 32, 26, .08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .97);
+  box-shadow: 0 14px 32px rgba(22, 28, 22, .16);
+  transform: translateX(-50%);
+  backdrop-filter: blur(14px);
+}
+
+.pdf-ink-colors { display: flex; gap: 5px; }
+.pdf-ink-colors button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08);
+}
+.pdf-ink-colors button.is-active { border-color: #2c3a2f; }
+
+.pdf-ink-widths { display: flex; gap: 2px; }
+.pdf-ink-widths button,
+.pdf-ink-palette > button {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid #e0e4dd;
+  border-radius: 6px;
+  color: #5c655c;
+  background: #fbfcf9;
+  font-size: 9px;
+  cursor: pointer;
+}
+.pdf-ink-widths button.is-active,
+.pdf-ink-palette > button.is-active { border-color: #405943; color: #f4f6ef; background: #405943; }
+.pdf-ink-palette > button:hover:not(.is-active),
+.pdf-ink-widths button:hover:not(.is-active) { background: #eff3e9; }

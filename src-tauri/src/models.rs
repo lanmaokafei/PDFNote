@@ -1,6 +1,7 @@
 use chrono::{SecondsFormat, Utc};
-use rusqlite::{Error, Row};
+use rusqlite::{params_from_iter, Connection, Error, Row};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
@@ -44,6 +45,8 @@ pub struct Card {
     pub excerpt: String,
     pub user_note: String,
     pub question: String,
+    /// 标签按字母序返回，空数组表示没有标签。
+    pub tags: Vec<String>,
     pub parent_id: Option<String>,
     pub sort_order: i64,
     pub collapsed: bool,
@@ -89,6 +92,7 @@ pub fn card_from_row(row: &Row<'_>) -> Result<Card, Error> {
         excerpt: row.get(7)?,
         user_note: row.get(8)?,
         question: row.get(9)?,
+        tags: Vec::new(),
         parent_id: row.get(10)?,
         sort_order: row.get(11)?,
         collapsed: row.get::<_, i64>(12)? != 0,
@@ -124,6 +128,32 @@ pub struct Document {
     pub last_page: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// 批量补齐标签，避免在卡片列表里做 N+1 查询。
+pub fn attach_tags(connection: &Connection, cards: &mut [Card]) -> Result<(), Error> {
+    if cards.is_empty() {
+        return Ok(());
+    }
+    let placeholders = vec!["?"; cards.len()].join(", ");
+    let query = format!(
+        "SELECT card_id, tag FROM card_tags WHERE card_id IN ({placeholders}) ORDER BY tag"
+    );
+    let mut statement = connection.prepare(&query)?;
+    let rows = statement.query_map(params_from_iter(cards.iter().map(|card| &card.id)), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut grouped: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let (card_id, tag) = row?;
+        grouped.entry(card_id).or_default().push(tag);
+    }
+    for card in cards.iter_mut() {
+        if let Some(tags) = grouped.remove(&card.id) {
+            card.tags = tags;
+        }
+    }
+    Ok(())
 }
 
 pub const DOCUMENT_COLUMNS: &str = "id, title, stored_path, original_path, content_hash, file_size, page_count, file_status, created_at, updated_at, last_page";
@@ -224,6 +254,58 @@ pub struct UpdateCardContentInput {
     pub excerpt: String,
     pub user_note: String,
     pub question: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CardLink {
+    pub id: String,
+    pub source_card_id: String,
+    pub target_card_id: String,
+    pub label: String,
+    pub created_at: String,
+}
+
+pub const CARD_LINK_COLUMNS: &str = "id, source_card_id, target_card_id, label, created_at";
+
+pub fn link_from_row(row: &Row<'_>) -> Result<CardLink, Error> {
+    Ok(CardLink {
+        id: row.get(0)?,
+        source_card_id: row.get(1)?,
+        target_card_id: row.get(2)?,
+        label: row.get(3)?,
+        created_at: row.get(4)?,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageInk {
+    pub id: String,
+    pub document_id: String,
+    pub page: u32,
+    pub bbox: NormalizedBBox,
+    pub style: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub const PAGE_INK_COLUMNS: &str =
+    "id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height, style_json, created_at, updated_at";
+
+pub fn ink_from_row(row: &Row<'_>) -> Result<PageInk, Error> {
+    Ok(PageInk {
+        id: row.get(0)?,
+        document_id: row.get(1)?,
+        page: row.get(2)?,
+        bbox: NormalizedBBox {
+            x: row.get(3)?,
+            y: row.get(4)?,
+            width: row.get(5)?,
+            height: row.get(6)?,
+        },
+        style: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or(serde_json::json!({})),
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

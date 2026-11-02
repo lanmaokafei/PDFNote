@@ -4,6 +4,7 @@ import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown } f
 
 const base = {
   source_ref: null,
+  tags: [],
   user_note: '',
   sort_order: 0,
   collapsed: false,

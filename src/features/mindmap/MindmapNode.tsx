@@ -55,6 +55,12 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
         )}
       </header>
 
+      {card.tags.length > 0 && (
+        <div className="mindmap-node-tags">
+          {card.tags.slice(0, 4).map((tag) => <span key={tag}>#{tag}</span>)}
+        </div>
+      )}
+
       {!revealed ? (
         <button className="mindmap-reveal-answer nodrag" type="button" onClick={() => context.onReveal(card.id)}>
           显示答案

@@ -1,6 +1,6 @@
 # PDFNote 架构基线（阶段 01 + 02）
 
-版本：0.5.0  
+版本：0.6.0  
 状态：已落地工程骨架与 schema v2
 
 ## 1. 不可破坏的架构约束
@@ -152,6 +152,7 @@ app-data/               运行时生成，不随安装包写入
 - PDF 工具坞固定在窗口底部，脑图操作在其右上角浮动。
 - 两个视图都只读取 `cardsById`，任何写操作经 Rust command 后刷新同一 store。
 - 脑图可选「画布 / 大纲」投影；大纲按同一 `parent_id + sort_order` 生成，导出 Markdown 由 Rust 命令落盘。
+- schema v3 新增 `card_tags`、`card_links`、`page_inks`：标签与链接是卡片级关系，墨迹是页面级标记（不建卡片、不进复习）。
 
 ## 9. 当前落地范围
 

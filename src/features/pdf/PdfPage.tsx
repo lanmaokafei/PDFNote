@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PDFPageProxy, RenderTask } from 'pdfjs-dist'
-import type { Annotation, AnnotationGeometry, NormalizedBBox } from '../../domain/card'
+import type { Annotation, AnnotationGeometry, NormalizedBBox, PageInk } from '../../domain/card'
 import {
   clampRect,
   displayPointToNormalized,
@@ -14,7 +14,7 @@ import {
   unionRects,
 } from './geometry'
 
-export type PdfTool = 'select' | 'highlight' | 'rectangle'
+export type PdfTool = 'select' | 'highlight' | 'rectangle' | 'ink'
 export interface PageSize {
   width: number
   height: number
@@ -31,6 +31,10 @@ interface PdfPageProps {
   scale: number
   size: PageSize
   annotations: Annotation[]
+  inks: PageInk[]
+  inkColor: string
+  inkWidth: number
+  inkErase: boolean
   excerpts: Record<string, string>
   tool: PdfTool
   recallMode: boolean
@@ -43,6 +47,8 @@ interface PdfPageProps {
   onCreate: (page: PDFPageProxy, rect: NormalizedBBox, excerpt: string, ocrImage?: string) => Promise<void>
   onMove: (annotation: Annotation, geometry: AnnotationGeometry, bbox: NormalizedBBox) => void
   onReveal: (annotationIds: string[]) => void
+  onInk: (bbox: NormalizedBBox, points: Array<[number, number]>) => void
+  onEraseInk: (id: string) => void
 }
 
 export function PdfPage({
@@ -51,6 +57,10 @@ export function PdfPage({
   scale,
   size,
   annotations,
+  inks,
+  inkColor,
+  inkWidth,
+  inkErase,
   excerpts,
   tool,
   recallMode,
@@ -63,12 +73,15 @@ export function PdfPage({
   onCreate,
   onMove,
   onReveal,
+  onInk,
+  onEraseInk,
 }: PdfPageProps) {
   const [page, setPage] = useState<PDFPageProxy | null>(null)
   const [pageError, setPageError] = useState('')
   const [rendering, setRendering] = useState(false)
   const [retry, setRetry] = useState(0)
   const [interaction, setInteraction] = useState<Interaction | null>(null)
+  const [stroke, setStroke] = useState<Array<[number, number]> | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -166,7 +179,16 @@ export function PdfPage({
   }, [annotations, recallMode])
 
   const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (recallMode || tool === 'select' || event.button !== 0 || !viewport || !view) return
+    if (recallMode || event.button !== 0 || !viewport || !view) return
+    if (tool === 'ink') {
+      if (inkErase) return
+      event.preventDefault()
+      const point = displayPointToNormalized(pointFromEvent(event), viewport, view)
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setStroke([[point.x, point.y]])
+      return
+    }
+    if (tool === 'select') return
     event.preventDefault()
     const start = pointFromEvent(event)
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -191,6 +213,17 @@ export function PdfPage({
   }
 
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (stroke) {
+      if (!viewport || !view) return
+      const point = displayPointToNormalized(pointFromEvent(event), viewport, view)
+      setStroke((current) => {
+        if (!current) return current
+        const last = current[current.length - 1]
+        if (last && Math.hypot(point.x - last[0], point.y - last[1]) < 0.0015) return current
+        return [...current, [point.x, point.y]]
+      })
+      return
+    }
     if (!interaction || interaction.pointerId !== event.pointerId || !viewport || !view) return
     const point = pointFromEvent(event)
     if (interaction.type === 'create') {
@@ -253,6 +286,27 @@ export function PdfPage({
   }
 
   const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (stroke) {
+      if (stroke.length >= 2) {
+        const xs = stroke.map((point) => point[0])
+        const ys = stroke.map((point) => point[1])
+        const minX = Math.max(0, Math.min(...xs))
+        const minY = Math.max(0, Math.min(...ys))
+        const maxX = Math.min(1, Math.max(...xs))
+        const maxY = Math.min(1, Math.max(...ys))
+        const width = Math.max(0.004, Math.min(1 - minX, maxX - minX))
+        const height = Math.max(0.004, Math.min(1 - minY, maxY - minY))
+        const bbox: NormalizedBBox = {
+          x: Math.min(minX, 1 - width),
+          y: Math.min(minY, 1 - height),
+          width,
+          height,
+        }
+        onInk(bbox, stroke)
+      }
+      setStroke(null)
+      return
+    }
     if (!interaction || interaction.pointerId !== event.pointerId || !page || !view) return
     if (interaction.type === 'create') {
       const rect = interaction.rect
@@ -313,6 +367,60 @@ export function PdfPage({
             onPointerUp={handlePointerUp}
             onPointerCancel={() => setInteraction(null)}
           >
+            <g className="pdf-ink-layer">
+              {inks.map((ink) => {
+                const points = ink.style.points ?? []
+                const path = points
+                  .map((point, index) => {
+                    const display = toDisplayRect(
+                      { x: point[0], y: point[1], width: 0.0001, height: 0.0001 },
+                      viewport,
+                      view,
+                    )
+                    return `${index === 0 ? 'M' : 'L'}${display.left} ${display.top}`
+                  })
+                  .join(' ')
+                if (!path) return null
+                return (
+                  <path
+                    key={ink.id}
+                    d={path}
+                    fill="none"
+                    stroke={ink.style.color ?? '#d94f3d'}
+                    strokeWidth={Math.max(1, (ink.style.width ?? 0.0025) * viewport.width)}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`pdf-ink${inkErase ? ' is-erasing' : ''}`}
+                    onPointerDown={(event) => {
+                      if (!inkErase) return
+                      event.stopPropagation()
+                      onEraseInk(ink.id)
+                    }}
+                  />
+                )
+              })}
+              {stroke && stroke.length > 1 && (
+                <path
+                  className="pdf-ink-draft"
+                  d={stroke
+                    .map((point, index) => {
+                      const display = toDisplayRect(
+                        { x: point[0], y: point[1], width: 0.0001, height: 0.0001 },
+                        viewport,
+                        view,
+                      )
+                      return `${index === 0 ? 'M' : 'L'}${display.left} ${display.top}`
+                    })
+                    .join(' ')}
+                  fill="none"
+                  stroke={inkColor}
+                  strokeWidth={Math.max(1, inkWidth * viewport.width)}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+            </g>
+
             {displayedAnnotations.map((annotation) => (
               <g
                 key={annotation.id}

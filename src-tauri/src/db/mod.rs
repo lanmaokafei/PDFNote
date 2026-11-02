@@ -1,9 +1,10 @@
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
 const DOCUMENT_PROGRESS_SQL: &str = include_str!("../../migrations/002_document_progress.sql");
+const COLLABORATION_SQL: &str = include_str!("../../migrations/003_collaboration.sql");
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
@@ -43,9 +44,14 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
         version if version == SCHEMA_VERSION => Ok(()),
         0 => {
             apply_migration(connection, INIT_SQL, 1)?;
-            apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2)
+            apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2)?;
+            apply_migration(connection, COLLABORATION_SQL, 3)
         }
-        1 => apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2),
+        1 => {
+            apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2)?;
+            apply_migration(connection, COLLABORATION_SQL, 3)
+        }
+        2 => apply_migration(connection, COLLABORATION_SQL, 3),
         newer => Err(format!(
             "数据库 schema 版本 {newer} 高于当前应用支持的版本 {SCHEMA_VERSION}"
         )),
@@ -96,6 +102,16 @@ mod tests {
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
         assert!(columns(&connection, "documents").contains(&"last_page".to_string()));
+        for table in ["card_tags", "card_links", "page_inks"] {
+            let count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "{table} 必须存在");
+        }
         for field in ["elapsed_days", "scheduled_days", "learning_steps"] {
             assert!(columns(&connection, "cards").contains(&field.to_string()));
         }
@@ -122,7 +138,7 @@ mod tests {
         let version: u32 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         let last_page: i64 = connection
             .query_row(
                 "INSERT INTO documents (id, title, stored_path, content_hash, created_at, updated_at)

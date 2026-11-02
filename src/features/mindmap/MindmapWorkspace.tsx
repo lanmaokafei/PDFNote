@@ -15,10 +15,11 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { save as saveDialog } from '@tauri-apps/plugin-dialog'
-import type { Card, MindmapLayoutInput, Rating } from '../../domain/card'
+import type { Card, CardLink, MindmapLayoutInput, Rating } from '../../domain/card'
 import {
   exportMarkdownFile,
   isTauriRuntime,
+  listCardLinks,
   listMindmapLayout,
   moveCard,
   saveMindmapLayout,
@@ -28,6 +29,7 @@ import {
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
 import { CardEditor, ConfirmationDialog, type CardDraft, type ConfirmationKind } from './CardEditor'
+import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
 import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown } from './outline'
@@ -83,6 +85,10 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null)
   const [viewMode, setViewMode] = useState<'canvas' | 'outline'>('canvas')
   const [exporting, setExporting] = useState(false)
+  const [links, setLinks] = useState<CardLink[]>([])
+  const [tagTarget, setTagTarget] = useState<string | null>(null)
+  const [linkTarget, setLinkTarget] = useState<string | null>(null)
+  const [mergeOpen, setMergeOpen] = useState(false)
 
   const [recallActive, setRecallActive] = useState(false)
   const [recallSort, setRecallSort] = useState<MindmapSortMode>('order')
@@ -142,26 +148,44 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     }),
     [measuredSizes, orderedVisibleCards, positions, selectedIds],
   )
-  const edges = useMemo<Edge[]>(
-    () => orderedVisibleCards.flatMap((card) => {
+  const edges = useMemo<Edge[]>(() => {
+    const hierarchy = orderedVisibleCards.flatMap((card) => {
       if (!card.parent_id || !visibleIds.has(card.parent_id)) return []
       return [{
         id: `${card.parent_id}->${card.id}`,
         source: card.parent_id,
         target: card.id,
-        type: 'smoothstep',
+        type: 'smoothstep' as const,
         markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#a8b2aa' },
         style: { stroke: '#a8b2aa', strokeWidth: 1.4 },
       }]
-    }),
-    [orderedVisibleCards, visibleIds],
-  )
+    })
+    const references = links
+      .filter((link) => visibleIds.has(link.source_card_id) && visibleIds.has(link.target_card_id))
+      .map((link) => ({
+        id: `link-${link.id}`,
+        source: link.source_card_id,
+        target: link.target_card_id,
+        type: 'straight' as const,
+        label: '链接',
+        labelStyle: { fill: '#6d8794', fontSize: 8 },
+        labelBgStyle: { fill: '#f4f7f4', fillOpacity: 0.9 },
+        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: '#7d9dab' },
+        style: { stroke: '#7d9dab', strokeWidth: 1.2, strokeDasharray: '5 4' },
+      }))
+    return [...hierarchy, ...references]
+  }, [links, orderedVisibleCards, visibleIds])
 
   const refresh = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const [savedLayouts] = await Promise.all([listMindmapLayout(CANVAS_ID), loadCards()])
+      const [savedLayouts, , allLinks] = await Promise.all([
+        listMindmapLayout(CANVAS_ID),
+        loadCards(),
+        listCardLinks(),
+      ])
+      setLinks(allLinks)
       const latestCards = Object.values(useCardStore.getState().cardsById).filter((card) => card.surface_mindmap)
       const generated = buildTreeLayout(latestCards)
       const savedById = new Map(savedLayouts.map((layout) => [layout.card_id, layout]))
@@ -190,6 +214,14 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  useEffect(() => {
+    const reloadLinks = () => {
+      void listCardLinks().then(setLinks).catch(() => undefined)
+    }
+    window.addEventListener('pdfnote:links-changed', reloadLinks)
+    return () => window.removeEventListener('pdfnote:links-changed', reloadLinks)
+  }, [])
 
   // 分栏模式下新建的卡片不会重新挂载脑图，这里为缺少坐标的卡片补一次树形布局。
   useEffect(() => {
@@ -578,6 +610,8 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       ratingPendingIds,
       recallErrors,
       onEdit: (id) => setEditor(id),
+      onTag: (id) => setTagTarget(id),
+      onLink: (id) => setLinkTarget(id),
       onToggle: (id) => void toggleCard(id),
       onReveal: revealAnswer,
       onRate: (id, rating) => void rateCard(id, rating),
@@ -613,6 +647,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
           <button type="button" onClick={() => void refresh()} disabled={loading || busy}>刷新</button>
           <button type="button" onClick={autoArrange} disabled={busy || !cards.length || viewMode === 'outline'}>自动整理</button>
           <button type="button" onClick={saveSelected} disabled={busy || !cards.length || viewMode === 'outline'}>保存所选布局</button>
+          <button type="button" onClick={() => setMergeOpen(true)} disabled={busy || selectedIds.size < 2} title="先多选两张以上卡片">合并所选</button>
           <button type="button" onClick={() => void handleExportMarkdown()} disabled={exporting || !cards.length}>{exporting ? '导出中…' : '导出 MD'}</button>
           <button type="button" className="primary" onClick={() => setEditor('new')} disabled={busy}>＋ 新建卡片</button>
         </div>
@@ -632,6 +667,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
           >
             {recallActive ? '结束回忆' : '主动回忆'}
           </button>
+          <button type="button" onClick={() => setMergeOpen(true)} disabled={busy || selectedIds.size < 2}>合并</button>
           <button type="button" onClick={() => void handleExportMarkdown()} disabled={exporting || !cards.length}>{exporting ? '导出中…' : '导出'}</button>
         </div>
       )}
@@ -707,6 +743,11 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
                         {outlineTitle(card)}
                       </button>
                       {card.excerpt.trim() && <p>{card.excerpt.trim()}</p>}
+                      {card.tags.length > 0 && (
+                        <div className="mindmap-outline-tags">
+                          {card.tags.map((tag) => <span key={tag}>#{tag}</span>)}
+                        </div>
+                      )}
                     </div>
                     <span className="mindmap-outline-level">L{depth + 1}</span>
                   </div>
@@ -775,6 +816,32 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
           />
         )}
       </div>
+
+      {tagTarget && cardsById[tagTarget] && (
+        <TagDialog
+          card={cardsById[tagTarget]}
+          onClose={() => setTagTarget(null)}
+          onSaved={() => { void syncCards() }}
+        />
+      )}
+
+      {linkTarget && cardsById[linkTarget] && (
+        <LinkDialog
+          card={cardsById[linkTarget]}
+          cards={cards}
+          onClose={() => setLinkTarget(null)}
+          onChanged={() => undefined}
+        />
+      )}
+
+      {mergeOpen && (
+        <MergeDialog
+          cards={cards}
+          initialSelection={[...selectedIds]}
+          onClose={() => setMergeOpen(false)}
+          onMerged={() => { void syncCards() }}
+        />
+      )}
 
       {!compact && (
       <footer className="mindmap-footer">

@@ -296,6 +296,29 @@ fn document_copy_sql(schema_version: u32, only_missing: bool) -> String {
     )
 }
 
+/// 旧备份（0.6.0 之前）没有标签/链接/墨迹表，导入时先判断是否存在。
+fn import_has_table(connection: &rusqlite::Connection, table: &str) -> Result<bool, String> {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM import_src.sqlite_master WHERE type = 'table' AND name = ?1)",
+            params![table],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn copy_table_if_present(connection: &rusqlite::Connection, table: &str) -> Result<(), String> {
+    if import_has_table(connection, table)? {
+        connection
+            .execute(
+                &format!("INSERT INTO {table} SELECT * FROM import_src.{table}"),
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn import_overwrite(
     state: &AppState,
     staging: &Path,
@@ -310,6 +333,9 @@ fn import_overwrite(
         "review_logs",
         "mindmap_layout",
         "annotations",
+        "card_links",
+        "card_tags",
+        "page_inks",
         "cards",
         "documents",
     ] {
@@ -335,6 +361,9 @@ fn import_overwrite(
             transaction
                 .execute(statement, [])
                 .map_err(|error| error.to_string())?;
+        }
+        for table in ["card_tags", "card_links", "page_inks"] {
+            copy_table_if_present(&transaction, table)?;
         }
         Ok(())
     })();
@@ -437,6 +466,49 @@ fn import_merge(
                 [],
             )
             .map_err(|error| error.to_string())?;
+        if import_has_table(&transaction, "page_inks")? {
+            // 墨迹挂在文档上，合并模式要按内容哈希重新指向本地文档。
+            transaction
+                .execute(
+                    "UPDATE import_src.page_inks SET document_id = (
+                        SELECT d.id FROM documents d
+                        WHERE d.content_hash = (SELECT s2.content_hash FROM import_src.documents s2 WHERE s2.id = import_src.page_inks.document_id)
+                    ) WHERE document_id IS NOT NULL",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        if import_has_table(&transaction, "card_tags")? {
+            transaction
+                .execute(
+                    "INSERT INTO card_tags
+                     SELECT s.* FROM import_src.card_tags s
+                     WHERE NOT EXISTS (SELECT 1 FROM card_tags t WHERE t.card_id = s.card_id AND t.tag = s.tag)",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        if import_has_table(&transaction, "card_links")? {
+            transaction
+                .execute(
+                    "INSERT INTO card_links
+                     SELECT s.* FROM import_src.card_links s
+                     WHERE NOT EXISTS (SELECT 1 FROM card_links l WHERE l.id = s.id)",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        if import_has_table(&transaction, "page_inks")? {
+            transaction
+                .execute(
+                    "INSERT INTO page_inks
+                     SELECT s.* FROM import_src.page_inks s
+                     WHERE NOT EXISTS (SELECT 1 FROM page_inks i WHERE i.id = s.id)",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+
         Ok(())
     })();
     result?;
@@ -649,10 +721,50 @@ mod tests {
     #[test]
     fn export_import_roundtrip_restores_data_and_pdf() {
         let (source_dir, source_state) = prepare_state();
+        // 标签、链接、墨迹也要随备份往返。
+        let card = crate::cards::list_cards(&source_state, None)
+            .unwrap()
+            .remove(0);
+        crate::cards::set_card_tags(&source_state, card.id.clone(), vec!["备份".into()]).unwrap();
+        let document = crate::documents::list_documents(&source_state)
+            .unwrap()
+            .remove(0);
+        crate::cards::create_page_ink(
+            &source_state,
+            document.id.clone(),
+            1,
+            NormalizedBBox {
+                x: 0.2,
+                y: 0.2,
+                width: 0.2,
+                height: 0.2,
+            },
+            serde_json::json!({
+                "color": "#2f6f8f",
+                "width": 0.0028,
+                "points": [[0.2, 0.2], [0.4, 0.3]]
+            }),
+        )
+        .unwrap();
+        let second = create_card(
+            &source_state,
+            CreateCardInput {
+                source_ref: None,
+                excerpt: String::new(),
+                user_note: String::new(),
+                question: "第二张卡片".into(),
+                parent_id: None,
+                sort_order: 0,
+                annotation: None,
+            },
+        )
+        .unwrap();
+        crate::cards::create_card_link(&source_state, card.id.clone(), second.id).unwrap();
+
         let archive = source_dir.join("backup.zip");
         let exported = export_backup(&source_state, archive.to_string_lossy().to_string()).unwrap();
         assert_eq!(exported.documents, 1);
-        assert_eq!(exported.cards, 1);
+        assert_eq!(exported.cards, 2);
         assert!(archive.exists());
 
         let (_target_dir, target_state) = test_state();
@@ -663,7 +775,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(imported.documents, 1);
-        assert_eq!(imported.cards, 1);
+        assert_eq!(imported.cards, 2);
 
         let database = target_state.db().unwrap();
         let cards: i64 = database
@@ -675,7 +787,21 @@ mod tests {
         let documents: i64 = database
             .query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))
             .unwrap();
-        assert_eq!((documents, cards, annotations), (1, 1, 1));
+        assert_eq!((documents, cards, annotations), (1, 2, 1));
+        let tags: i64 = database
+            .query_row("SELECT COUNT(*) FROM card_tags", [], |row| row.get(0))
+            .unwrap();
+        let links: i64 = database
+            .query_row("SELECT COUNT(*) FROM card_links", [], |row| row.get(0))
+            .unwrap();
+        let inks: i64 = database
+            .query_row("SELECT COUNT(*) FROM page_inks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            (tags, links, inks),
+            (1, 1, 1),
+            "标签/链接/墨迹必须随备份恢复"
+        );
         drop(database);
         let document = crate::documents::list_documents(&target_state)
             .unwrap()
@@ -688,7 +814,7 @@ mod tests {
             "merge".into(),
         )
         .unwrap();
-        assert_eq!(reimported.cards, 1, "重复导入必须幂等");
+        assert_eq!(reimported.cards, 2, "重复导入必须幂等");
         let _ = fs::remove_dir_all(&source_dir);
     }
 

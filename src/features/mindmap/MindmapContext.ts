@@ -10,6 +10,8 @@ export interface MindmapNodeContextValue {
   ratingPendingIds: ReadonlySet<string>
   recallErrors: Readonly<Record<string, string>>
   onEdit: (id: string) => void
+  onTag: (id: string) => void
+  onLink: (id: string) => void
   onToggle: (id: string) => void
   onReveal: (id: string) => void
   onRate: (id: string, rating: Rating) => void

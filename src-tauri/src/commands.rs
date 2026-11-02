@@ -211,6 +211,72 @@ pub fn export_markdown(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn set_card_tags(
+    state: State<'_, AppState>,
+    card_id: String,
+    tags: Vec<String>,
+) -> Result<models::Card, String> {
+    cards::set_card_tags(&state, card_id, tags)
+}
+
+#[tauri::command]
+pub fn list_tags(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    cards::list_tags(&state)
+}
+
+#[tauri::command]
+pub fn list_card_links(state: State<'_, AppState>) -> Result<Vec<models::CardLink>, String> {
+    cards::list_card_links(&state)
+}
+
+#[tauri::command]
+pub fn create_card_link(
+    state: State<'_, AppState>,
+    source_card_id: String,
+    target_card_id: String,
+) -> Result<models::CardLink, String> {
+    cards::create_card_link(&state, source_card_id, target_card_id)
+}
+
+#[tauri::command]
+pub fn delete_card_link(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    cards::delete_card_link(&state, id)
+}
+
+#[tauri::command]
+pub fn list_page_inks(
+    state: State<'_, AppState>,
+    document_id: String,
+    pages: Vec<i64>,
+) -> Result<Vec<models::PageInk>, String> {
+    cards::list_page_inks(&state, document_id, pages)
+}
+
+#[tauri::command]
+pub fn create_page_ink(
+    state: State<'_, AppState>,
+    document_id: String,
+    page: u32,
+    bbox: models::NormalizedBBox,
+    style: serde_json::Value,
+) -> Result<models::PageInk, String> {
+    cards::create_page_ink(&state, document_id, page, bbox, style)
+}
+
+#[tauri::command]
+pub fn delete_page_ink(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    cards::delete_page_ink(&state, id)
+}
+
+#[tauri::command]
+pub fn merge_cards(
+    state: State<'_, AppState>,
+    card_ids: Vec<String>,
+) -> Result<models::Card, String> {
+    cards::merge_cards(&state, card_ids)
+}
+
+#[tauri::command]
 pub fn update_document_progress(
     state: State<'_, AppState>,
     id: String,

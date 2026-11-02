@@ -1,8 +1,9 @@
 use crate::{
     models::{
-        annotation_from_row, card_from_row, now, Annotation, AnnotationGeometry, AnnotationInput,
-        Card, CreateCardInput, MindmapLayout, MindmapLayoutInput, NormalizedBBox,
-        UpdateCardContentInput, ANNOTATION_COLUMNS, CARD_COLUMNS,
+        annotation_from_row, attach_tags, card_from_row, ink_from_row, link_from_row, now,
+        Annotation, AnnotationGeometry, AnnotationInput, Card, CardLink, CreateCardInput,
+        MindmapLayout, MindmapLayoutInput, NormalizedBBox, PageInk, UpdateCardContentInput,
+        ANNOTATION_COLUMNS, CARD_COLUMNS, CARD_LINK_COLUMNS, PAGE_INK_COLUMNS,
     },
     state::AppState,
 };
@@ -18,11 +19,13 @@ fn validate_annotation(annotation: &AnnotationInput) -> Result<(), String> {
 
 pub fn get_card(connection: &Connection, id: &str) -> Result<Card, String> {
     let query = format!("SELECT {CARD_COLUMNS} FROM cards WHERE id = ?1");
-    connection
+    let mut card = connection
         .query_row(&query, params![id], card_from_row)
         .optional()
         .map_err(|error| error.to_string())?
-        .ok_or_else(|| "card not found".into())
+        .ok_or_else(|| "card not found".to_string())?;
+    attach_tags(connection, std::slice::from_mut(&mut card)).map_err(|error| error.to_string())?;
+    Ok(card)
 }
 
 pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, String> {
@@ -135,12 +138,13 @@ pub fn list_cards(state: &AppState, limit: Option<u32>) -> Result<Vec<Card>, Str
     let mut statement = database
         .prepare(&query)
         .map_err(|error| error.to_string())?;
-    let rows = statement
+    let mut cards = statement
         .query_map(params![limit.unwrap_or(500).clamp(1, 500)], card_from_row)
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string());
-    rows
+        .map_err(|error| error.to_string())?;
+    attach_tags(&database, &mut cards).map_err(|error| error.to_string())?;
+    Ok(cards)
 }
 
 pub fn update_card_content(
@@ -410,6 +414,433 @@ pub fn delete_card(state: &AppState, id: String) -> Result<(), String> {
     transaction.commit().map_err(|error| error.to_string())
 }
 
+/// 规范化标签：去空白与前置 #，去重，限制数量与长度。
+pub fn set_card_tags(state: &AppState, card_id: String, tags: Vec<String>) -> Result<Card, String> {
+    let mut normalized: Vec<String> = Vec::new();
+    for tag in tags {
+        let value = tag.trim().trim_start_matches('#').trim().to_string();
+        if value.is_empty() {
+            continue;
+        }
+        if value.chars().count() > 24 {
+            return Err("单个标签不能超过 24 个字符".into());
+        }
+        if !normalized.contains(&value) {
+            normalized.push(value);
+        }
+    }
+    if normalized.len() > 12 {
+        return Err("每张卡片最多 12 个标签".into());
+    }
+
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let exists: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM cards WHERE id = ?1",
+            params![card_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if exists == 0 {
+        return Err("card not found".into());
+    }
+    transaction
+        .execute("DELETE FROM card_tags WHERE card_id = ?1", params![card_id])
+        .map_err(|error| error.to_string())?;
+    let timestamp = now();
+    for tag in &normalized {
+        transaction
+            .execute(
+                "INSERT INTO card_tags (card_id, tag, created_at) VALUES (?1, ?2, ?3)",
+                params![card_id, tag, timestamp],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    let card = get_card(&transaction, &card_id)?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(card)
+}
+
+/// 供标签输入框做候选提示，按使用频率排序。
+pub fn list_tags(state: &AppState) -> Result<Vec<String>, String> {
+    let database = state.db()?;
+    let mut statement = database
+        .prepare("SELECT tag FROM card_tags GROUP BY tag ORDER BY COUNT(*) DESC, tag LIMIT 200")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+pub fn list_card_links(state: &AppState) -> Result<Vec<CardLink>, String> {
+    let database = state.db()?;
+    let query = format!("SELECT {CARD_LINK_COLUMNS} FROM card_links ORDER BY created_at, id");
+    let mut statement = database
+        .prepare(&query)
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], link_from_row)
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+pub fn create_card_link(
+    state: &AppState,
+    source_card_id: String,
+    target_card_id: String,
+) -> Result<CardLink, String> {
+    if source_card_id == target_card_id {
+        return Err("不能把卡片链接到自身".into());
+    }
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let existing: Option<CardLink> = transaction
+        .query_row(
+            &format!("SELECT {CARD_LINK_COLUMNS} FROM card_links WHERE source_card_id = ?1 AND target_card_id = ?2"),
+            params![source_card_id, target_card_id],
+            link_from_row,
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if let Some(link) = existing {
+        return Ok(link);
+    }
+    let count: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM cards WHERE id IN (?1, ?2)",
+            params![source_card_id, target_card_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if count != 2 {
+        return Err("卡片不存在".into());
+    }
+    let id = Uuid::new_v4().to_string();
+    transaction
+        .execute(
+            "INSERT INTO card_links (id, source_card_id, target_card_id, label, created_at)
+             VALUES (?1, ?2, ?3, '', ?4)",
+            params![id, source_card_id, target_card_id, now()],
+        )
+        .map_err(|error| error.to_string())?;
+    let link = transaction
+        .query_row(
+            &format!("SELECT {CARD_LINK_COLUMNS} FROM card_links WHERE id = ?1"),
+            params![id],
+            link_from_row,
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(link)
+}
+
+pub fn delete_card_link(state: &AppState, id: String) -> Result<(), String> {
+    let database = state.db()?;
+    let affected = database
+        .execute("DELETE FROM card_links WHERE id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    if affected == 0 {
+        return Err("链接不存在".into());
+    }
+    Ok(())
+}
+
+pub fn list_page_inks(
+    state: &AppState,
+    document_id: String,
+    pages: Vec<i64>,
+) -> Result<Vec<PageInk>, String> {
+    if pages.is_empty() {
+        return Ok(Vec::new());
+    }
+    let database = state.db()?;
+    let placeholders = vec!["?"; pages.len()].join(", ");
+    let query = format!(
+        "SELECT {PAGE_INK_COLUMNS} FROM page_inks
+         WHERE document_id = ?1 AND page IN ({placeholders}) ORDER BY page, created_at"
+    );
+    let mut values: Vec<Value> = vec![Value::Text(document_id)];
+    values.extend(pages.into_iter().map(Value::Integer));
+    let mut statement = database
+        .prepare(&query)
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params_from_iter(values), ink_from_row)
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+fn validate_ink_style(style: &serde_json::Value) -> Result<(), String> {
+    let points = style
+        .get("points")
+        .and_then(|value| value.as_array())
+        .ok_or("墨迹缺少 points")?;
+    if points.len() < 2 {
+        return Err("墨迹至少需要两个点".into());
+    }
+    for point in points {
+        let pair = point.as_array().ok_or("墨迹点格式错误")?;
+        if pair.len() != 2 {
+            return Err("墨迹点必须是 [x, y]".into());
+        }
+        for value in pair {
+            let number = value.as_f64().ok_or("墨迹点必须是数字")?;
+            if !(0.0..=1.0).contains(&number) {
+                return Err("墨迹点必须归一化到 0–1".into());
+            }
+        }
+    }
+    let width = style
+        .get("width")
+        .and_then(|value| value.as_f64())
+        .unwrap_or(0.002);
+    if !(0.0005..=0.05).contains(&width) {
+        return Err("墨迹宽度超出范围".into());
+    }
+    Ok(())
+}
+
+pub fn create_page_ink(
+    state: &AppState,
+    document_id: String,
+    page: u32,
+    bbox: NormalizedBBox,
+    style: serde_json::Value,
+) -> Result<PageInk, String> {
+    if page == 0 {
+        return Err("page numbers are one-based".into());
+    }
+    bbox.validate()?;
+    validate_ink_style(&style)?;
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let exists: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM documents WHERE id = ?1",
+            params![document_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if exists == 0 {
+        return Err("文档不存在".into());
+    }
+    let id = Uuid::new_v4().to_string();
+    let timestamp = now();
+    transaction
+        .execute(
+            "INSERT INTO page_inks
+             (id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height, style_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+            params![
+                id,
+                document_id,
+                page,
+                bbox.x,
+                bbox.y,
+                bbox.width,
+                bbox.height,
+                serde_json::to_string(&style).map_err(|error| error.to_string())?,
+                timestamp
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    let ink = transaction
+        .query_row(
+            &format!("SELECT {PAGE_INK_COLUMNS} FROM page_inks WHERE id = ?1"),
+            params![id],
+            ink_from_row,
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(ink)
+}
+
+pub fn delete_page_ink(state: &AppState, id: String) -> Result<(), String> {
+    let database = state.db()?;
+    let affected = database
+        .execute("DELETE FROM page_inks WHERE id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    if affected == 0 {
+        return Err("墨迹不存在".into());
+    }
+    Ok(())
+}
+
+fn join_unique(values: impl IntoIterator<Item = String>) -> String {
+    let mut seen: Vec<String> = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() || seen.iter().any(|item| item == trimmed) {
+            continue;
+        }
+        seen.push(trimmed.to_string());
+    }
+    seen.join("\n\n")
+}
+
+/// 多张卡片合并为第一张：文本合并、子节点与标注迁移、标签取并集，其余卡片删除。
+pub fn merge_cards(state: &AppState, card_ids: Vec<String>) -> Result<Card, String> {
+    let mut unique: Vec<String> = Vec::new();
+    for id in card_ids {
+        if !unique.contains(&id) {
+            unique.push(id);
+        }
+    }
+    if unique.len() < 2 {
+        return Err("至少选择两张卡片才能合并".into());
+    }
+
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let mut cards = Vec::new();
+    for id in &unique {
+        cards.push(get_card(&transaction, id)?);
+    }
+    let mut document_ids: Vec<String> = cards
+        .iter()
+        .filter_map(|card| {
+            card.source_ref
+                .as_ref()
+                .map(|source| source.document_id.clone())
+        })
+        .collect();
+    document_ids.sort();
+    document_ids.dedup();
+    if document_ids.len() > 1 {
+        return Err("不能合并来自不同 PDF 的卡片".into());
+    }
+
+    let target = cards[0].clone();
+    let others: Vec<Card> = cards[1..].to_vec();
+    // 若主体卡片的父节点正好被合并，把主体提升到祖父节点，避免合并后变成孤儿。
+    if let Some(parent_id) = target.parent_id.as_ref() {
+        if let Some(parent) = others.iter().find(|card| &card.id == parent_id) {
+            transaction
+                .execute(
+                    "UPDATE cards SET parent_id = ?1 WHERE id = ?2",
+                    params![parent.parent_id, target.id],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+
+    let excerpt = join_unique(cards.iter().map(|card| card.excerpt.clone()));
+    let user_note = join_unique(cards.iter().map(|card| card.user_note.clone()));
+    let question = if target.question.trim().is_empty() {
+        cards
+            .iter()
+            .map(|card| card.question.trim())
+            .find(|value| !value.is_empty())
+            .unwrap_or("")
+            .to_string()
+    } else {
+        target.question.clone()
+    };
+
+    // 目标卡片若没有 PDF 来源，继承被合并卡片中第一个来源，避免标注失去文档归属。
+    let source = if target.source_ref.is_some() {
+        None
+    } else {
+        cards.iter().find_map(|card| card.source_ref.as_ref())
+    };
+    let (document_id, page, bbox_x, bbox_y, bbox_width, bbox_height) = match source {
+        Some(source) => (
+            Some(source.document_id.clone()),
+            Some(source.page as i64),
+            Some(source.bbox.x),
+            Some(source.bbox.y),
+            Some(source.bbox.width),
+            Some(source.bbox.height),
+        ),
+        None => (None, None, None, None, None, None),
+    };
+
+    transaction
+        .execute(
+            "UPDATE cards SET excerpt = ?1, user_note = ?2, question = ?3,
+                surface_pdf = ?4, surface_mindmap = ?5, surface_review = ?6, updated_at = ?7,
+                document_id = COALESCE(?8, document_id), page = COALESCE(?9, page),
+                bbox_x = COALESCE(?10, bbox_x), bbox_y = COALESCE(?11, bbox_y),
+                bbox_width = COALESCE(?12, bbox_width), bbox_height = COALESCE(?13, bbox_height)
+             WHERE id = ?14",
+            params![
+                excerpt,
+                user_note,
+                question,
+                cards.iter().any(|card| card.surface_pdf) as i64,
+                cards.iter().any(|card| card.surface_mindmap) as i64,
+                cards.iter().any(|card| card.surface_review) as i64,
+                now(),
+                document_id,
+                page,
+                bbox_x,
+                bbox_y,
+                bbox_width,
+                bbox_height,
+                target.id
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+
+    for other in &others {
+        transaction
+            .execute(
+                "UPDATE cards SET parent_id = ?1 WHERE parent_id = ?2",
+                params![target.id, other.id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "UPDATE annotations SET card_id = ?1 WHERE card_id = ?2",
+                params![target.id, other.id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO card_tags (card_id, tag, created_at)
+                 SELECT ?1, tag, created_at FROM card_tags WHERE card_id = ?2",
+                params![target.id, other.id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "UPDATE OR IGNORE card_links SET source_card_id = ?1 WHERE source_card_id = ?2",
+                params![target.id, other.id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "UPDATE OR IGNORE card_links SET target_card_id = ?1 WHERE target_card_id = ?2",
+                params![target.id, other.id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "DELETE FROM mindmap_layout WHERE card_id = ?1",
+                params![other.id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute("DELETE FROM cards WHERE id = ?1", params![other.id])
+            .map_err(|error| error.to_string())?;
+    }
+
+    transaction
+        .execute(
+            "DELETE FROM card_links WHERE source_card_id = target_card_id",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    let merged = get_card(&transaction, &target.id)?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(merged)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,6 +910,192 @@ mod tests {
         .unwrap();
         assert_eq!(card.source_ref.as_ref().map(|source| source.page), Some(1));
         assert!(card.excerpt.is_empty());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn tags_are_normalized_and_replaced_atomically() {
+        let (directory, state) = test_state();
+        let card = create_card(
+            &state,
+            CreateCardInput {
+                source_ref: None,
+                excerpt: String::new(),
+                user_note: String::new(),
+                question: "带标签的卡片".into(),
+                parent_id: None,
+                sort_order: 0,
+                annotation: None,
+            },
+        )
+        .unwrap();
+
+        let updated = set_card_tags(
+            &state,
+            card.id.clone(),
+            vec![
+                " #认知 ".into(),
+                "认知".into(),
+                "学习方法 ".into(),
+                "   ".into(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(updated.tags, vec!["学习方法", "认知"]);
+
+        let tags = list_tags(&state).unwrap();
+        assert!(tags.contains(&"认知".to_string()));
+        assert_eq!(tags.iter().filter(|tag| tag.as_str() == "认知").count(), 1);
+
+        let cleared = set_card_tags(&state, card.id.clone(), vec![]).unwrap();
+        assert!(cleared.tags.is_empty());
+        assert!(set_card_tags(&state, card.id.clone(), vec!["x".repeat(25)]).is_err());
+        assert!(set_card_tags(&state, "missing".into(), vec!["a".into()]).is_err());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn links_are_idempotent_and_removable() {
+        let (directory, state) = test_state();
+        let first = create_card(&state, input("第一张", None)).unwrap();
+        let second = create_card(&state, input("第二张", None)).unwrap();
+
+        let link = create_card_link(&state, first.id.clone(), second.id.clone()).unwrap();
+        let duplicate = create_card_link(&state, first.id.clone(), second.id.clone()).unwrap();
+        assert_eq!(link.id, duplicate.id);
+        assert_eq!(list_card_links(&state).unwrap().len(), 1);
+        assert!(create_card_link(&state, first.id.clone(), first.id.clone()).is_err());
+        assert!(create_card_link(&state, "missing".into(), second.id.clone()).is_err());
+
+        delete_card_link(&state, link.id).unwrap();
+        assert!(list_card_links(&state).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn page_ink_roundtrip_and_validation() {
+        let (directory, state) = test_state();
+        {
+            let database = state.db().unwrap();
+            database
+                .execute(
+                    "INSERT INTO documents (id, title, stored_path, content_hash, created_at, updated_at)
+                     VALUES ('doc-ink', '墨迹文档', 'pdfs/ink.pdf', 'ink-hash', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                    [],
+                )
+                .unwrap();
+        }
+        let bbox = NormalizedBBox {
+            x: 0.1,
+            y: 0.1,
+            width: 0.3,
+            height: 0.3,
+        };
+        let style = serde_json::json!({
+            "color": "#e05b4a",
+            "width": 0.003,
+            "points": [[0.1, 0.1], [0.3, 0.2], [0.25, 0.4]]
+        });
+        let ink = create_page_ink(&state, "doc-ink".into(), 2, bbox.clone(), style).unwrap();
+        assert_eq!(ink.page, 2);
+
+        let page_two = list_page_inks(&state, "doc-ink".into(), vec![2]).unwrap();
+        assert_eq!(page_two.len(), 1);
+        assert!(list_page_inks(&state, "doc-ink".into(), vec![1])
+            .unwrap()
+            .is_empty());
+
+        let bad_style = serde_json::json!({ "points": [[0.1, 0.1]] });
+        assert!(create_page_ink(&state, "doc-ink".into(), 2, bbox, bad_style).is_err());
+        assert!(create_page_ink(
+            &state,
+            "missing".into(),
+            1,
+            NormalizedBBox {
+                x: 0.1,
+                y: 0.1,
+                width: 0.2,
+                height: 0.2
+            },
+            serde_json::json!({ "points": [[0.1, 0.1], [0.2, 0.2]] })
+        )
+        .is_err());
+
+        delete_page_ink(&state, ink.id).unwrap();
+        assert!(list_page_inks(&state, "doc-ink".into(), vec![2])
+            .unwrap()
+            .is_empty());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn merge_cards_combines_text_and_moves_children_and_tags() {
+        let (directory, state) = test_state();
+        {
+            let database = state.db().unwrap();
+            database
+                .execute(
+                    "INSERT INTO documents (id, title, stored_path, content_hash, created_at, updated_at)
+                     VALUES ('doc-merge', '合并文档', 'pdfs/merge.pdf', 'merge-hash', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                    [],
+                )
+                .unwrap();
+        }
+        let first = create_card(
+            &state,
+            CreateCardInput {
+                excerpt: "第一段摘录".into(),
+                ..input("主卡片", None)
+            },
+        )
+        .unwrap();
+        let bbox = NormalizedBBox {
+            x: 0.1,
+            y: 0.1,
+            width: 0.3,
+            height: 0.2,
+        };
+        let second = create_card(
+            &state,
+            CreateCardInput {
+                source_ref: Some(crate::models::SourceRef {
+                    document_id: "doc-merge".into(),
+                    page: 3,
+                    bbox: bbox.clone(),
+                }),
+                excerpt: "第二段摘录".into(),
+                annotation: Some(AnnotationInput {
+                    kind: "highlight".into(),
+                    geometry: AnnotationGeometry { rects: vec![bbox] },
+                    style: serde_json::json!({}),
+                }),
+                ..input("", None)
+            },
+        )
+        .unwrap();
+        let child = create_card(&state, input("子卡片", Some(second.id.clone()))).unwrap();
+
+        set_card_tags(&state, first.id.clone(), vec!["认知".into()]).unwrap();
+        set_card_tags(
+            &state,
+            second.id.clone(),
+            vec!["方法".into(), "认知".into()],
+        )
+        .unwrap();
+
+        let merged = merge_cards(&state, vec![first.id.clone(), second.id.clone()]).unwrap();
+        assert_eq!(merged.excerpt, "第一段摘录\n\n第二段摘录");
+        assert_eq!(merged.tags, vec!["方法", "认知"]);
+        assert_eq!(merged.question, "主卡片");
+
+        let reparented = get_card(&state.db().unwrap(), &child.id).unwrap();
+        assert_eq!(reparented.parent_id.as_deref(), Some(first.id.as_str()));
+        assert!(get_card(&state.db().unwrap(), &second.id).is_err());
+
+        let annotations = list_annotations(&state, "doc-merge".into(), vec![3]).unwrap();
+        assert_eq!(annotations.len(), 1);
+        assert_eq!(annotations[0].card_id, first.id);
+        assert!(merge_cards(&state, vec![first.id.clone()]).is_err());
         let _ = std::fs::remove_dir_all(&directory);
     }
 

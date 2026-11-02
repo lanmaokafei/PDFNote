@@ -6,10 +6,13 @@ import type {
   BootstrapStatus,
   Card,
   CreateCardInput,
+  CardLink,
   Document,
+  InkStyle,
   MindmapLayout,
   MindmapLayoutInput,
   NormalizedBBox,
+  PageInk,
   ReviewInput,
   ReviewStats,
   UpdateCardContentInput,
@@ -50,6 +53,47 @@ export async function resolveDocumentPath(id: string): Promise<string> {
 export async function updateDocumentMetadata(id: string, title: string, pageCount: number): Promise<void> {
   desktopOnly()
   return invoke('update_document_metadata', { id, title, pageCount })
+}
+export async function setCardTags(cardId: string, tags: string[]): Promise<Card> {
+  desktopOnly()
+  return invoke('set_card_tags', { cardId, tags })
+}
+export async function listTags(): Promise<string[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_tags')
+}
+export async function listCardLinks(): Promise<CardLink[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_card_links')
+}
+export async function createCardLink(sourceCardId: string, targetCardId: string): Promise<CardLink> {
+  desktopOnly()
+  return invoke('create_card_link', { sourceCardId, targetCardId })
+}
+export async function deleteCardLink(id: string): Promise<void> {
+  desktopOnly()
+  return invoke('delete_card_link', { id })
+}
+export async function listPageInks(documentId: string, pages: number[]): Promise<PageInk[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_page_inks', { documentId, pages })
+}
+export async function createPageInk(
+  documentId: string,
+  page: number,
+  bbox: NormalizedBBox,
+  style: InkStyle,
+): Promise<PageInk> {
+  desktopOnly()
+  return invoke('create_page_ink', { documentId, page, bbox, style })
+}
+export async function deletePageInk(id: string): Promise<void> {
+  desktopOnly()
+  return invoke('delete_page_ink', { id })
+}
+export async function mergeCards(cardIds: string[]): Promise<Card> {
+  desktopOnly()
+  return invoke('merge_cards', { cardIds })
 }
 export async function exportMarkdownFile(path: string, content: string): Promise<void> {
   desktopOnly()

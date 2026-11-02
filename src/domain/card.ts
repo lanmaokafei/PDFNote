@@ -21,6 +21,8 @@ export interface Card {
   excerpt: string
   user_note: string
   question: string
+  /** 标签按字母序返回。 */
+  tags: string[]
   parent_id: string | null
   sort_order: number
   collapsed: boolean
@@ -73,6 +75,30 @@ export interface UpdateCardContentInput {
   excerpt: string
   user_note: string
   question: string
+}
+
+export interface CardLink {
+  id: string
+  source_card_id: string
+  target_card_id: string
+  label: string
+  created_at: string
+}
+
+export interface InkStyle {
+  color?: string
+  width?: number
+  points: Array<[number, number]>
+}
+
+export interface PageInk {
+  id: string
+  document_id: string
+  page: number
+  bbox: NormalizedBBox
+  style: InkStyle
+  created_at: string
+  updated_at: string
 }
 
 export interface Document {

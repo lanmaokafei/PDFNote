@@ -441,3 +441,37 @@
 
 .mindmap-workspace.is-embedded .mindmap-outline-head { padding: 11px 14px; }
 .mindmap-workspace.is-embedded .mindmap-outline-row { padding-right: 14px; }
+
+
+/* ---------- 标签与关联链接 ---------- */
+
+.mindmap-node-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 11px 8px;
+}
+
+.mindmap-node-tags span {
+  padding: 2px 7px;
+  border-radius: 9px;
+  color: #54714f;
+  background: #e9f0e3;
+  font-size: 7.5px;
+  letter-spacing: .2px;
+}
+
+.mindmap-outline-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.mindmap-outline-tags span {
+  padding: 1px 6px;
+  border-radius: 8px;
+  color: #5b7156;
+  background: #eef3e8;
+  font-size: 7.5px;
+}

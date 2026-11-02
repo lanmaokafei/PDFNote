@@ -17,20 +17,23 @@ await page.goto('http://127.0.0.1:1420/', { waitUntil: 'networkidle' })
 await page.screenshot({ path: `${output}/library.png`, fullPage: true })
 
 const views = [
-  ['文档', 'library'],
   ['脑图', 'mindmap'],
   ['复习', 'review'],
-  ['备份', 'backup'],
+  ['资料库', 'library'],
 ]
 
 for (const [label, name] of views) {
-  await page.getByRole('button', { name: new RegExp(label) }).first().click()
-  await page.waitForTimeout(500)
+  await page.getByRole('tab', { name: new RegExp(label) }).first().click()
+  await page.waitForTimeout(600)
   await page.screenshot({ path: `${output}/${name}.png`, fullPage: true })
 }
 
+await page.getByRole('button', { name: '备份与恢复' }).click()
+await page.waitForTimeout(600)
+await page.screenshot({ path: `${output}/backup.png`, fullPage: true })
+
 const body = await page.locator('body').innerText()
-for (const expected of ['本地', '备份', 'PDFNote']) {
+for (const expected of ['本地', '备份', '资料库']) {
   if (!body.includes(expected)) problems.push(`missing text: ${expected}`)
 }
 

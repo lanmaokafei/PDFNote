@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import {
   FileText,
@@ -25,6 +25,8 @@ import './LibraryWorkspace.css'
 interface LibraryWorkspaceProps {
   onOpenDocument: (document: Document) => void
   onChanged: () => void
+  /** 顶部搜索按钮递增该值即可让搜索框获得焦点。 */
+  focusSearchToken?: number
 }
 
 type BusyState = { kind: 'import' | 'verify' | 'relocate' | 'delete'; id?: string } | null
@@ -57,7 +59,7 @@ const statusLabels: Record<Document['file_status'], string> = {
   importing: '导入中',
 }
 
-export function LibraryWorkspace({ onOpenDocument, onChanged }: LibraryWorkspaceProps) {
+export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken = 0 }: LibraryWorkspaceProps) {
   const [documents, setDocuments] = useState<Document[]>([])
   const [status, setStatus] = useState<BootstrapStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -68,6 +70,7 @@ export function LibraryWorkspace({ onOpenDocument, onChanged }: LibraryWorkspace
   const [deleteTarget, setDeleteTarget] = useState<Document | null>(null)
   const [keepCards, setKeepCards] = useState(true)
   const desktop = isTauriRuntime()
+  const searchRef = useRef<HTMLInputElement>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -87,6 +90,10 @@ export function LibraryWorkspace({ onOpenDocument, onChanged }: LibraryWorkspace
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  useEffect(() => {
+    if (focusSearchToken > 0) searchRef.current?.focus()
+  }, [focusSearchToken])
 
   useEffect(() => {
     if (!notice) return
@@ -230,6 +237,7 @@ export function LibraryWorkspace({ onOpenDocument, onChanged }: LibraryWorkspace
         <label className="library-search">
           <Search size={15} />
           <input
+            ref={searchRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索文档标题"

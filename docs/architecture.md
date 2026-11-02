@@ -1,6 +1,6 @@
 # PDFNote 架构基线（阶段 01 + 02）
 
-版本：0.3.0  
+版本：0.4.0  
 状态：已落地工程骨架与 schema v2
 
 ## 1. 不可破坏的架构约束
@@ -145,7 +145,14 @@ app-data/               运行时生成，不随安装包写入
 - 开发期静态资源来自 Vite `/pdfjs/...`；打包后同一相对 URL 来自 frontendDist，不引用开发机绝对路径。
 - PDF.js worker 使用 `new URL('/pdfjs/pdf.worker.min.mjs', window.location.origin)` 的统一封装，并通过测试确认 asset 协议下可用；字体和 CMap 路径同步配置。
 
-## 8. 当前落地范围
+## 8. 界面结构
+
+- 顶部悬浮分段栏：资料库、复习、当前文档、脑图；搜索与备份入口。
+- 打开文档后进入 `StudyWorkspace`：左 PDF（embedded）、右脑图（compact），中间可拖动分隔条。
+- PDF 工具坞固定在窗口底部，脑图操作在其右上角浮动。
+- 两个视图都只读取 `cardsById`，任何写操作经 Rust command 后刷新同一 store。
+
+## 9. 当前落地范围
 
 已实现：完整资料库与 PDF 工作区、三视图共享 Card、脑图与主动回忆、FSRS 复习、ZIP 备份恢复、崩溃边界、macOS Release 安装包。
 

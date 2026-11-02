@@ -1,21 +1,17 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import {
-  ArchiveRestore,
-  ArrowLeft,
   BookOpen,
-  CloudOff,
+  FileText,
   Network,
-  Plus,
+  Search,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
 import './App.css'
 import type { BootstrapStatus, Document } from './domain/card'
 import { LibraryWorkspace } from './features/library/LibraryWorkspace'
+import { StudyWorkspace } from './features/study/StudyWorkspace'
 
-const PdfWorkspace = lazy(() =>
-  import('./features/pdf/PdfWorkspace').then((module) => ({ default: module.PdfWorkspace })),
-)
 const MindmapWorkspace = lazy(() =>
   import('./features/mindmap/MindmapWorkspace').then((module) => ({ default: module.MindmapWorkspace })),
 )
@@ -39,25 +35,13 @@ import { useCardStore } from './store/cardStore'
 
 type View = 'library' | 'mindmap' | 'review' | 'backup'
 
-const navigation = [
-  { id: 'library' as const, label: '文档', icon: BookOpen, hint: 'PDF 与卡片' },
-  { id: 'mindmap' as const, label: '脑图', icon: Network, hint: '知识结构' },
-  { id: 'review' as const, label: '复习', icon: Sparkles, hint: 'FSRS 调度' },
-  { id: 'backup' as const, label: '备份', icon: ArchiveRestore, hint: '本地安全' },
-]
-
-const viewMeta: Record<View, { title: string; eyebrow: string }> = {
-  library: { title: '本地资料库', eyebrow: 'LIBRARY' },
-  mindmap: { title: '知识脑图', eyebrow: 'MINDMAP' },
-  review: { title: '主动复习', eyebrow: 'FSRS REVIEW' },
-  backup: { title: '数据安全', eyebrow: 'BACKUP' },
-}
-
 function App() {
   const [view, setView] = useState<View>('library')
   const [activeDocument, setActiveDocument] = useState<Document | null>(null)
   const [status, setStatus] = useState<BootstrapStatus | null>(null)
   const [fatalError, setFatalError] = useState('')
+  const [showMindmap, setShowMindmap] = useState(true)
+  const [searchToken, setSearchToken] = useState(0)
   const loadCards = useCardStore((state) => state.loadCards)
   const cardsById = useCardStore((state) => state.cardsById)
   const desktop = isTauriRuntime()
@@ -74,7 +58,6 @@ function App() {
   useEffect(() => {
     void refreshStatus()
   }, [refreshStatus])
-
 
   useEffect(() => {
     if (!desktop) return
@@ -96,6 +79,12 @@ function App() {
     setView(next)
   }
 
+  function openSearch() {
+    setActiveDocument(null)
+    setView('library')
+    setSearchToken((token) => token + 1)
+  }
+
   async function handlePageCount(count: number) {
     if (!activeDocument || activeDocument.page_count === count) return
     try {
@@ -107,98 +96,107 @@ function App() {
   }
 
   const cardCount = Object.keys(cardsById).length
-  return (
-    <div className={`app-shell ${activeDocument ? 'is-immersive' : ''}`}>
-      <aside className="app-sidebar">
-        <button type="button" className="app-brand" onClick={() => goTo('library')} aria-label="返回资料库">
-          <span className="app-brand-mark">P</span>
-          <span className="app-brand-text"><strong>PDFNote</strong><small>LOCAL STUDY</small></span>
-        </button>
+  const documentOpen = activeDocument !== null
+  const segments = [
+    {
+      key: 'library' as const,
+      icon: BookOpen,
+      label: '资料库',
+      hint: `${status?.document_count ?? 0} 份文档`,
+      active: !documentOpen && view === 'library',
+      onClick: () => goTo('library'),
+    },
+    {
+      key: 'review' as const,
+      icon: Sparkles,
+      label: '复习',
+      hint: `${status?.card_count ?? cardCount} 张卡片`,
+      active: !documentOpen && view === 'review',
+      onClick: () => goTo('review'),
+    },
+    {
+      key: 'document' as const,
+      icon: FileText,
+      label: activeDocument?.title ?? '未打开文档',
+      hint: activeDocument ? `${activeDocument.page_count || '—'} 页 · 本地副本` : '从资料库选择 PDF',
+      active: documentOpen,
+      onClick: () => {
+        if (activeDocument) {
+          setShowMindmap(true)
+        } else {
+          goTo('library')
+        }
+      },
+    },
+    {
+      key: 'mindmap' as const,
+      icon: Network,
+      label: '脑图',
+      hint: documentOpen ? (showMindmap ? '已展开' : '已收起') : `${cardCount} 个节点`,
+      active: documentOpen ? showMindmap : view === 'mindmap',
+      onClick: () => {
+        if (documentOpen) setShowMindmap((value) => !value)
+        else goTo('mindmap')
+      },
+    },
+  ]
 
-        <nav className="app-nav" aria-label="主要模块">
-          <p className="app-nav-label">学习空间</p>
-          {navigation.slice(0, 3).map((item) => {
-            const Icon = item.icon
-            const active = !activeDocument && view === item.id
+  return (
+    <div className="app-shell">
+      <header className="app-top">
+        <div className="app-segments" role="tablist" aria-label="工作区切换">
+          {segments.map((segment) => {
+            const Icon = segment.icon
             return (
               <button
                 type="button"
-                key={item.id}
-                className={`app-nav-item ${active ? 'is-active' : ''}`}
-                onClick={() => goTo(item.id)}
-                aria-current={active ? 'page' : undefined}
+                key={segment.key}
+                role="tab"
+                aria-selected={segment.active}
+                className={`app-segment${segment.active ? ' is-active' : ''}${segment.key === 'document' ? ' is-document' : ''}`}
+                onClick={segment.onClick}
+                title={`${segment.label} · ${segment.hint}`}
               >
                 <Icon size={17} strokeWidth={1.7} />
-                <span><strong>{item.label}</strong><small>{item.hint}</small></span>
-                {item.id === 'library' && <i>{status?.document_count ?? 0}</i>}
-                {item.id === 'mindmap' && <i>{cardCount}</i>}
+                <span>
+                  <strong>{segment.label}</strong>
+                  <small>{segment.hint}</small>
+                </span>
               </button>
             )
           })}
-          <p className="app-nav-label is-secondary">数据与交付</p>
-          <button
-            type="button"
-            className={`app-nav-item ${!activeDocument && view === 'backup' ? 'is-active' : ''}`}
-            onClick={() => goTo('backup')}
-          >
-            <ArchiveRestore size={17} strokeWidth={1.7} />
-            <span><strong>备份与恢复</strong><small>导出 · 校验 · 迁移</small></span>
+          <span className="app-segment-divider" aria-hidden="true" />
+          <button type="button" className="app-segment-action" onClick={openSearch} title="搜索文档" aria-label="搜索文档">
+            <Search size={17} strokeWidth={1.8} />
           </button>
-        </nav>
-
-        <div className="app-sidebar-note">
-          <ShieldCheck size={15} />
-          <div><strong>完全本地</strong><small>无账号 · 无云端 · 离线可用</small></div>
+          <button type="button" className="app-segment-action" onClick={() => goTo('backup')} title="备份与恢复" aria-label="备份与恢复">
+            <ShieldCheck size={17} strokeWidth={1.8} />
+          </button>
         </div>
-      </aside>
+      </header>
 
       <main className="app-main">
-        {activeDocument ? (
-          <div className="app-immersive">
-            <header className="app-pdf-bar">
-              <button type="button" className="app-back" onClick={() => { setActiveDocument(null); void refreshStatus() }}>
-                <ArrowLeft size={15} /> 资料库
-              </button>
-              <div className="app-pdf-title">
-                <small>PDF · {activeDocument.page_count || '—'} 页</small>
-                <strong>{activeDocument.title}</strong>
-              </div>
-              <span className="app-pdf-badge"><CloudOff size={12} /> 本地副本</span>
-            </header>
-            <div className="app-pdf-canvas">
-              <Suspense fallback={<ViewLoading label="正在加载 PDF 引擎…" />}>
-                <PdfWorkspace
-                  document={activeDocument}
-                  onPageCount={(count) => void handlePageCount(count)}
-                  onCardsChanged={() => void refreshStatus()}
-                />
-              </Suspense>
-            </div>
-          </div>
+        {documentOpen ? (
+          <StudyWorkspace
+            document={activeDocument}
+            showMindmap={showMindmap}
+            onPageCount={(count) => void handlePageCount(count)}
+            onCardsChanged={() => void refreshStatus()}
+          />
         ) : (
           <>
-            <header className="app-topbar">
-              <div className="app-breadcrumb">
-                <span>PDFNote</span><b>/</b><strong>{viewMeta[view].title}</strong>
-              </div>
-              <div className="app-topbar-right">
-                <span className={`app-runtime ${desktop ? 'is-online' : ''}`}>
-                  <i /> {desktop ? 'SQLite 已连接' : '浏览器预览'}
-                </span>
-                <span className="app-schema">SCHEMA v{status?.schema_version ?? 1}</span>
-              </div>
-            </header>
             {fatalError && (
               <div className="app-fatal" role="alert">
                 本地数据访问异常：{fatalError}
                 <button type="button" onClick={() => { setFatalError(''); void refreshStatus() }}>重试</button>
               </div>
             )}
-            <div className="app-view">
+            <div className={`app-view${view === 'library' ? ' is-library' : ''}${view === 'mindmap' ? ' is-full' : ''}`}>
               {view === 'library' && (
                 <LibraryWorkspace
                   onOpenDocument={(document) => { setFatalError(''); setActiveDocument(document) }}
                   onChanged={() => void refreshStatus()}
+                  focusSearchToken={searchToken}
                 />
               )}
               {view === 'mindmap' && (
@@ -220,24 +218,6 @@ function App() {
           </>
         )}
       </main>
-
-      <nav className="app-mobile-nav" aria-label="移动端导航">
-        {navigation.map((item) => {
-          const Icon = item.icon
-          const active = !activeDocument && view === item.id
-          return (
-            <button type="button" key={item.id} className={active ? 'is-active' : ''} onClick={() => goTo(item.id)}>
-              <Icon size={18} /><span>{item.label}</span>
-            </button>
-          )
-        })}
-      </nav>
-
-      {!desktop && (
-        <button type="button" className="app-floating-hint" onClick={() => goTo('library')}>
-          <Plus size={14} /> 桌面模式下可导入 PDF
-        </button>
-      )}
     </div>
   )
 }

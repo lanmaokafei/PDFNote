@@ -22,6 +22,19 @@ import {
   updateAnnotationGeometry,
   updateDocumentProgress,
 } from '../../services/pdfnote'
+import {
+  Highlighter,
+  Link2,
+  Merge,
+  MessageSquare,
+  MoreHorizontal,
+  MousePointer2,
+  PenLine,
+  Scissors,
+  Square,
+  Tag,
+  Trash2,
+} from 'lucide-react'
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
 import { PdfPage, type PageSize, type PdfTool } from './PdfPage'
@@ -40,6 +53,8 @@ export interface PdfWorkspaceProps {
   document: PdfDocument
   onPageCount: (count: number) => void
   onCardsChanged: () => void
+  /** 嵌入分栏工作区：隐藏独立页头与标注检查器，改用底部悬浮工具坞。 */
+  embedded?: boolean
 }
 
 function errorMessage(reason: unknown): string {
@@ -54,7 +69,7 @@ function updateSet(previous: Set<number>, page: number, included: boolean): Set<
   return next
 }
 
-export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorkspaceProps) {
+export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded = false }: PdfWorkspaceProps) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [pageCount, setPageCount] = useState(document.page_count)
   const [loading, setLoading] = useState(true)
@@ -84,6 +99,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
   const [ratedCardIds, setRatedCardIds] = useState<Set<string>>(new Set())
   const [ratingBusy, setRatingBusy] = useState(false)
   const [reviewedCards, setReviewedCards] = useState<Record<string, Card>>({})
+  const [dockMenuOpen, setDockMenuOpen] = useState(false)
 
   const cardsById = useCardStore((state) => state.cardsById)
   const createCard = useCardStore((state) => state.createCard)
@@ -446,19 +462,25 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
     if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current)
   }, [])
 
+  const goToPage = (page: number) => {
+    const target = Math.min(Math.max(Math.round(page), 1), pageCount || 1)
+    const element = pageElementsRef.current.get(target)
+    const root = scrollRef.current
+    if (!element || !root) return
+    setOperationError('')
+    userNavigatedRef.current = true
+    setCurrentPage(target)
+    setPageInput(String(target))
+    root.scrollTo({ top: Math.max(0, element.offsetTop - 20), behavior: 'smooth' })
+  }
+
   const jumpToPage = () => {
     const page = Number(pageInput)
     if (!Number.isInteger(page) || page < 1 || page > pageCount) {
       setOperationError(`请输入 1 至 ${pageCount} 的页码。`)
       return
     }
-    const element = pageElementsRef.current.get(page)
-    const root = scrollRef.current
-    if (!element || !root) return
-    setOperationError('')
-    userNavigatedRef.current = true
-    setCurrentPage(page)
-    root.scrollTo({ top: Math.max(0, element.offsetTop - 20), behavior: 'smooth' })
+    goToPage(page)
   }
 
   const handleCreate = useCallback(async (
@@ -642,7 +664,8 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
   const loadingMessage = document.file_status === 'importing' ? '文档正在导入，请稍候…' : largeDocument ? '正在按需读取大型 PDF…' : '正在打开 PDF 文档…'
 
   return (
-    <div className="pdf-workspace">
+    <div className={`pdf-workspace${embedded ? ' is-embedded' : ''}`}>
+      {!embedded && (
       <header className="pdf-toolbar">
         <div className="pdf-document-heading">
           <span className="pdf-document-icon">PDF</span>
@@ -683,9 +706,10 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
           {recallMode ? '退出回忆' : '文档回忆'}
         </button>
       </header>
+      )}
 
       {(operationError || notice || creating || ocrMessage) && (
-        <div className={`pdf-operation-bar ${operationError ? 'is-error' : ''}`} role={operationError ? 'alert' : 'status'}>
+        <div className={`pdf-operation-bar${embedded ? ' is-floating' : ''} ${operationError ? 'is-error' : ''}`} role={operationError ? 'alert' : 'status'}>
           <span>{operationError || ocrMessage || (creating ? '正在创建卡片与标注…' : notice)}</span>
           {(operationError || notice) && <button type="button" onClick={() => { setOperationError(''); setNotice('') }} aria-label="关闭提示">×</button>}
         </div>
@@ -744,6 +768,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
           )}
         </div>
 
+        {!embedded && (
         <aside className="pdf-inspector">
           <div className="pdf-inspector-heading">
             <div>
@@ -796,7 +821,75 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged }: PdfWorks
             <p>{recallMode ? '同一会话中，每张卡片仅记录一次评分。' : '拖动时仅更新内存位置，松开鼠标后才写入本地数据库。'}</p>
           </div>
         </aside>
+        )}
       </div>
+
+      {embedded && (
+        <>
+          {recallMode && selectedAnnotation && revealedCardIds.has(selectedAnnotation.card_id) && (
+            <div className="pdf-recall-float" role="group" aria-label="文档回忆评分">
+              <span>{selectedCard ? (ratedCardIds.has(selectedCard.id) ? '本会话已评分' : '回忆程度如何？') : '卡片尚未载入'}</span>
+              <div>
+                {(['重来', '困难', '良好', '简单'] as const).map((label, index) => (
+                  <button
+                    type="button"
+                    key={label}
+                    onClick={() => void handleRating((index + 1) as Rating)}
+                    disabled={ratingBusy || !selectedCard || ratedCardIds.has(selectedCard.id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {pageCount > 0 && (
+            <div className="pdf-page-pill">
+              <button type="button" onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1} aria-label="上一页">‹</button>
+              <span>第 {currentPage} / {pageCount} 页</span>
+              <button type="button" onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= pageCount} aria-label="下一页">›</button>
+            </div>
+          )}
+
+          <div className="pdf-dock" role="toolbar" aria-label="标注与阅读工具">
+            <button type="button" disabled title="剪切（暂未支持）"><Scissors size={17} /><span>剪切</span></button>
+            <button type="button" className={tool === 'select' ? 'is-active' : ''} onClick={() => setTool('select')} disabled={recallMode} aria-pressed={tool === 'select'} title="套索选择"><MousePointer2 size={17} /><span>套索</span></button>
+            <button type="button" className={tool === 'highlight' ? 'is-active' : ''} onClick={() => setTool('highlight')} disabled={recallMode} aria-pressed={tool === 'highlight'} title="高亮颜色"><Highlighter size={17} /><span>颜色</span></button>
+            <button type="button" disabled title="标签（暂未支持）"><Tag size={17} /><span>标签</span></button>
+            <button type="button" disabled title="链接（请直接在脑图中连线）"><Link2 size={17} /><span>链接</span></button>
+            <button type="button" className={tool === 'rectangle' ? 'is-active' : ''} onClick={() => setTool('rectangle')} disabled={recallMode} aria-pressed={tool === 'rectangle'} title="矩形框选"><Square size={17} /><span>框架</span></button>
+            <button type="button" disabled title="墨迹（暂未支持）"><PenLine size={17} /><span>墨迹</span></button>
+            <button type="button" disabled title="合并（暂未支持）"><Merge size={17} /><span>合并</span></button>
+            <button type="button" className={recallMode ? 'is-active' : ''} onClick={toggleRecall} disabled={!pdf} aria-pressed={recallMode} title="文档遮挡回忆"><MessageSquare size={17} /><span>{recallMode ? '退出' : '对话'}</span></button>
+            <button type="button" onClick={() => { if (selectedAnnotation) setDeleteTarget(selectedAnnotation) }} disabled={!selectedAnnotation} title="删除选中的标注"><Trash2 size={17} /><span>删除</span></button>
+            <button type="button" className={dockMenuOpen ? 'is-active' : ''} onClick={() => setDockMenuOpen((open) => !open)} aria-expanded={dockMenuOpen} title="更多：缩放与跳页"><MoreHorizontal size={17} /><span>更多</span></button>
+          </div>
+
+          {dockMenuOpen && (
+            <div className="pdf-dock-menu" role="dialog" aria-label="缩放与跳页">
+              <div className="pdf-dock-menu-row">
+                <span>跳转</span>
+                <input
+                  value={pageInput}
+                  onChange={(event) => setPageInput(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Enter') jumpToPage() }}
+                  inputMode="numeric"
+                  aria-label="跳转页码"
+                />
+                <button type="button" onClick={jumpToPage} disabled={!pdf || pageCount === 0}>前往</button>
+              </div>
+              <div className="pdf-dock-menu-row">
+                <span>缩放</span>
+                <button type="button" onClick={() => zoom(-0.1)} disabled={scale <= MIN_SCALE}>−</button>
+                <button type="button" className="pdf-dock-scale" onClick={() => setScale(1)}>{Math.round(scale * 100)}%</button>
+                <button type="button" onClick={() => zoom(0.1)} disabled={scale >= MAX_SCALE}>+</button>
+              </div>
+              <button type="button" className="pdf-dock-menu-wide" onClick={() => { setScale(1); setDockMenuOpen(false) }}>恢复 100%</button>
+            </div>
+          )}
+        </>
+      )}
 
       {deleteTarget && (
         <div className="pdf-modal-backdrop" role="presentation" onMouseDown={(event) => {

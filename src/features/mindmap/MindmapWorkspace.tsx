@@ -50,6 +50,8 @@ function titleOf(card: Card | undefined): string {
 
 interface MindmapWorkspaceProps {
   onCardsChanged: () => void
+  /** 嵌入分栏工作区：隐藏页头与完整工具栏，改用画布内悬浮操作。 */
+  compact?: boolean
 }
 
 interface ConfirmationState {
@@ -57,7 +59,7 @@ interface ConfirmationState {
   id: string
 }
 
-function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
+function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProps) {
   const cardsById = useCardStore((state) => state.cardsById)
   const loadCards = useCardStore((state) => state.loadCards)
   const createCardInStore = useCardStore((state) => state.createCard)
@@ -172,6 +174,27 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  // 分栏模式下新建的卡片不会重新挂载脑图，这里为缺少坐标的卡片补一次树形布局。
+  useEffect(() => {
+    if (!hasLoaded) return
+    const missing = cards.filter((card) => !positions[card.id])
+    if (!missing.length) return
+    const generated = buildTreeLayout(cards)
+    const fallback = { x: 80, y: 80 }
+    setPositions((current) => {
+      const next = { ...current }
+      missing.forEach((card) => {
+        next[card.id] = generated[card.id] ?? fallback
+      })
+      return next
+    })
+    void saveMindmapLayout(missing.map((card) => ({
+      card_id: card.id,
+      canvas_id: CANVAS_ID,
+      ...(generated[card.id] ?? fallback),
+    }))).catch(() => undefined)
+  }, [cards, hasLoaded, positions])
 
   const syncCards = useCallback(async () => {
     await loadCards()
@@ -501,7 +524,8 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
       onRemove: (id) => setConfirmation({ kind: 'remove', id }),
       onDelete: (id) => setConfirmation({ kind: 'delete', id }),
     }}>
-    <section className="mindmap-workspace" aria-label="知识脑图工作区">
+    <section className={`mindmap-workspace${compact ? ' is-embedded' : ''}`} aria-label="知识脑图工作区">
+      {!compact && (
       <header className="mindmap-header">
         <div>
           <span className="mindmap-eyebrow">CARD-CENTRIC KNOWLEDGE MAP</span>
@@ -513,7 +537,9 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
           <span>脑图卡片</span>
         </div>
       </header>
+      )}
 
+      {!compact && (
       <div className="mindmap-toolbar">
         <div className="mindmap-mode-switch" aria-label="工作区模式">
           <button type="button" className={!recallActive ? 'active' : ''} onClick={stopRecall} disabled={!recallActive}>结构编辑</button>
@@ -526,8 +552,25 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
           <button type="button" className="primary" onClick={() => setEditor('new')} disabled={busy}>＋ 新建卡片</button>
         </div>
       </div>
+      )}
 
-      {recallActive && (
+      {compact && (
+        <div className="mindmap-float-actions">
+          <button type="button" onClick={() => void refresh()} disabled={loading || busy}>刷新</button>
+          <button type="button" onClick={autoArrange} disabled={busy || !cards.length}>整理</button>
+          <button type="button" onClick={() => setEditor('new')} disabled={busy}>新建</button>
+          <button
+            type="button"
+            className={recallActive ? 'is-active' : ''}
+            onClick={recallActive ? stopRecall : startRecall}
+            disabled={!recallActive && !cards.length}
+          >
+            {recallActive ? '结束回忆' : '主动回忆'}
+          </button>
+        </div>
+      )}
+
+      {!compact && recallActive && (
         <div className="mindmap-recall-toolbar">
           <div className="mindmap-recall-status">
             <span className="mindmap-live-dot" />
@@ -543,6 +586,13 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
           </label>
           <button type="button" onClick={revealNext} disabled={busy}>揭示下一项</button>
           <button type="button" onClick={stopRecall}>结束会话</button>
+        </div>
+      )}
+
+      {compact && recallActive && (
+        <div className="mindmap-float-recall">
+          <span>{ratedIds.size} / {cards.length} 已评分</span>
+          <button type="button" onClick={revealNext} disabled={busy}>揭示下一项</button>
         </div>
       )}
 
@@ -565,8 +615,9 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
             onNodeDragStop={handleNodeDragStop}
             onConnect={handleConnect}
             onSelectionChange={handleSelectionChange}
-            fitView
+            fitView={!compact}
             fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
+            defaultViewport={compact ? { x: 30, y: 96, zoom: 0.9 } : undefined}
             minZoom={0.15}
             maxZoom={1.8}
             nodesDraggable={!busy}
@@ -578,14 +629,16 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
           >
             <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#d7ded9" />
             <Controls position="bottom-left" showInteractive={false} />
-            <MiniMap
-              position="bottom-right"
-              pannable
-              zoomable
-              nodeColor="#c8d5cc"
-              nodeStrokeColor="#8da092"
-              maskColor="rgba(244, 247, 244, .78)"
-            />
+            {!compact && (
+              <MiniMap
+                position="bottom-right"
+                pannable
+                zoomable
+                nodeColor="#c8d5cc"
+                nodeStrokeColor="#8da092"
+                maskColor="rgba(244, 247, 244, .78)"
+              />
+            )}
           </ReactFlow>
         )}
 
@@ -609,11 +662,13 @@ function MindmapCanvas({ onCardsChanged }: MindmapWorkspaceProps) {
         )}
       </div>
 
+      {!compact && (
       <footer className="mindmap-footer">
         {recallActive
           ? '默认仅显示当前层级。显示答案后可评分；每张卡片在本会话最多评分一次。'
           : '连线或在节点重叠处释放可修改父级；拖动空白处框选，Shift / ⌘ / Ctrl 可多选。'}
       </footer>
+      )}
 
     </section>
     </MindmapNodeContext.Provider>

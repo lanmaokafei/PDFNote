@@ -7,6 +7,7 @@
 ## 已实现
 
 - **本地资料库**：PDF 选择导入、SHA-256 去重、应用数据目录副本、断链检测、哈希一致性校验、重新定位、删除时保留或级联删除卡片。
+- **同屏工作台**：左 PDF、右脑图，顶部悬浮分段栏，底部工具坞；分栏可拖动，脑图可一键收起。
 - **PDF 工作区**：PDF.js 连续滚动与页级虚拟化、256KB Range 分块读取、缩放、页码跳转、自动回到上次阅读页、高亮/矩形框选建卡、文字层提取、离线中文 OCR、标注拖拽、标注删除语义选择、文档遮挡主动回忆。
 - **中文 OCR**：macOS Vision / Windows 原生 OCR 优先，内置 Tesseract chi_sim+eng 离线兜底；扫描页无文字层时自动识别选区并建卡。
 - **知识脑图**：React Flow 自定义卡片节点、折叠/展开、拖拽改父级、连线改父级、防环、多选、布局持久化、独立建卡、卡片编辑、脑图逐级主动回忆。
@@ -78,13 +79,15 @@ scripts/ui-smoke.mjs     Playwright 界面冒烟脚本（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.3.0_aarch64.dmg
-release/PDFNote_0.3.0_aarch64.dmg.sha256
+release/PDFNote_0.4.0_aarch64.dmg
+release/PDFNote_0.4.0_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
 
 ## 重要修复
+
+- 0.4.0 重构界面为“左文右图 + 悬浮工具栏”的工作台布局，详见 [工作台布局](docs/workspace-layout.md)。
 
 - 新增“继续阅读”：每份 PDF 记录上次停留页，重新打开自动定位；旧版备份仍可导入。
 
@@ -100,6 +103,7 @@ release/PDFNote_0.3.0_aarch64.dmg.sha256
 
 - [离线中文 OCR](docs/ocr.md)
 - [脑图 React #185 复盘](docs/react-185-regression.md)
+- [学习工作台布局](docs/workspace-layout.md)
 
 - [架构基线](docs/architecture.md)
 - [实施与验收计划](docs/implementation-plan.md)

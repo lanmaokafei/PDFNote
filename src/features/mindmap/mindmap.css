@@ -1,6 +1,8 @@
 .mindmap-workspace {
-  height: calc(100vh - 64px);
-  min-height: 560px;
+  position: relative;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   color: #2b352d;
@@ -175,7 +177,6 @@
 .react-flow__minimap { border: 1px solid #e1e6db; border-radius: 7px; overflow: hidden; background: #f9faf6 !important; }
 
 @media (max-width: 800px) {
-  .mindmap-workspace { height: calc(100vh - 114px); }
   .mindmap-header { padding: 20px 18px 12px; }
   .mindmap-toolbar { align-items: flex-start; flex-direction: column; padding: 0 18px 11px; }
   .mindmap-toolbar-actions { width: 100%; flex-wrap: wrap; }
@@ -184,3 +185,95 @@
   .mindmap-footer { padding: 7px 18px 9px; }
   .mindmap-header-stat { display: none; }
 }
+
+
+/* ---------- 嵌入分栏工作区 ---------- */
+
+.mindmap-workspace.is-embedded {
+  background: #f4f4f2;
+}
+
+.mindmap-workspace.is-embedded .mindmap-node { width: 228px; }
+
+.mindmap-workspace.is-embedded .mindmap-canvas {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: #f4f4f2;
+}
+
+.mindmap-workspace.is-embedded .mindmap-error,
+.mindmap-workspace.is-embedded .mindmap-notice {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  z-index: 24;
+  max-width: min(420px, calc(100% - 32px));
+  margin: 0;
+  transform: translateX(-50%);
+  box-shadow: 0 10px 24px rgba(24, 30, 24, .10);
+}
+
+.mindmap-float-actions {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 23;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid rgba(26, 32, 26, .06);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .93);
+  box-shadow: 0 8px 20px rgba(24, 30, 24, .08);
+  backdrop-filter: blur(10px);
+}
+
+.mindmap-float-actions button {
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  color: #5f685d;
+  background: transparent;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.mindmap-float-actions button:hover:not(:disabled) { color: #26332a; background: #f0f2ec; }
+.mindmap-float-actions button.is-active { color: #1f3a28; background: #e6eee4; }
+.mindmap-float-actions button:disabled { opacity: .4; cursor: not-allowed; }
+
+.mindmap-float-recall {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  z-index: 23;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid #dbe6d2;
+  border-radius: 10px;
+  color: #566b50;
+  background: rgba(237, 243, 231, .96);
+  box-shadow: 0 8px 20px rgba(24, 30, 24, .08);
+  font-size: 9px;
+  backdrop-filter: blur(10px);
+}
+
+.mindmap-float-recall button {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid #cfdcc2;
+  border-radius: 6px;
+  color: #4f6647;
+  background: #fbfdf7;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.mindmap-float-recall button:hover { background: #eef4e6; }
+.mindmap-float-recall button:disabled { opacity: .45; cursor: default; }

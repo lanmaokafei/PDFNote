@@ -766,3 +766,218 @@
   .pdf-pages { padding-inline: 14px; }
   .pdf-recall-toggle { margin-left: auto; }
 }
+
+/* ---------- 嵌入分栏工作区：画布 + 悬浮工具 ---------- */
+
+.pdf-workspace.is-embedded {
+  position: relative;
+  min-height: 0;
+  height: 100%;
+  background: #ececeb;
+}
+
+.pdf-workspace.is-embedded .pdf-workspace-body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pdf-workspace.is-embedded .pdf-scroll {
+  background: #ececeb;
+}
+
+.pdf-workspace.is-embedded .pdf-pages {
+  padding: 20px 20px 132px;
+}
+
+.pdf-workspace.is-embedded .pdf-page {
+  margin-bottom: 26px;
+  box-shadow: 0 1px 3px rgba(24, 30, 24, .13), 0 0 0 1px rgba(24, 30, 24, .045);
+}
+
+.pdf-operation-bar.is-floating {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 32;
+  width: auto;
+  max-width: min(560px, calc(100% - 40px));
+  margin: 0;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  box-shadow: 0 10px 26px rgba(24, 30, 24, .10);
+}
+
+.pdf-page-pill {
+  position: absolute;
+  left: 50%;
+  bottom: 82px;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid rgba(26, 32, 26, .07);
+  border-radius: 999px;
+  color: #4d544e;
+  background: rgba(255, 255, 255, .95);
+  box-shadow: 0 8px 22px rgba(24, 30, 24, .12);
+  transform: translateX(-50%);
+  font-size: 10px;
+  backdrop-filter: blur(10px);
+}
+
+.pdf-page-pill button {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #5d635d;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pdf-page-pill button:hover:not(:disabled) { background: #eef0ec; }
+.pdf-page-pill button:disabled { opacity: .3; cursor: default; }
+
+.pdf-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  z-index: 45;
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 1px solid rgba(26, 32, 26, .07);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .95);
+  box-shadow: 0 16px 38px rgba(22, 28, 22, .16), 0 1px 2px rgba(22, 28, 22, .05);
+  transform: translateX(-50%);
+  backdrop-filter: blur(16px);
+}
+
+.pdf-dock button {
+  width: 54px;
+  height: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 10px;
+  color: #5f665f;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pdf-dock button span { font-size: 8.5px; letter-spacing: .2px; }
+.pdf-dock button:hover:not(:disabled) { color: #232b23; background: #f2f3f0; }
+.pdf-dock button.is-active { color: #1f3828; background: #e8efe8; }
+.pdf-dock button:disabled { opacity: .34; cursor: not-allowed; }
+
+.pdf-dock-menu {
+  position: fixed;
+  right: 22px;
+  bottom: 78px;
+  z-index: 46;
+  width: 210px;
+  padding: 10px;
+  border: 1px solid rgba(26, 32, 26, .08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 18px 38px rgba(22, 28, 22, .16);
+  backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pdf-dock-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6e756e;
+  font-size: 9px;
+}
+
+.pdf-dock-menu-row > span { flex: 0 0 28px; }
+
+.pdf-dock-menu-row input {
+  width: 52px;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid #e0e3de;
+  border-radius: 6px;
+  color: #333a34;
+  background: #fafbf8;
+  font-size: 10px;
+}
+
+.pdf-dock-menu-row button {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid #e0e3de;
+  border-radius: 6px;
+  color: #565d56;
+  background: #fbfcf9;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.pdf-dock-menu-row button:hover { background: #eef1ea; }
+.pdf-dock-menu-row .pdf-dock-scale { min-width: 46px; }
+
+.pdf-dock-menu-wide {
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  color: #45524a;
+  background: #eef1ea;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.pdf-recall-float {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(26, 32, 26, .08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .97);
+  box-shadow: 0 14px 30px rgba(22, 28, 22, .14);
+  color: #596159;
+  font-size: 10px;
+}
+
+.pdf-recall-float > div { display: flex; gap: 4px; }
+
+.pdf-recall-float button {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid #e0e3de;
+  border-radius: 6px;
+  color: #4f5850;
+  background: #fbfcf9;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.pdf-recall-float button:hover:not(:disabled) { background: #eaf0e8; }
+.pdf-recall-float button:disabled { opacity: .42; cursor: not-allowed; }
+
+@media (max-width: 900px) {
+  .pdf-dock { gap: 0; padding: 5px; max-width: calc(100vw - 16px); overflow-x: auto; }
+  .pdf-dock button { width: 46px; height: 44px; }
+  .pdf-page-pill { bottom: 72px; }
+  .pdf-dock-menu { right: 12px; bottom: 70px; }
+}

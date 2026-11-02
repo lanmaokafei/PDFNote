@@ -1,8 +1,7 @@
-import { createWorker, OEM, PSM, type Worker } from 'tesseract.js'
 import { isTauriRuntime, recognizeNativeImage } from '../../services/pdfnote'
 
 /**
- * 判断 OCR 结果是否像数学公式。macOS Vision / Tesseract 这类纯文字引擎
+ * 判断 OCR 结果是否像数学公式。Apple Vision 是纯文字 OCR 引擎，
  * 无法识别公式结构，输出通常是"字母数字混杂 + 数学符号 + 中文乱码"，
  * 直接作为摘录会污染卡片。命中强特征即可判定为疑似公式。
  */
@@ -30,9 +29,6 @@ export function looksLikeMathFormula(text: string): boolean {
   return score >= 3
 }
 
-let workerPromise: Promise<Worker> | null = null
-let progressListener: ((progress: number, status: string) => void) | null = null
-
 function normalizeChineseText(text: string): string {
   return text
     .replace(/\r/g, '')
@@ -43,73 +39,16 @@ function normalizeChineseText(text: string): string {
     .trim()
 }
 
-async function getWorker(): Promise<Worker> {
-  if (!workerPromise) {
-    workerPromise = createWorker(['chi_sim', 'eng'], OEM.LSTM_ONLY, {
-      workerPath: '/ocr/worker.min.js',
-      corePath: '/ocr/core',
-      langPath: '/ocr/lang',
-      cacheMethod: 'none',
-      workerBlobURL: false,
-      gzip: true,
-      logger: (message) => {
-        progressListener?.(Math.round(message.progress * 100), message.status)
-      },
-    })
-      .then(async (worker) => {
-        await worker.setParameters({
-          tessedit_pageseg_mode: PSM.AUTO,
-          preserve_interword_spaces: '1',
-          user_defined_dpi: '300',
-        })
-        return worker
-      })
-      .catch((error) => {
-        workerPromise = null
-        throw error
-      })
-  }
-  return workerPromise
-}
-
 /**
- * Recognize a cropped region. The first call loads the bundled Chinese and
- * English language data locally; no network access is performed.
+ * 用 Apple Vision（macOS 原生）识别框选区域。
+ *
+ * PDFNote 仅面向 macOS 分发，不再打包 Tesseract 离线模型。原生引擎失败时
+ * 直接抛错，由调用方保留选区图像并提示用户，而不是静默降级到准确率更低的
+ * 引擎或把乱码写进卡片。
  */
-export async function recognizeChinese(
-  image: string,
-  onProgress?: (progress: number, status: string) => void,
-): Promise<string> {
-  progressListener = onProgress ?? null
-  try {
-    const worker = await getWorker()
-    const result = await worker.recognize(image)
-    return normalizeChineseText(result.data.text ?? '')
-  } finally {
-    progressListener = null
+export async function recognizeText(image: string): Promise<string> {
+  if (!isTauriRuntime()) {
+    throw new Error('OCR 仅可在 PDFNote 桌面应用（macOS）中使用')
   }
-}
-
-/**
- * Prefer the OS OCR engine (macOS Vision gives much better Chinese accuracy),
- * and fall back to the bundled Tesseract model on other platforms or on error.
- */
-export async function recognizeText(
-  image: string,
-  onProgress?: (progress: number, status: string) => void,
-): Promise<string> {
-  if (isTauriRuntime()) {
-    try {
-      // An empty native result means the crop contains no text; do not spend
-      // seconds loading the fallback model unless the native engine failed.
-      return normalizeChineseText(await recognizeNativeImage(image))
-    } catch {
-      // Native OCR unavailable: continue with the offline Tesseract fallback.
-    }
-  }
-  return recognizeChinese(image, onProgress)
-}
-
-export function isOcrReady(): boolean {
-  return workerPromise !== null
+  return normalizeChineseText(await recognizeNativeImage(image))
 }

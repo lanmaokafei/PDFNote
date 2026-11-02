@@ -64,7 +64,7 @@
 
 ## 4. 交付物
 
-- Windows MSI/NSIS 至少一种；macOS DMG；Linux AppImage（按实际签名与测试条件发布）。
+- macOS DMG（arm64）。应用按用户决定仅在 macOS 运行，不产出 Windows MSI/NSIS 与 Linux AppImage。
 - 数据目录结构、备份格式与 schema 版本兼容说明。
 - 安装/换机/恢复操作指引、已知限制列表、验收记录。
 - 数据库迁移、可复现构建配置和离线 PDF.js 资源清单。
@@ -72,7 +72,7 @@
 ## 5. 当前状态（2026-11-02）
 
 - 阶段 1–5 的源码闭环已落地：数据层、PDF 导入/渲染/标注、三视图联动、脑图、FSRS、文档/脑图回忆、备份恢复。
-- Rust 17 项测试、前端 7 项测试、TypeScript 构建、Oxlint 0 warning 全部通过。
-- Tauri debug `.app` 已成功生成，首次启动建库且 `quick_check=ok`。
-- 阶段 6 进行中：macOS 本地构建已通过；Windows/Linux 构建、签名、公证和完整性能基准仍需对应环境。
+- Rust 26 项测试（含 v4 迁移与旧备份兼容）、前端 13 项测试、TypeScript 构建、Oxlint 0 warning 全部通过；Apple Vision 真机中文识别集成测试通过。
+- Tauri release `.app` / DMG 已生成并通过 `hdiutil verify`；首次启动建库且 `quick_check=ok`。
+- 阶段 6：macOS 交付闭环已完成（0.8.0）。剩余为签名/公证、系统强退恢复演练与性能采样；Windows/Linux 不在交付范围内。
 - 详细逐项证据见 `docs/acceptance.md`。

@@ -16,7 +16,7 @@
   tmp/                 导入与恢复暂存；启动时清理残留
 ```
 
-Windows / Linux 路径由 Tauri 按平台规则解析。数据库和文件均位于应用自己的数据目录内，不需要用户授权任意文件系统访问。
+实际路径由 Tauri 按 macOS 应用数据目录规则解析（本机为 `~/Library/Application Support/com.pdfnote.local/`）。数据库和文件均位于应用自己的数据目录内，不需要用户授权任意文件系统访问。
 
 ## PDF 文件策略
 

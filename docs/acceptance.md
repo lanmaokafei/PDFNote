@@ -7,12 +7,12 @@
 
 | 项目 | 命令 | 结果 |
 | --- | --- | --- |
-| Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml` | 26 passed + 1 ignored（Vision 集成） |
+| Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml` | 26 passed + 1 ignored（Vision 真机集成，已跑通） |
 | 前端单元 | `npm run test` | 13 passed（4 files，含公式检测与大纲导出） |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
-| 原生编译 | `npx tauri build --bundles app` | 通过，0.7.0 生成 57.8 MB release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.7.0 已通过 `hdiutil verify`，约 51 MB，SHA-256 见 `release/*.sha256` |
+| 原生编译 | `npx tauri build --bundles app` | 通过，0.8.0 生成 17.07 MB release PDFNote.app |
+| DMG | 手动 `hdiutil` 打包 | 0.8.0 已通过 `hdiutil verify`，约 8.2 MB，SHA-256 见 `release/*.sha256` |
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=4`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v3 → v4 | `excerpt_image` 列存在，5 张卡片保留，`quick_check=ok` |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
@@ -55,11 +55,11 @@ Rust 测试覆盖：
 | A08 中途退出恢复 | 部分验证 | 每次评分立即提交，无内存待刷队列；未做系统强退演练 |
 | A09 跨机恢复 | 自动化通过 | 新测试库从 zip 恢复 DB、PDF、标注 |
 | A10 损坏包保护 | 自动化通过 | 高 schema 版本包被拒绝，现有数据不变；另有 zip 路径校验 |
-| A11 完全离线 | 设计验证 | PDF.js worker/fonts/cmaps 打入 dist；业务代码无外部请求 |
+| A11 完全离线 | 设计验证 | PDF.js worker/fonts/cmaps 打入 dist；OCR 用系统 Apple Vision，不打包离线模型；业务代码无外部请求 |
 | A12 全新启动 | 自动化 + 运行通过 | 首次启动建库；权限/目录不可写场景仍需人工验证 |
 | 大文件 | 原生 + 浏览器实测 | 526MB / 752 页 PDF 打开不崩溃，仅请求可视页；备份改为 Stored 且后台执行 |
 | 顶部栏固定 | 浏览器布局实测 | body 无滚动，内容区独立滚动，topbar top 始终为 0 |
-| OCR 建卡 | Rust + 浏览器实测 | 标注-only 建卡通过；macOS Vision 中文页约 1.1 秒；Tesseract 离线模型可加载 |
+| OCR 建卡 | Rust 真机 + 浏览器实测 | 标注-only 建卡通过；0.8.0 起为 Apple Vision 单引擎，真机中文图识别出「信息化」；已移除 Tesseract 与 63MB 离线模型 |
 | 脑图稳定性 | Chromium + IPC 模拟 | 进入脑图、选中、拖拽、PDF 建卡后切换均无 React #185 |
 | 继续阅读 | Chromium + IPC 模拟 | 5 页文档记录第 4 页，重开落在第 4 页；滚到第 3 页后返回重开仍为第 3 页 |
 | 分栏工作台 | Chromium + IPC 模拟 | 左 PDF 右脑图、11 个工具槽、拖动分隔条、脑图收起、工具坞建卡均通过 |
@@ -82,8 +82,8 @@ Rust 测试覆盖：
 - 200 页文档滚动/缩放与 500 标注拖拽的性能采样。
 - 真实 PDF 的框选文字提取质量与旋转页面视觉核对。
 - 系统休眠、时钟回拨、跨时区场景。
-- Windows / Linux 原生构建。
-- DMG/MSI/AppImage 安装与未签名提示体验。
+- Windows / Linux 不在交付范围内（用户明确仅 macOS），OCR 依赖 Apple Vision，不做跨平台原生实现。
+- DMG 安装与未签名提示体验。
 - 崩溃注入（强杀进程）后的 WAL 恢复演练。
 
 以上项目未标记为通过，避免把自动化覆盖误当完整验收。

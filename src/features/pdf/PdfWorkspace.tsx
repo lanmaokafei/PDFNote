@@ -576,16 +576,9 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     let cardImage = archiveImage ?? ocrImage
 
     if (!finalExcerpt && ocrImage) {
-      setOcrMessage('正在识别选中区域的中文文字…')
+      setOcrMessage('正在使用 Apple Vision 识别选中区域…')
       try {
-        finalExcerpt = await recognizeText(ocrImage, (progress, status) => {
-          const phase = status.includes('loading language')
-            ? '正在加载中文模型'
-            : status.includes('recognizing')
-              ? '正在识别中文'
-              : '正在准备 OCR'
-          setOcrMessage(`${phase} ${progress}%`)
-        })
+        finalExcerpt = await recognizeText(ocrImage)
         usedOcr = Boolean(finalExcerpt)
       } catch (reason) {
         ocrError = errorMessage(reason)
@@ -633,7 +626,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
       } else if (ocrError) {
         setOperationError(`OCR 识别失败：${ocrError}。卡片已创建，可编辑摘录补充文字。`)
       } else if (finalExcerpt) {
-        setNotice(usedOcr ? '中文 OCR 已完成，卡片与标注已创建。' : '已创建卡片与标注。')
+        setNotice(usedOcr ? 'Apple Vision 识别已完成，卡片与标注已创建。' : '已创建卡片与标注。')
       } else if (cardImage) {
         setNotice('未识别到文字，已创建图像摘录卡片。')
       } else {

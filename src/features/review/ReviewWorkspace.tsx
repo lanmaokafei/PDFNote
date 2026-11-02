@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Copy, Eye, Pencil, RefreshCw } from 'lucide-react'
 import type { Card, Rating, ReviewStats } from '../../domain/card'
+import { ContextMenu } from '../../ui/ContextMenu'
+import { useContextMenu } from '../../ui/contextMenuCore'
 import { getReviewStats, listDueCards, updateCardContent } from '../../services/pdfnote'
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from './scheduler'
@@ -88,6 +91,7 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
   const [completed, setCompleted] = useState(0)
   const [sessionTotal, setSessionTotal] = useState(0)
   const [lastReviewed, setLastReviewed] = useState<{ question: string; due: string; rating: Rating } | null>(null)
+  const { menu, show, close } = useContextMenu()
 
   const mountedRef = useRef(false)
   const loadRequestRef = useRef(0)
@@ -212,6 +216,30 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
     }
   }
 
+  const copyText = (text: string) => {
+    if (navigator.clipboard) void navigator.clipboard.writeText(text).catch(() => undefined)
+  }
+
+  function handleCardContextMenu(event: React.MouseEvent<HTMLElement>) {
+    const selected = window.getSelection()?.toString().trim() ?? ''
+    const card = current
+    show(event, {
+      title: '复习卡片',
+      sections: [
+        { id: 'card', items: [
+          { id: 'reveal', label: revealed ? '隐藏答案' : '显示答案', icon: Eye, disabled: !card || editing || busy, onSelect: () => setRevealed((value) => !value) },
+          { id: 'edit', label: '编辑卡片', icon: Pencil, disabled: !card || busy || editing, onSelect: beginEditing },
+          { id: 'copy-question', label: '复制问题', icon: Copy, disabled: !card?.question.trim(), onSelect: () => copyText(card?.question ?? '') },
+          { id: 'copy-excerpt', label: '复制原文摘录', icon: Copy, disabled: !card?.excerpt.trim(), onSelect: () => copyText(card?.excerpt ?? '') },
+        ] },
+        { id: 'selection', items: [
+          { id: 'copy-selection', label: '复制选中文字', icon: Copy, disabled: !selected, hint: selected ? `${selected.length} 字` : undefined, onSelect: () => copyText(selected) },
+          { id: 'refresh', label: '重新检查到期卡片', icon: RefreshCw, disabled: busy || loading, onSelect: () => void loadWorkspace() },
+        ] },
+      ],
+    })
+  }
+
   const trend = useMemo(() => buildFourteenDayTrend(stats), [stats])
   const maxReviews = Math.max(1, ...trend.map((item) => item.reviews))
   const hasTrend = trend.some((item) => item.reviews > 0)
@@ -264,7 +292,7 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
               <p>正在整理到期卡片与复习统计…</p>
             </div>
           ) : current ? (
-            <article className="review-card">
+            <article className="review-card" onContextMenu={handleCardContextMenu}>
               <div className="review-card-meta">
                 <span>{current.source_ref ? `原文第 ${current.source_ref.page} 页` : '知识卡片'}</span>
                 <span>本次到期 {formatDue(current.due)}</span>
@@ -446,6 +474,7 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
           <p className="review-stats-note">正确率按今日评分记录计算；积压与到期数以本地数据库为准。</p>
         </aside>
       </div>
+      <ContextMenu state={menu} onClose={close} />
     </div>
   )
 }

@@ -44,7 +44,7 @@ import {
 import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
-import { PdfPage, type PageSize, type PdfTool } from './PdfPage'
+import { PdfPage, type PageSize, type PdfContextAction, type PdfTool } from './PdfPage'
 import { looksLikeMathFormula, recognizeText } from './ocr'
 import './PdfWorkspace.css'
 
@@ -564,8 +564,9 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     excerpt: string,
     ocrImage?: string,
     archiveImage?: string,
+    annotationKind?: 'highlight' | 'rectangle',
   ) => {
-    if (creating || recallMode || tool === 'select') return
+    if (creating || recallMode) return
     setCreating(true)
     setOperationError('')
     setNotice('')
@@ -607,7 +608,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
         // 普通文字层摘录不存图，避免数据库被重复截图撑大；公式与 OCR 结果保留原图。
         excerpt_image: finalExcerpt && !isFormula && !usedOcr ? undefined : cardImage,
         annotation: {
-          kind: tool === 'rectangle' ? 'rectangle' : 'highlight',
+          kind: annotationKind ?? (tool === 'rectangle' ? 'rectangle' : 'highlight'),
           geometry: { rects: [rect] },
         },
       })
@@ -761,6 +762,43 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   const largeDocument = document.file_size > 200 * 1024 * 1024
   const loadingMessage = document.file_status === 'importing' ? '文档正在导入，请稍候…' : largeDocument ? '正在按需读取大型 PDF…' : '正在打开 PDF 文档…'
 
+  /** PDF 页右键菜单把工作区级动作上抛，这里统一分发到已有的工具与对话框。 */
+  function handleContextAction(action: PdfContextAction) {
+    switch (action.type) {
+      case 'tool':
+        setTool(action.tool)
+        if (action.tool === 'ink') setInkErase(false)
+        break
+      case 'zoom':
+        zoom(action.delta)
+        break
+      case 'zoom-reset':
+        setScale(1)
+        break
+      case 'page':
+        goToPage(currentPage + action.delta)
+        break
+      case 'recall-toggle':
+        toggleRecall()
+        break
+      case 'tags':
+        setTagTarget(action.cardId)
+        break
+      case 'links':
+        setLinkTarget(action.cardId)
+        break
+      case 'merge':
+        setMergeOpen(true)
+        break
+      case 'delete-annotation':
+        setDeleteTarget(action.annotation)
+        break
+      case 'reveal':
+        handleReveal(action.annotationIds)
+        break
+    }
+  }
+
   return (
     <div className={`pdf-workspace${embedded ? ' is-embedded' : ''}`}>
       {!embedded && (
@@ -868,6 +906,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
                   onCreate={handleCreate}
                   onMove={handleMove}
                   onReveal={handleReveal}
+                  onContextAction={handleContextAction}
                 />
               ))}
             </div>

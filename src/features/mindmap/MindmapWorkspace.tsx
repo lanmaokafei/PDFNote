@@ -15,7 +15,25 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { save as saveDialog } from '@tauri-apps/plugin-dialog'
+import {
+  ChevronRight,
+  Copy,
+  Download,
+  Focus,
+  LayoutGrid,
+  Link2,
+  ListTree,
+  Merge,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Tag,
+  Trash2,
+} from 'lucide-react'
 import type { Card, CardLink, MindmapLayoutInput, Rating } from '../../domain/card'
+import { ContextMenu } from '../../ui/ContextMenu'
+import { useContextMenu, type ContextMenuSection } from '../../ui/contextMenuCore'
 import {
   exportMarkdownFile,
   isTauriRuntime,
@@ -89,6 +107,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   const [tagTarget, setTagTarget] = useState<string | null>(null)
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
+  const { menu, show, close } = useContextMenu()
 
   const [recallActive, setRecallActive] = useState(false)
   const [recallSort, setRecallSort] = useState<MindmapSortMode>('order')
@@ -597,6 +616,105 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     })
   }, [confirmation, deleteCard, editor, removeFromMindmap, runTask, syncCards])
 
+  const copyToClipboard = (text: string) => {
+    if (navigator.clipboard) void navigator.clipboard.writeText(text).catch(() => undefined)
+  }
+
+  /** 节点与大纲行共用一套卡片操作，仅折叠行为与视图项不同。 */
+  const cardMenuSections = (
+    cardId: string,
+    options: { toggleLabel: string; onToggle: () => void; canToggle: boolean; includeWorkspace: boolean },
+  ): ContextMenuSection[] => {
+    const title = titleOf(cardsById[cardId])
+    const sections: ContextMenuSection[] = [
+      { id: 'card', items: [
+        { id: 'edit', label: '编辑卡片', icon: Pencil, disabled: busy, onSelect: () => setEditor(cardId) },
+        { id: 'copy', label: '复制卡片标题', icon: Copy, onSelect: () => copyToClipboard(title) },
+        { id: 'toggle', label: options.toggleLabel, icon: ChevronRight, disabled: !options.canToggle || busy, onSelect: options.onToggle },
+      ] },
+      { id: 'relations', title: '卡片关系', items: [
+        { id: 'tags', label: '编辑标签…', icon: Tag, onSelect: () => setTagTarget(cardId) },
+        { id: 'link', label: '关联其他卡片…', icon: Link2, onSelect: () => setLinkTarget(cardId) },
+        { id: 'merge', label: '合并所选卡片…', icon: Merge, disabled: selectedIds.size < 2 || busy, onSelect: () => setMergeOpen(true) },
+      ] },
+      { id: 'danger', items: [
+        { id: 'remove', label: '从脑图移除', icon: LayoutGrid, disabled: busy, onSelect: () => setConfirmation({ kind: 'remove', id: cardId }) },
+        { id: 'delete', label: '彻底删除卡片', icon: Trash2, danger: true, disabled: busy, onSelect: () => setConfirmation({ kind: 'delete', id: cardId }) },
+      ] },
+    ]
+    if (options.includeWorkspace) {
+      sections.push({ id: 'workspace', title: '工作区', items: [
+        { id: 'outline', label: '切换到大纲', icon: ListTree, onSelect: () => setViewMode('outline') },
+        { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
+      ] })
+    }
+    return sections
+  }
+
+  const handleNodeContextMenu = (event: React.MouseEvent, node: MindmapFlowNode) => {
+    const card = cardsById[node.id]
+    if (!card) return
+    const collapsed = collapsedIds.has(card.id)
+    show(event, {
+      title: titleOf(card),
+      sections: cardMenuSections(card.id, {
+        toggleLabel: collapsed ? '展开子节点' : '折叠子节点',
+        onToggle: () => void toggleCard(card.id),
+        canToggle: parentCardIds.has(card.id),
+        includeWorkspace: true,
+      }),
+    })
+  }
+
+  const handleOutlineContextMenu = (event: React.MouseEvent, card: Card) => {
+    const collapsed = outlineCollapsedIds.has(card.id)
+    show(event, {
+      title: outlineTitle(card),
+      sections: [
+        ...cardMenuSections(card.id, {
+          toggleLabel: collapsed ? '展开子节点' : '折叠子节点',
+          onToggle: () => toggleOutlineCollapse(card.id),
+          canToggle: parentCardIds.has(card.id),
+          includeWorkspace: false,
+        }),
+        { id: 'outline-view', title: '视图', items: [
+          { id: 'canvas', label: '返回画布', icon: LayoutGrid, onSelect: () => setViewMode('canvas') },
+          { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
+        ] },
+      ],
+    })
+  }
+
+  const handlePaneContextMenu = (event: React.MouseEvent | MouseEvent) => {
+    show(event, {
+      title: '脑图画布',
+      sections: [
+        { id: 'canvas', items: [
+          { id: 'new', label: '新建独立卡片', icon: Plus, disabled: busy, onSelect: () => setEditor('new') },
+          { id: 'refresh', label: '刷新脑图', icon: RefreshCw, onSelect: () => void refresh() },
+          { id: 'arrange', label: '自动整理节点', icon: Focus, disabled: busy || !cards.length, onSelect: autoArrange },
+          { id: 'save', label: '保存所选布局', icon: LayoutGrid, disabled: busy || selectedIds.size === 0, onSelect: saveSelected },
+        ] },
+        { id: 'view', title: '视图', items: [
+          { id: 'outline', label: '切换到大纲', icon: ListTree, onSelect: () => setViewMode('outline') },
+          { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
+          { id: 'recall', label: recallActive ? '结束主动回忆' : '开始主动回忆', icon: Sparkles, checked: recallActive, disabled: !recallActive && !cards.length, onSelect: recallActive ? stopRecall : startRecall },
+        ] },
+      ],
+    })
+  }
+
+  const handleOutlinePaneContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    show(event, {
+      title: '大纲视图',
+      sections: [{ id: 'outline', items: [
+        { id: 'canvas', label: '返回画布', icon: LayoutGrid, onSelect: () => setViewMode('canvas') },
+        { id: 'new', label: '新建独立卡片', icon: Plus, disabled: busy, onSelect: () => setEditor('new') },
+        { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
+      ] }],
+    })
+  }
+
   const editingCard = editor && editor !== 'new' ? cardsById[editor] : null
   const confirmationCard = confirmation ? cardsById[confirmation.id] : undefined
 
@@ -703,7 +821,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
 
       <div className="mindmap-canvas">
         {viewMode === 'outline' && hasLoaded ? (
-          <div className="mindmap-outline">
+          <div className="mindmap-outline" onContextMenu={handleOutlinePaneContextMenu}>
             <div className="mindmap-outline-head">
               <div>
                 <strong>大纲视图</strong>
@@ -727,6 +845,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
                     className="mindmap-outline-row"
                     key={card.id}
                     style={{ paddingLeft: `${12 + depth * 22}px` }}
+                    onContextMenu={(event) => handleOutlineContextMenu(event, card)}
                   >
                     <button
                       type="button"
@@ -770,6 +889,8 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
             onNodeDragStop={handleNodeDragStop}
             onConnect={handleConnect}
             onSelectionChange={handleSelectionChange}
+            onNodeContextMenu={handleNodeContextMenu}
+            onPaneContextMenu={handlePaneContextMenu}
             fitView={!compact}
             fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
             defaultViewport={compact ? { x: 30, y: 96, zoom: 0.9 } : undefined}
@@ -851,6 +972,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       </footer>
       )}
 
+      <ContextMenu state={menu} onClose={close} />
     </section>
     </MindmapNodeContext.Provider>
   )

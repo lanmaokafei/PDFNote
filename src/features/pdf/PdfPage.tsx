@@ -21,9 +21,48 @@ import {
   getCachedLines,
   linesFromTextContent,
 } from './pageText'
+import {
+  ArrowLeft,
+  ArrowRight,
+  ClipboardCopy,
+  Copy,
+  Eye,
+  FilePlus2,
+  Focus,
+  Highlighter,
+  Link2,
+  Merge,
+  MessageSquare,
+  MousePointer2,
+  PenLine,
+  Quote,
+  Square,
+  Tag,
+  Trash2,
+  Type,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react'
+import { ContextMenu } from '../../ui/ContextMenu'
+import { useContextMenu, type ContextMenuItem, type ContextMenuSection } from '../../ui/contextMenuCore'
 import { PageTextLayer, type TextSelectionInfo } from './PageTextLayer'
+import { readTextSelection } from './textSelection'
 
 export type PdfTool = 'select' | 'highlight' | 'rectangle' | 'ink' | 'text'
+
+/** 右键菜单里需要在工作区层执行的动作（工具、缩放、对话框、回忆会话）。 */
+export type PdfContextAction =
+  | { type: 'tool'; tool: PdfTool }
+  | { type: 'zoom'; delta: number }
+  | { type: 'zoom-reset' }
+  | { type: 'page'; delta: number }
+  | { type: 'recall-toggle' }
+  | { type: 'tags'; cardId: string }
+  | { type: 'links'; cardId: string }
+  | { type: 'merge' }
+  | { type: 'delete-annotation'; annotation: Annotation }
+  | { type: 'reveal'; annotationIds: string[] }
 export interface PageSize {
   width: number
   height: number
@@ -54,11 +93,19 @@ interface PdfPageProps {
   registerPage: (pageNumber: number, element: HTMLElement | null) => void
   onSize: (pageNumber: number, size: PageSize) => void
   onSelect: (annotation: Annotation) => void
-  onCreate: (page: PDFPageProxy, rect: NormalizedBBox, excerpt: string, ocrImage?: string, archiveImage?: string) => Promise<void>
+  onCreate: (
+    page: PDFPageProxy,
+    rect: NormalizedBBox,
+    excerpt: string,
+    ocrImage?: string,
+    archiveImage?: string,
+    annotationKind?: 'highlight' | 'rectangle',
+  ) => Promise<void>
   onMove: (annotation: Annotation, geometry: AnnotationGeometry, bbox: NormalizedBBox) => void
   onReveal: (annotationIds: string[]) => void
   onInk: (bbox: NormalizedBBox, points: Array<[number, number]>) => void
   onEraseInk: (id: string) => void
+  onContextAction: (action: PdfContextAction) => void
 }
 
 export function PdfPage({
@@ -86,6 +133,7 @@ export function PdfPage({
   onReveal,
   onInk,
   onEraseInk,
+  onContextAction,
 }: PdfPageProps) {
   const [page, setPage] = useState<PDFPageProxy | null>(null)
   const [pageError, setPageError] = useState('')
@@ -97,6 +145,7 @@ export function PdfPage({
   const [textStatus, setTextStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [textError, setTextError] = useState('')
   const [selection, setSelection] = useState<TextSelectionInfo | null>(null)
+  const { menu, show, close } = useContextMenu()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -459,20 +508,123 @@ export function PdfPage({
     window.getSelection()?.removeAllRanges()
   }
 
-  const copySelectedText = async (text: string) => {
+  const copyText = async (text: string) => {
+    if (!text) return
     try {
       await navigator.clipboard.writeText(text)
     } catch {
       // 剪贴板不可用时保留原生选区，用户仍可用系统快捷键复制。
     }
+  }
+
+  const copySelectedText = async (text: string) => {
+    await copyText(text)
     clearTextSelection()
   }
 
   const createCardFromSelection = (info: TextSelectionInfo) => {
     if (!page) return
     const crops = cropSelection(info.bbox, false)
-    onCreate(page, info.bbox, info.text, undefined, crops.archive)
+    // 文字选区建卡不受当前工具限制，默认生成高亮标注。
+    onCreate(page, info.bbox, info.text, undefined, crops.archive, 'highlight')
     clearTextSelection()
+  }
+
+  /**
+   * 右键命中元素由 DOM 结构判断：遮挡块 > 标注 > 墨迹 > 文字选区 > 页面空白。
+   * 每页各自持有菜单状态，但通用组件保证全局只显示一个菜单。
+   */
+  const handleContextMenu = (event: React.MouseEvent<HTMLElement>) => {
+    const target = event.target instanceof Element ? event.target : null
+    const layer = event.currentTarget.querySelector<HTMLElement>('.pdf-text-layer')
+    const selectionInfo = layer ? readTextSelection(layer) : null
+    const maskElement = target?.closest<SVGGElement>('[data-mask-index]')
+    const annotationElement = target?.closest<SVGGElement>('[data-annotation-id]')
+    const inkElement = target?.closest<SVGPathElement>('[data-ink-id]')
+    const open = (title: string, sections: ContextMenuSection[]) => show(event, { title, sections })
+
+    if (maskElement) {
+      const mask = recallMasks[Number(maskElement.dataset.maskIndex)]
+      if (mask) {
+        const ids = annotations
+          .filter((annotation) => annotation.geometry.rects.some((rect) => rectsOverlap(mask, rect)))
+          .map((annotation) => annotation.id)
+        open(`回忆遮挡 · 第 ${pageNumber} 页`, [{ id: 'mask', items: [
+          { id: 'reveal', label: '揭示此处的摘录', icon: Eye, onSelect: () => onReveal(ids) },
+          { id: 'exit', label: '退出文档回忆', icon: MessageSquare, onSelect: () => onContextAction({ type: 'recall-toggle' }) },
+        ] }])
+        return
+      }
+    }
+
+    if (annotationElement) {
+      const annotation = annotations.find((item) => item.id === annotationElement.dataset.annotationId)
+      if (annotation) {
+        const excerpt = excerpts[annotation.card_id] ?? ''
+        open(`${annotation.kind === 'rectangle' ? '矩形标注' : '高亮标注'} · 第 ${pageNumber} 页`, [
+          { id: 'annotation', items: [
+            { id: 'copy', label: '复制摘录文字', icon: Copy, disabled: !excerpt, onSelect: () => void copyText(excerpt) },
+            { id: 'inspect', label: '在检查器中查看', icon: MousePointer2, onSelect: () => onSelect(annotation) },
+          ] },
+          { id: 'card', title: '关联卡片', items: [
+            { id: 'tags', label: '编辑标签…', icon: Tag, onSelect: () => onContextAction({ type: 'tags', cardId: annotation.card_id }) },
+            { id: 'links', label: '关联其他卡片…', icon: Link2, onSelect: () => onContextAction({ type: 'links', cardId: annotation.card_id }) },
+            { id: 'merge', label: '合并卡片…', icon: Merge, onSelect: () => { onSelect(annotation); onContextAction({ type: 'merge' }) } },
+          ] },
+          { id: 'danger', items: [
+            { id: 'delete', label: '删除标注…', icon: Trash2, danger: true, onSelect: () => onContextAction({ type: 'delete-annotation', annotation }) },
+          ] },
+        ])
+        return
+      }
+    }
+
+    if (inkElement?.dataset.inkId) {
+      const inkId = inkElement.dataset.inkId
+      open(`墨迹 · 第 ${pageNumber} 页`, [{ id: 'ink', items: [
+        { id: 'erase', label: '删除这条墨迹', icon: Trash2, danger: true, onSelect: () => onEraseInk(inkId) },
+        { id: 'ink-tool', label: '继续手写墨迹', icon: PenLine, onSelect: () => onContextAction({ type: 'tool', tool: 'ink' }) },
+      ] }])
+      return
+    }
+
+    if (selectionInfo) {
+      open(`已选中 ${selectionInfo.text.length} 字 · 第 ${pageNumber} 页`, [
+        { id: 'selection', items: [
+          { id: 'copy', label: '复制文字', icon: Copy, hint: '⌘C', onSelect: () => void copySelectedText(selectionInfo.text) },
+          { id: 'quote', label: '复制为引用', icon: Quote, onSelect: () => void copySelectedText(`「${selectionInfo.text}」（第 ${pageNumber} 页）`) },
+          { id: 'create', label: '用选中文字建卡', icon: FilePlus2, onSelect: () => createCardFromSelection(selectionInfo) },
+        ] },
+        { id: 'selection-tools', items: [
+          { id: 'clear', label: '取消选择', icon: X, onSelect: clearTextSelection },
+          { id: 'text-tool', label: '文字选择模式', icon: Type, checked: tool === 'text' && !recallMode, onSelect: () => onContextAction({ type: 'tool', tool: 'text' }) },
+        ] },
+      ])
+      return
+    }
+
+    const toolItems: ContextMenuItem[] = [
+      { id: 'tool-select', label: '选择 / 移动标注', icon: MousePointer2, checked: tool === 'select', disabled: recallMode, onSelect: () => onContextAction({ type: 'tool', tool: 'select' }) },
+      { id: 'tool-text', label: '文字选择', icon: Type, checked: tool === 'text', disabled: recallMode, onSelect: () => onContextAction({ type: 'tool', tool: 'text' }) },
+      { id: 'tool-highlight', label: '高亮框选', icon: Highlighter, checked: tool === 'highlight', disabled: recallMode, onSelect: () => onContextAction({ type: 'tool', tool: 'highlight' }) },
+      { id: 'tool-rectangle', label: '矩形框选', icon: Square, checked: tool === 'rectangle', disabled: recallMode, onSelect: () => onContextAction({ type: 'tool', tool: 'rectangle' }) },
+      { id: 'tool-ink', label: '手写墨迹', icon: PenLine, checked: tool === 'ink', disabled: recallMode, onSelect: () => onContextAction({ type: 'tool', tool: 'ink' }) },
+    ]
+    const pageText = lines.map((line) => line.text).join('\n')
+    open(`第 ${pageNumber} 页`, [
+      { id: 'tools', title: '标注工具', items: toolItems },
+      { id: 'view', title: '视图与翻页', items: [
+        { id: 'zoom-in', label: '放大', icon: ZoomIn, hint: '+10%', onSelect: () => onContextAction({ type: 'zoom', delta: 0.1 }) },
+        { id: 'zoom-out', label: '缩小', icon: ZoomOut, hint: '−10%', onSelect: () => onContextAction({ type: 'zoom', delta: -0.1 }) },
+        { id: 'zoom-reset', label: '恢复 100%', icon: Focus, hint: '100%', onSelect: () => onContextAction({ type: 'zoom-reset' }) },
+        { id: 'prev', label: '上一页', icon: ArrowLeft, onSelect: () => onContextAction({ type: 'page', delta: -1 }) },
+        { id: 'next', label: '下一页', icon: ArrowRight, onSelect: () => onContextAction({ type: 'page', delta: 1 }) },
+      ] },
+      { id: 'page-actions', items: [
+        { id: 'copy-page', label: '复制本页文字', icon: ClipboardCopy, disabled: !pageText, hint: pageText ? `${lines.length} 行` : '文字层未就绪', onSelect: () => void copyText(pageText) },
+        { id: 'recall', label: recallMode ? '退出文档回忆' : '开始文档回忆', icon: MessageSquare, checked: recallMode, onSelect: () => onContextAction({ type: 'recall-toggle' }) },
+      ] },
+    ])
   }
 
   const showSurface = shouldRender && page && viewport && view
@@ -484,6 +636,7 @@ export function PdfPage({
       style={{ width: cssWidth, height: cssHeight }}
       data-page={pageNumber}
       aria-label={`第 ${pageNumber} 页`}
+      onContextMenu={handleContextMenu}
     >
       {!showSurface && (
         <div className="pdf-page-placeholder">
@@ -549,6 +702,7 @@ export function PdfPage({
                 return (
                   <path
                     key={ink.id}
+                    data-ink-id={ink.id}
                     d={path}
                     fill="none"
                     stroke={ink.style.color ?? '#d94f3d'}
@@ -589,6 +743,7 @@ export function PdfPage({
             {displayedAnnotations.map((annotation) => (
               <g
                 key={annotation.id}
+                data-annotation-id={annotation.id}
                 className={`pdf-annotation is-${annotation.kind} ${selectedAnnotationId === annotation.id ? 'is-selected' : ''}`}
                 onPointerDown={(event) => handleMoveStart(event, annotation)}
               >
@@ -622,6 +777,7 @@ export function PdfPage({
               return (
                 <g
                   key={`mask-${index}`}
+                  data-mask-index={index}
                   className="pdf-recall-mask"
                   role="button"
                   tabIndex={0}
@@ -647,6 +803,7 @@ export function PdfPage({
         </>
       )}
       <span className="pdf-page-number">{pageNumber}</span>
+      <ContextMenu state={menu} onClose={close} />
     </section>
   )
 }

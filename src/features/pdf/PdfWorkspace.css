@@ -986,8 +986,9 @@
 /* ---------- 手写墨迹 ---------- */
 
 .pdf-ink-layer { pointer-events: none; }
-.pdf-ink { pointer-events: none; }
-.pdf-ink.is-erasing { pointer-events: stroke; cursor: not-allowed; }
+/* 墨迹线条本身可作为右键目标（父层 none 仍允许子元素覆盖），便于删除单条墨迹。 */
+.pdf-ink { pointer-events: stroke; cursor: context-menu; }
+.pdf-ink.is-erasing { cursor: not-allowed; }
 .pdf-ink-draft { pointer-events: none; }
 
 .pdf-ink-palette {

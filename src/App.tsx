@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import {
   BookOpen,
+  Copy,
   FileText,
   Network,
   Search,
@@ -8,6 +9,8 @@ import {
   Sparkles,
 } from 'lucide-react'
 import './App.css'
+import { ContextMenu } from './ui/ContextMenu'
+import { useContextMenu } from './ui/contextMenuCore'
 import type { BootstrapStatus, Document } from './domain/card'
 import { LibraryWorkspace } from './features/library/LibraryWorkspace'
 import { StudyWorkspace } from './features/study/StudyWorkspace'
@@ -42,6 +45,7 @@ function App() {
   const [fatalError, setFatalError] = useState('')
   const [showMindmap, setShowMindmap] = useState(true)
   const [searchToken, setSearchToken] = useState(0)
+  const { menu, show, close } = useContextMenu()
   const loadCards = useCardStore((state) => state.loadCards)
   const cardsById = useCardStore((state) => state.cardsById)
   const desktop = isTauriRuntime()
@@ -141,8 +145,37 @@ function App() {
     },
   ]
 
+  /** 没有元素菜单的区域也提供一层通用菜单，替代 WebView 自带的 Reload。 */
+  function handleShellContextMenu(event: React.MouseEvent<HTMLDivElement>) {
+    const selected = window.getSelection()?.toString().trim() ?? ''
+    const copyText = (text: string) => {
+      if (navigator.clipboard) void navigator.clipboard.writeText(text).catch(() => undefined)
+    }
+    show(event, {
+      title: 'PDFNote',
+      sections: [
+        { id: 'clipboard', items: [
+          {
+            id: 'copy-selection',
+            label: '复制选中文字',
+            icon: Copy,
+            disabled: !selected,
+            hint: selected ? `${selected.length} 字` : undefined,
+            onSelect: () => copyText(selected),
+          },
+        ] },
+        { id: 'navigate', title: '切换工作区', items: [
+          { id: 'library', label: '资料库', icon: BookOpen, checked: !documentOpen && view === 'library', onSelect: () => goTo('library') },
+          { id: 'mindmap', label: '知识脑图', icon: Network, checked: !documentOpen && view === 'mindmap', onSelect: () => goTo('mindmap') },
+          { id: 'review', label: '复习', icon: Sparkles, checked: !documentOpen && view === 'review', onSelect: () => goTo('review') },
+          { id: 'backup', label: '备份与恢复', icon: ShieldCheck, checked: !documentOpen && view === 'backup', onSelect: () => goTo('backup') },
+        ] },
+      ],
+    })
+  }
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" onContextMenu={handleShellContextMenu}>
       <header className="app-top">
         <div className="app-segments" role="tablist" aria-label="工作区切换">
           {segments.map((segment) => {
@@ -218,6 +251,7 @@ function App() {
           </>
         )}
       </main>
+      <ContextMenu state={menu} onClose={close} />
     </div>
   )
 }

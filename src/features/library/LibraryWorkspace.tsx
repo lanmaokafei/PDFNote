@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import {
+  Copy,
   FileText,
   FolderOpen,
   HardDrive,
@@ -11,6 +12,8 @@ import {
   Trash2,
 } from 'lucide-react'
 import type { BootstrapStatus, Document } from '../../domain/card'
+import { ContextMenu } from '../../ui/ContextMenu'
+import { useContextMenu } from '../../ui/contextMenuCore'
 import {
   deleteDocument,
   getBootstrapStatus,
@@ -69,6 +72,7 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
   const [query, setQuery] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Document | null>(null)
   const [keepCards, setKeepCards] = useState(true)
+  const { menu, show, close } = useContextMenu()
   const desktop = isTauriRuntime()
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -194,6 +198,29 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
     document.title.toLowerCase().includes(query.trim().toLowerCase()),
   )
 
+  function handleDocumentContextMenu(event: React.MouseEvent<HTMLElement>, document: Document) {
+    const copyTitle = () => {
+      if (navigator.clipboard) void navigator.clipboard.writeText(document.title).catch(() => undefined)
+    }
+    show(event, {
+      title: document.title,
+      sections: [
+        { id: 'document', items: [
+          { id: 'open', label: '打开文档', icon: FileText, disabled: busy !== null || !desktop, onSelect: () => void handleOpen(document) },
+          { id: 'copy', label: '复制文档标题', icon: Copy, onSelect: copyTitle },
+        ] },
+        { id: 'file', title: '文件', items: [
+          { id: 'relocate', label: '重新定位 PDF…', icon: FolderOpen, disabled: !desktop, onSelect: () => void handleRelocate(document) },
+          { id: 'refresh', label: '刷新资料库', icon: RefreshCw, onSelect: () => void refresh() },
+          { id: 'import', label: '导入新 PDF…', icon: Plus, disabled: !desktop, onSelect: () => void handleImport() },
+        ] },
+        { id: 'danger', items: [
+          { id: 'delete', label: '移除文档…', icon: Trash2, danger: true, onSelect: () => { setKeepCards(true); setDeleteTarget(document) } },
+        ] },
+      ],
+    })
+  }
+
   return (
     <section className="library">
       <header className="library-heading">
@@ -265,7 +292,7 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
       ) : (
         <div className="library-grid">
           {filtered.map((document, index) => (
-            <article className="document-card" key={document.id}>
+            <article className="document-card" key={document.id} onContextMenu={(event) => handleDocumentContextMenu(event, document)}>
               <button
                 type="button"
                 className="document-cover"
@@ -321,6 +348,8 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
           ))}
         </div>
       )}
+
+      <ContextMenu state={menu} onClose={close} />
 
       {deleteTarget && (
         <div className="library-modal-backdrop" role="presentation" onMouseDown={(event) => {

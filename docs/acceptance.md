@@ -8,12 +8,13 @@
 | 项目 | 命令 | 结果 |
 | --- | --- | --- |
 | Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml -- --include-ignored` | 29 passed（含 2 项 Vision 真机：中文识别 + 行级坐标） |
-| 前端单元 | `npm run test` | 19 passed（5 files，含文字层行提取与选区文本） |
+| 前端单元 | `npm run test` | 25 passed（6 files，含文字层行提取与选区文本、右键菜单定位边界） |
 | 文字层冒烟 | `node scripts/textlayer-smoke.mjs` | 通过：透明 DOM 文字可原生拖选「信息系统项目管」，选区 bbox 换算正确 |
+| 右键菜单冒烟 | `node scripts/contextmenu-smoke.mjs` | 通过：原生 Reload 菜单被接管、菜单项执行动作、右下角翻转、键盘导航、输入框保留系统菜单、选区读取与跨层判定 |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
-| 原生编译 | `npx tauri build --bundles app` | 通过，0.9.0 生成 17.11 MiB release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.9.0 已通过 `hdiutil verify`，约 8.2 MB，SHA-256 见 `release/*.sha256` |
+| 原生编译 | `npx tauri build --bundles app` | 通过，0.10.0 生成 release PDFNote.app |
+| DMG | 手动 `hdiutil` 打包 | 0.10.0 已通过 `hdiutil verify`，约 8.2 MB，SHA-256 `000818dd…e903691`，见 `release/*.sha256` |
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
@@ -41,6 +42,7 @@ Rust 测试覆盖：
 4. 重叠判定与遮挡块传递合并。
 5. FSRS 四种状态映射。
 6. 调度字段与日期映射。
+7. 右键菜单定位：常规位置、右/下边缘翻转、超大菜单 clamp、非有限坐标（6 项）。
 
 ## P0 验收状态
 
@@ -62,6 +64,7 @@ Rust 测试覆盖：
 | 顶部栏固定 | 浏览器布局实测 | body 无滚动，内容区独立滚动，topbar top 始终为 0 |
 | OCR 建卡 | Rust 真机 + 浏览器实测 | 标注-only 建卡通过；0.8.0 起为 Apple Vision 单引擎，真机中文图识别出「信息化」；已移除 Tesseract 与 63MB 离线模型 |
 | 可选文字层（0.9.0） | Rust 真机 + 无头 Chrome | 4 行中文图返回归一化行坐标（2.81s）；缓存往返与旧备份兼容测试通过；透明 DOM 文字拖选精确到字符，可复制/建卡 |
+| 元素右键菜单（0.10.0） | Vitest + 无头 Chrome | 原生 Reload 菜单被接管；文字选区/标注/墨迹/脑图节点/文档卡片按元素给菜单；动作执行、边界翻转、ESC 与键盘导航、输入框系统菜单均通过 |
 | 脑图稳定性 | Chromium + IPC 模拟 | 进入脑图、选中、拖拽、PDF 建卡后切换均无 React #185 |
 | 继续阅读 | Chromium + IPC 模拟 | 5 页文档记录第 4 页，重开落在第 4 页；滚到第 3 页后返回重开仍为第 3 页 |
 | 分栏工作台 | Chromium + IPC 模拟 | 左 PDF 右脑图、11 个工具槽、拖动分隔条、脑图收起、工具坞建卡均通过 |

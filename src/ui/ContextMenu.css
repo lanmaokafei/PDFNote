@@ -1,0 +1,122 @@
+/* 应用内统一右键菜单：浅色卡片，与工作台悬浮工具坞同风格 */
+.context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 196px;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid rgba(26, 32, 26, .10);
+  border-radius: 11px;
+  color: #2c352e;
+  background: rgba(255, 255, 255, .985);
+  box-shadow: 0 20px 48px rgba(20, 28, 22, .20), 0 1px 2px rgba(20, 28, 22, .07);
+  backdrop-filter: blur(16px);
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  user-select: none;
+  -webkit-user-select: none;
+  scrollbar-width: thin;
+}
+
+.context-menu-title {
+  padding: 5px 9px 7px;
+  overflow: hidden;
+  color: #7c867d;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu-divider {
+  height: 1px;
+  margin: 5px 4px;
+  background: #e8ece6;
+}
+
+.context-menu-section-title {
+  padding: 3px 9px 4px;
+  color: #929b93;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 7px;
+  color: #374238;
+  background: transparent;
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-menu-item:hover:not(:disabled),
+.context-menu-item.is-active:not(:disabled) {
+  color: #1f3828;
+  background: #eef3ed;
+}
+
+.context-menu-item:focus-visible {
+  outline: 2px solid #6f9278;
+  outline-offset: -2px;
+}
+
+.context-menu-item:disabled,
+.context-menu-item.is-disabled {
+  color: #aeb6ae;
+  cursor: default;
+}
+
+.context-menu-item.is-danger:not(:disabled) { color: #a4503f; }
+.context-menu-item.is-danger:hover:not(:disabled),
+.context-menu-item.is-danger.is-active:not(:disabled) { color: #8f3e30; background: #fbefec; }
+
+.context-menu-icon {
+  display: grid;
+  flex: 0 0 15px;
+  width: 15px;
+  height: 15px;
+  place-items: center;
+  color: #78867a;
+}
+
+.context-menu-item.is-danger .context-menu-icon { color: #b86552; }
+
+.context-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu-check {
+  display: grid;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+  color: #4f7e5d;
+}
+
+.context-menu-hint {
+  flex: 0 0 auto;
+  color: #9aa39b;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}

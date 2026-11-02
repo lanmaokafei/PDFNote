@@ -12,7 +12,7 @@
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
 | 原生编译 | `npx tauri build --bundles app` | 通过，生成 20.2 MB release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.4.0 已通过 `hdiutil verify`，约 58 MB |
+| DMG | 手动 `hdiutil` 打包 | 0.5.0 已通过 `hdiutil verify`，约 59 MB |
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=2`，`quick_check=ok` |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
 
@@ -62,6 +62,7 @@ Rust 测试覆盖：
 | 脑图稳定性 | Chromium + IPC 模拟 | 进入脑图、选中、拖拽、PDF 建卡后切换均无 React #185 |
 | 继续阅读 | Chromium + IPC 模拟 | 5 页文档记录第 4 页，重开落在第 4 页；滚到第 3 页后返回重开仍为第 3 页 |
 | 分栏工作台 | Chromium + IPC 模拟 | 左 PDF 右脑图、11 个工具槽、拖动分隔条、脑图收起、工具坞建卡均通过 |
+| 大纲与导出 | 单元 + Rust + Chromium | 5 行大纲、折叠后 2 行；Markdown 层级/摘录/页码正确；`.md` 写入通过、`.txt` 被拒 |
 
 ## 大文件回归证据
 

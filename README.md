@@ -79,13 +79,15 @@ scripts/ui-smoke.mjs     Playwright 界面冒烟脚本（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.4.0_aarch64.dmg
-release/PDFNote_0.4.0_aarch64.dmg.sha256
+release/PDFNote_0.5.0_aarch64.dmg
+release/PDFNote_0.5.0_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
 
 ## 重要修复
+
+- 0.5.0 新增脑图大纲模式与 Markdown 导出，详见 [大纲与导出](docs/outline-export.md)。
 
 - 0.4.0 重构界面为“左文右图 + 悬浮工具栏”的工作台布局，详见 [工作台布局](docs/workspace-layout.md)。
 
@@ -104,6 +106,7 @@ release/PDFNote_0.4.0_aarch64.dmg.sha256
 - [离线中文 OCR](docs/ocr.md)
 - [脑图 React #185 复盘](docs/react-185-regression.md)
 - [学习工作台布局](docs/workspace-layout.md)
+- [大纲模式与 Markdown 导出](docs/outline-export.md)
 
 - [架构基线](docs/architecture.md)
 - [实施与验收计划](docs/implementation-plan.md)

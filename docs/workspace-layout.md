@@ -32,6 +32,8 @@
 | 删除 | 删除当前选中标注，保留卡片或级联删除 |
 | 更多 | 页码跳转、缩放、恢复 100% |
 
+脑图侧另有「大纲 / 返回画布」与「导出」，详见 [大纲模式与 Markdown 导出](outline-export.md)。
+
 ## 嵌入模式
 
 `PdfWorkspace` 与 `MindmapWorkspace` 新增 `embedded` / `compact` 开关：

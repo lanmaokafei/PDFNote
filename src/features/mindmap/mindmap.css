@@ -277,3 +277,167 @@
 
 .mindmap-float-recall button:hover { background: #eef4e6; }
 .mindmap-float-recall button:disabled { opacity: .45; cursor: default; }
+
+
+/* ---------- 大纲视图 ---------- */
+
+.mindmap-toolbar { justify-content: flex-start; }
+.mindmap-toolbar-actions { margin-left: auto; }
+
+.mindmap-view-switch {
+  display: flex;
+  padding: 3px;
+  border-radius: 7px;
+  background: #eef0ea;
+}
+
+.mindmap-view-switch button {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 5px;
+  color: #7b8475;
+  background: transparent;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.mindmap-view-switch button.active {
+  color: #24372a;
+  background: #fbfcf8;
+  box-shadow: 0 1px 3px rgba(30, 40, 30, .12);
+}
+
+.mindmap-outline {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fbfcf9;
+}
+
+.mindmap-outline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 18px;
+  border-bottom: 1px solid #e8ece4;
+  background: #fbfcf9;
+}
+
+.mindmap-outline-head strong { display: block; color: #34423a; font-size: 12px; font-weight: 650; }
+.mindmap-outline-head span { display: block; margin-top: 3px; color: #98a094; font-size: 8.5px; }
+
+.mindmap-outline-actions { display: flex; gap: 6px; }
+
+.mindmap-outline-actions button {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #dfe5d9;
+  border-radius: 7px;
+  color: #5f6d5c;
+  background: #fbfcf8;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.mindmap-outline-actions button:hover:not(:disabled) { background: #eff3e9; }
+.mindmap-outline-actions button.is-primary { border-color: #405943; color: #f4f6ef; background: #405943; }
+.mindmap-outline-actions button.is-primary:hover:not(:disabled) { background: #354b3c; }
+.mindmap-outline-actions button:disabled { opacity: .45; cursor: not-allowed; }
+
+.mindmap-outline-list {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 0 48px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.mindmap-outline-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 18px 9px 0;
+  border-bottom: 1px solid #f1f3ed;
+}
+
+.mindmap-outline-row:hover { background: #f4f7f0; }
+
+.mindmap-outline-toggle {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  color: #7d8a76;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mindmap-outline-toggle:hover:not(:disabled) { background: #e6ece1; }
+.mindmap-outline-toggle:disabled { opacity: .35; cursor: default; }
+
+.mindmap-outline-badge {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  margin-top: 1px;
+  border-radius: 4px;
+  color: #f2f5ed;
+  background: #4a614d;
+  font-family: Georgia, serif;
+  font-size: 9px;
+}
+
+.mindmap-outline-body { flex: 1; min-width: 0; }
+
+.mindmap-outline-title {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  color: #34423a;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 620;
+  line-height: 1.5;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.mindmap-outline-title:hover { color: #1f3a29; text-decoration: underline; text-underline-offset: 2px; }
+
+.mindmap-outline-body p {
+  display: -webkit-box;
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: #7f897b;
+  font-size: 9.5px;
+  line-height: 1.6;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.mindmap-outline-level {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-top: 3px;
+  color: #aeb5a7;
+  font-size: 8px;
+  letter-spacing: .4px;
+}
+
+.mindmap-workspace.is-embedded .mindmap-outline-head { padding: 11px 14px; }
+.mindmap-workspace.is-embedded .mindmap-outline-row { padding-right: 14px; }

@@ -183,6 +183,33 @@ pub fn update_document_metadata(
     documents::update_document_metadata(&state, id, title, page_count)
 }
 
+/// 导出 Markdown 到用户通过保存对话框选择的路径。只接受 .md/.markdown，避免误写其他文件。
+#[tauri::command(async)]
+pub fn export_markdown(path: String, content: String) -> Result<(), String> {
+    if content.trim().is_empty() {
+        return Err("导出内容为空".into());
+    }
+    let target = std::path::PathBuf::from(path.trim());
+    if target.as_os_str().is_empty() {
+        return Err("导出路径为空".into());
+    }
+    let markdown_extension = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("md") || value.eq_ignore_ascii_case("markdown"))
+        .unwrap_or(false);
+    if !markdown_extension {
+        return Err("导出文件必须使用 .md 扩展名".into());
+    }
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("无法创建导出目录: {error}"))?;
+        }
+    }
+    std::fs::write(&target, content).map_err(|error| format!("写入 Markdown 失败: {error}"))
+}
+
 #[tauri::command]
 pub fn update_document_progress(
     state: State<'_, AppState>,
@@ -235,4 +262,36 @@ pub fn import_backup(
 #[tauri::command(async)]
 pub fn auto_backup(state: State<'_, AppState>) -> Result<String, String> {
     backup::auto_backup(&state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::export_markdown;
+
+    #[test]
+    fn export_markdown_writes_md_and_rejects_other_extensions() {
+        let directory =
+            std::env::temp_dir().join(format!("pdfnote-export-{}", uuid::Uuid::new_v4()));
+        let target = directory.join("outline.md");
+        export_markdown(
+            target.to_string_lossy().into_owned(),
+            "# 标题\n\n- 卡片\n".into(),
+        )
+        .unwrap();
+        let written = std::fs::read_to_string(&target).unwrap();
+        assert!(written.contains("# 标题"));
+        assert!(written.contains("- 卡片"));
+
+        let error = export_markdown(
+            directory.join("outline.txt").to_string_lossy().into_owned(),
+            "content".into(),
+        )
+        .unwrap_err();
+        assert!(error.contains(".md"));
+
+        let empty =
+            export_markdown(target.to_string_lossy().into_owned(), "   ".into()).unwrap_err();
+        assert!(empty.contains("为空"));
+        let _ = std::fs::remove_dir_all(&directory);
+    }
 }

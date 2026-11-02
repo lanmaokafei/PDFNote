@@ -14,8 +14,11 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { save as saveDialog } from '@tauri-apps/plugin-dialog'
 import type { Card, MindmapLayoutInput, Rating } from '../../domain/card'
 import {
+  exportMarkdownFile,
+  isTauriRuntime,
   listMindmapLayout,
   moveCard,
   saveMindmapLayout,
@@ -27,6 +30,7 @@ import { reviewCard } from '../review/scheduler'
 import { CardEditor, ConfirmationDialog, type CardDraft, type ConfirmationKind } from './CardEditor'
 import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
+import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown } from './outline'
 import {
   TREE_Y_GAP,
   buildTreeLayout,
@@ -77,6 +81,8 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   const [notice, setNotice] = useState('')
   const [editor, setEditor] = useState<'new' | string | null>(null)
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null)
+  const [viewMode, setViewMode] = useState<'canvas' | 'outline'>('canvas')
+  const [exporting, setExporting] = useState(false)
 
   const [recallActive, setRecallActive] = useState(false)
   const [recallSort, setRecallSort] = useState<MindmapSortMode>('order')
@@ -110,6 +116,16 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     [cards, collapsedIds, recallActive, recallSort],
   )
   const visibleIds = useMemo(() => new Set(orderedVisibleCards.map((card) => card.id)), [orderedVisibleCards])
+  const outlineForest = useMemo(() => buildOutlineForest(cards), [cards])
+  const outlineCollapsedIds = useMemo(
+    () => new Set(cards.filter((card) => card.collapsed).map((card) => card.id)),
+    [cards],
+  )
+  const outlineRows = useMemo(
+    () => flattenOutline(outlineForest, (id) => outlineCollapsedIds.has(id)),
+    [outlineCollapsedIds, outlineForest],
+  )
+  const parentCardIds = useMemo(() => new Set(parentIds), [parentIds])
 
   const nodes = useMemo<MindmapFlowNode[]>(
     () => orderedVisibleCards.map((card) => {
@@ -481,6 +497,50 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     }
   }, [ratedIds, ratingPendingIds, revealedIds, syncCards])
 
+  const toggleOutlineCollapse = useCallback((id: string) => {
+    const card = useCardStore.getState().cardsById[id]
+    if (!card || busy) return
+    void runTask(async () => {
+      await setCardCollapsed(id, !card.collapsed)
+      await syncCards()
+    })
+  }, [busy, runTask, syncCards])
+
+  const handleExportMarkdown = useCallback(async () => {
+    if (exporting) return
+    setExporting(true)
+    setError('')
+    setNotice('')
+    try {
+      const forest = buildOutlineForest(Object.values(useCardStore.getState().cardsById))
+      if (!forest.length) throw new Error('当前脑图没有可导出的卡片')
+      const markdown = outlineToMarkdown(forest)
+      const filename = `知识脑图-${new Date().toISOString().slice(0, 10)}.md`
+      if (isTauriRuntime()) {
+        const target = await saveDialog({
+          defaultPath: filename,
+          filters: [{ name: 'Markdown', extensions: ['md'] }],
+        })
+        if (!target) return
+        await exportMarkdownFile(target, markdown)
+        setNotice(`已导出 Markdown：${target}`)
+      } else {
+        const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = filename
+        link.click()
+        URL.revokeObjectURL(url)
+        setNotice('已下载 Markdown 文件。')
+      }
+    } catch (reason) {
+      setError(`导出失败：${errorMessage(reason)}`)
+    } finally {
+      setExporting(false)
+    }
+  }, [exporting])
+
   const confirmOperation = useCallback(() => {
     if (!confirmation) return
     const { id, kind } = confirmation
@@ -545,19 +605,24 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
           <button type="button" className={!recallActive ? 'active' : ''} onClick={stopRecall} disabled={!recallActive}>结构编辑</button>
           <button type="button" className={recallActive ? 'active' : ''} onClick={startRecall} disabled={recallActive || !cards.length}>主动回忆</button>
         </div>
+        <div className="mindmap-view-switch" aria-label="视图模式">
+          <button type="button" className={viewMode === 'canvas' ? 'active' : ''} onClick={() => setViewMode('canvas')} aria-pressed={viewMode === 'canvas'}>画布</button>
+          <button type="button" className={viewMode === 'outline' ? 'active' : ''} onClick={() => setViewMode('outline')} aria-pressed={viewMode === 'outline'}>大纲</button>
+        </div>
         <div className="mindmap-toolbar-actions">
           <button type="button" onClick={() => void refresh()} disabled={loading || busy}>刷新</button>
-          <button type="button" onClick={autoArrange} disabled={busy || !cards.length}>自动整理</button>
-          <button type="button" onClick={saveSelected} disabled={busy || !cards.length}>保存所选布局</button>
+          <button type="button" onClick={autoArrange} disabled={busy || !cards.length || viewMode === 'outline'}>自动整理</button>
+          <button type="button" onClick={saveSelected} disabled={busy || !cards.length || viewMode === 'outline'}>保存所选布局</button>
+          <button type="button" onClick={() => void handleExportMarkdown()} disabled={exporting || !cards.length}>{exporting ? '导出中…' : '导出 MD'}</button>
           <button type="button" className="primary" onClick={() => setEditor('new')} disabled={busy}>＋ 新建卡片</button>
         </div>
       </div>
       )}
 
-      {compact && (
+      {compact && viewMode === 'canvas' && (
         <div className="mindmap-float-actions">
           <button type="button" onClick={() => void refresh()} disabled={loading || busy}>刷新</button>
-          <button type="button" onClick={autoArrange} disabled={busy || !cards.length}>整理</button>
+          <button type="button" onClick={() => setViewMode('outline')}>大纲</button>
           <button type="button" onClick={() => setEditor('new')} disabled={busy}>新建</button>
           <button
             type="button"
@@ -567,6 +632,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
           >
             {recallActive ? '结束回忆' : '主动回忆'}
           </button>
+          <button type="button" onClick={() => void handleExportMarkdown()} disabled={exporting || !cards.length}>{exporting ? '导出中…' : '导出'}</button>
         </div>
       )}
 
@@ -600,7 +666,55 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       {notice && <div className="mindmap-notice" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice('')}>关闭</button></div>}
 
       <div className="mindmap-canvas">
-        {loading && !hasLoaded ? (
+        {viewMode === 'outline' && hasLoaded ? (
+          <div className="mindmap-outline">
+            <div className="mindmap-outline-head">
+              <div>
+                <strong>大纲视图</strong>
+                <span>{cards.length} 张卡片 · 点击标题可编辑，折叠状态与脑图同步</span>
+              </div>
+              <div className="mindmap-outline-actions">
+                {compact && (
+                  <button type="button" onClick={() => setViewMode('canvas')}>返回画布</button>
+                )}
+                <button type="button" className="is-primary" onClick={() => void handleExportMarkdown()} disabled={exporting || !cards.length}>
+                  {exporting ? '导出中…' : '导出 Markdown'}
+                </button>
+              </div>
+            </div>
+            <div className="mindmap-outline-list">
+              {outlineRows.map(({ card, depth }) => {
+                const hasChildren = parentCardIds.has(card.id)
+                const collapsed = outlineCollapsedIds.has(card.id)
+                return (
+                  <div
+                    className="mindmap-outline-row"
+                    key={card.id}
+                    style={{ paddingLeft: `${12 + depth * 22}px` }}
+                  >
+                    <button
+                      type="button"
+                      className="mindmap-outline-toggle"
+                      onClick={() => toggleOutlineCollapse(card.id)}
+                      disabled={!hasChildren || busy}
+                      aria-label={hasChildren ? (collapsed ? '展开子节点' : '折叠子节点') : '没有子节点'}
+                    >
+                      {hasChildren ? (collapsed ? '▸' : '▾') : '·'}
+                    </button>
+                    <span className="mindmap-outline-badge" aria-hidden="true">Q</span>
+                    <div className="mindmap-outline-body">
+                      <button type="button" className="mindmap-outline-title" onClick={() => setEditor(card.id)}>
+                        {outlineTitle(card)}
+                      </button>
+                      {card.excerpt.trim() && <p>{card.excerpt.trim()}</p>}
+                    </div>
+                    <span className="mindmap-outline-level">L{depth + 1}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ) : loading && !hasLoaded ? (
           <div className="mindmap-state"><span className="mindmap-spinner" /><h2>正在读取脑图</h2><p>加载最新卡片与已保存的布局…</p></div>
         ) : !hasLoaded ? (
           <div className="mindmap-state"><span className="mindmap-state-mark">!</span><h2>暂时无法打开脑图</h2><p>{error}</p><button type="button" className="mindmap-button primary" onClick={() => void refresh()}>重试</button></div>

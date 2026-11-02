@@ -51,6 +51,10 @@ export async function updateDocumentMetadata(id: string, title: string, pageCoun
   desktopOnly()
   return invoke('update_document_metadata', { id, title, pageCount })
 }
+export async function exportMarkdownFile(path: string, content: string): Promise<void> {
+  desktopOnly()
+  return invoke('export_markdown', { path, content })
+}
 export async function updateDocumentProgress(id: string, lastPage: number): Promise<number> {
   if (!isTauriRuntime()) return lastPage
   return invoke('update_document_progress', { id, lastPage })

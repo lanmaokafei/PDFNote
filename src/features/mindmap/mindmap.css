@@ -126,6 +126,12 @@
 .mindmap-node-content section > span { color: #9aa392; font-size: 7px; letter-spacing: .8px; text-transform: uppercase; }
 .mindmap-node-content p { display: -webkit-box; margin: 3px 0 0; overflow: hidden; color: #5d6b5a; font-size: 9px; line-height: 1.55; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .mindmap-node-content p.is-empty { color: #a7aea1; font-style: italic; }
+.mindmap-node-image { display: block; max-width: 100%; max-height: 110px; margin-top: 5px; border: 1px solid #dde2d6; border-radius: 5px; object-fit: contain; background: #fff; }
+
+.mindmap-editor-image { margin: 10px 0 2px; }
+.mindmap-editor-image span { color: #9aa392; font-size: 7px; letter-spacing: .8px; text-transform: uppercase; }
+.mindmap-editor-image img { display: block; max-width: 100%; max-height: 160px; margin-top: 5px; border: 1px solid #dde2d6; border-radius: 6px; object-fit: contain; background: #fff; }
+.mindmap-editor-image small { display: block; margin-top: 4px; color: #97a093; font-size: 8.5px; line-height: 1.5; }
 .mindmap-reveal-answer { width: calc(100% - 22px); margin: 0 11px 9px; padding: 8px; border: 1px dashed #ccd7c3; border-radius: 5px; color: #6a7e60; background: #f2f6ec; font-size: 9px; cursor: pointer; }
 .mindmap-reveal-answer:hover { background: #eaf1e2; }
 .mindmap-recall-rating { padding: 0 11px 9px; }

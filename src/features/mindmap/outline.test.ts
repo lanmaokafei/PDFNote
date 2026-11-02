@@ -6,6 +6,7 @@ const base = {
   source_ref: null,
   tags: [],
   user_note: '',
+  excerpt_image: null,
   sort_order: 0,
   collapsed: false,
   stability: 0,

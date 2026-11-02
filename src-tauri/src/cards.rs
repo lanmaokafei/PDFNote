@@ -40,6 +40,14 @@ pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, Str
     if input.annotation.is_some() && input.source_ref.is_none() {
         return Err("标注需要 PDF 来源".into());
     }
+    if let Some(image) = &input.excerpt_image {
+        if !image.starts_with("data:image/") {
+            return Err("摘录图像必须是 data:image 格式".into());
+        }
+        if image.len() > 8_000_000 {
+            return Err("摘录图像过大，请缩小选区后重试".into());
+        }
+    }
     if let Some(annotation) = &input.annotation {
         validate_annotation(annotation)?;
     }
@@ -80,8 +88,8 @@ pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, Str
             "INSERT INTO cards (
                 id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height,
                 excerpt, user_note, question, parent_id, sort_order, collapsed,
-                due, review_state, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 'new', ?14, ?14)",
+                due, review_state, created_at, updated_at, excerpt_image
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 'new', ?14, ?14, ?15)",
             params![
                 id,
                 document_id,
@@ -97,6 +105,7 @@ pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, Str
                 input.sort_order,
                 timestamp,
                 timestamp,
+                input.excerpt_image,
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -766,8 +775,9 @@ pub fn merge_cards(state: &AppState, card_ids: Vec<String>) -> Result<Card, Stri
                 surface_pdf = ?4, surface_mindmap = ?5, surface_review = ?6, updated_at = ?7,
                 document_id = COALESCE(?8, document_id), page = COALESCE(?9, page),
                 bbox_x = COALESCE(?10, bbox_x), bbox_y = COALESCE(?11, bbox_y),
-                bbox_width = COALESCE(?12, bbox_width), bbox_height = COALESCE(?13, bbox_height)
-             WHERE id = ?14",
+                bbox_width = COALESCE(?12, bbox_width), bbox_height = COALESCE(?13, bbox_height),
+                excerpt_image = COALESCE(excerpt_image, ?14)
+             WHERE id = ?15",
             params![
                 excerpt,
                 user_note,
@@ -782,6 +792,7 @@ pub fn merge_cards(state: &AppState, card_ids: Vec<String>) -> Result<Card, Stri
                 bbox_y,
                 bbox_width,
                 bbox_height,
+                cards.iter().find_map(|card| card.excerpt_image.clone()),
                 target.id
             ],
         )
@@ -855,6 +866,7 @@ mod tests {
             parent_id,
             sort_order: 0,
             annotation: None,
+            excerpt_image: None,
         }
     }
 
@@ -900,6 +912,7 @@ mod tests {
                 question: String::new(),
                 parent_id: None,
                 sort_order: 0,
+                excerpt_image: None,
                 annotation: Some(AnnotationInput {
                     kind: "highlight".into(),
                     geometry: AnnotationGeometry { rects: vec![bbox] },
@@ -925,6 +938,7 @@ mod tests {
                 question: "带标签的卡片".into(),
                 parent_id: None,
                 sort_order: 0,
+                excerpt_image: None,
                 annotation: None,
             },
         )

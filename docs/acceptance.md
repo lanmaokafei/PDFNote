@@ -7,18 +7,19 @@
 
 | 项目 | 命令 | 结果 |
 | --- | --- | --- |
-| Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml` | 17 passed + 1 ignored（Vision 集成） |
-| 前端单元 | `npm run test` | 7 passed（2 files） |
+| Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml` | 26 passed + 1 ignored（Vision 集成） |
+| 前端单元 | `npm run test` | 13 passed（4 files，含公式检测与大纲导出） |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
-| 原生编译 | `npx tauri build --bundles app` | 通过，生成 20.2 MB release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.6.0 已通过 `hdiutil verify`，约 61 MB |
-| 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=3`，`quick_check=ok` |
+| 原生编译 | `npx tauri build --bundles app` | 通过，0.7.0 生成 57.8 MB release PDFNote.app |
+| DMG | 手动 `hdiutil` 打包 | 0.7.0 已通过 `hdiutil verify`，约 51 MB，SHA-256 见 `release/*.sha256` |
+| 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=4`，`quick_check=ok` |
+| schema 迁移 | 真实数据库副本执行 v3 → v4 | `excerpt_image` 列存在，5 张卡片保留，`quick_check=ok` |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
 
 Rust 测试覆盖：
 
-1. schema v1 → v2 → v3 迁移（阅读进度、标签/链接/墨迹）、外键与索引。
+1. schema v1 → v2 → v3 → v4 迁移（阅读进度、标签/链接/墨迹、摘录图像）、外键与索引。
 2. WAL、foreign_keys 安全设置。
 3. 同内容 PDF 去重、非 PDF 拒绝、缺失/哈希不一致检测。
 4. 删除文档时保留卡片、清理标注与 PDF。

@@ -69,6 +69,15 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
         <div className="mindmap-node-content">
           <section>
             <span>摘录</span>
+            {card.excerpt_image && (
+              <img
+                className="mindmap-node-image nodrag"
+                src={card.excerpt_image}
+                alt="摘录图像"
+                draggable={false}
+                loading="lazy"
+              />
+            )}
             <p className={!card.excerpt ? 'is-empty' : ''}>{card.excerpt || '未填写摘录'}</p>
           </section>
           <section>

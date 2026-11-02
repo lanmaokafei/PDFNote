@@ -39,6 +39,8 @@ export interface Card {
   surface_pdf: boolean
   surface_mindmap: boolean
   surface_review: boolean
+  /** 选区截图（data URL）。扫描版 PDF 的公式或图像摘录随卡片存档。 */
+  excerpt_image: string | null
   created_at: string
   updated_at: string
 }
@@ -68,6 +70,8 @@ export interface CreateCardInput {
   parent_id?: string
   sort_order?: number
   annotation?: AnnotationInput
+  /** 选区截图（data URL），用于无法文字识别的公式或图像摘录。 */
+  excerpt_image?: string
 }
 
 export interface UpdateCardContentInput {

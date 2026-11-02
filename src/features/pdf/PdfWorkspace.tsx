@@ -23,6 +23,7 @@ import {
   listPageInks,
   readPdfChunk,
   removeAnnotation,
+  setCardTags,
   updateAnnotationGeometry,
   updateDocumentProgress,
 } from '../../services/pdfnote'
@@ -43,7 +44,7 @@ import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
 import { PdfPage, type PageSize, type PdfTool } from './PdfPage'
-import { recognizeText } from './ocr'
+import { looksLikeMathFormula, recognizeText } from './ocr'
 import './PdfWorkspace.css'
 
 GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs'
@@ -561,6 +562,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     rect: NormalizedBBox,
     excerpt: string,
     ocrImage?: string,
+    archiveImage?: string,
   ) => {
     if (creating || recallMode || tool === 'select') return
     setCreating(true)
@@ -570,6 +572,8 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     let finalExcerpt = excerpt.trim()
     let ocrError = ''
     let usedOcr = false
+    // 选区原图始终生成：公式、扫描页、OCR 结果都需要它作为原始证据。
+    let cardImage = archiveImage ?? ocrImage
 
     if (!finalExcerpt && ocrImage) {
       setOcrMessage('正在识别选中区域的中文文字…')
@@ -590,22 +594,48 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
       }
     }
 
+    // 纯文字 OCR 引擎无法识别公式结构，会把公式输出成乱码。命中公式特征时：
+    // - 文字来自 PDF 文字层：保留原始字符（可信），同时附上原图供对照版式；
+    // - 文字来自 OCR：丢弃乱码，只存原图，由用户手动补录公式。
+    const isFormula = Boolean(finalExcerpt) && looksLikeMathFormula(finalExcerpt)
+    const ocrFormula = usedOcr && isFormula
+    if (ocrFormula) finalExcerpt = ''
+
     try {
-      await createCard({
+      const card = await createCard({
         source_ref: { document_id: document.id, page: page.pageNumber, bbox: rect },
         excerpt: finalExcerpt,
-        question: finalExcerpt ? '' : `第 ${page.pageNumber} 页图像摘录`,
+        question: finalExcerpt
+          ? ''
+          : isFormula
+            ? `第 ${page.pageNumber} 页公式摘录`
+            : `第 ${page.pageNumber} 页图像摘录`,
+        // 普通文字层摘录不存图，避免数据库被重复截图撑大；公式与 OCR 结果保留原图。
+        excerpt_image: finalExcerpt && !isFormula && !usedOcr ? undefined : cardImage,
         annotation: {
           kind: tool === 'rectangle' ? 'rectangle' : 'highlight',
           geometry: { rects: [rect] },
         },
       })
+      if (isFormula && !card.tags.includes('公式')) {
+        try {
+          await setCardTags(card.id, [...card.tags, '公式'])
+        } catch {
+          // 打标签失败不影响卡片创建。
+        }
+      }
       invalidateAnnotations(page.pageNumber)
       callbacksRef.current.onCardsChanged()
-      if (ocrError) {
+      if (ocrFormula) {
+        setNotice('选区疑似数学公式，文字 OCR 无法识别公式结构。已保存选区图像，请编辑卡片手动输入公式内容。')
+      } else if (isFormula) {
+        setNotice('已识别为公式：保留 PDF 原文并附上选区图像，请核对上下标与符号。')
+      } else if (ocrError) {
         setOperationError(`OCR 识别失败：${ocrError}。卡片已创建，可编辑摘录补充文字。`)
       } else if (finalExcerpt) {
         setNotice(usedOcr ? '中文 OCR 已完成，卡片与标注已创建。' : '已创建卡片与标注。')
+      } else if (cardImage) {
+        setNotice('未识别到文字，已创建图像摘录卡片。')
       } else {
         setNotice('未识别到文字，已创建空白摘录卡片，可稍后补充。')
       }

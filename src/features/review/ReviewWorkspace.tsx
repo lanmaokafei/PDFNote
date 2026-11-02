@@ -316,6 +316,14 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
                   <div className="review-question">
                     <span className="review-face-label">正面 · 问题</span>
                     <h2>{current.question.trim() || '这张卡片尚未填写问题'}</h2>
+                    {current.excerpt_image && (
+                      <img
+                        className="review-question-image"
+                        src={current.excerpt_image}
+                        alt="问题摘录图像"
+                        loading="lazy"
+                      />
+                    )}
                     <p>请在心里组织答案，准备好后再查看背面。</p>
                   </div>
 
@@ -323,6 +331,14 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
                     <div className="review-answer">
                       <section>
                         <span className="review-face-label">背面 · 原文摘录</span>
+                        {current.excerpt_image && (
+                          <img
+                            className="review-answer-image"
+                            src={current.excerpt_image}
+                            alt="原文摘录图像"
+                            loading="lazy"
+                          />
+                        )}
                         <p>{current.excerpt.trim() || '未填写原文摘录'}</p>
                       </section>
                       <section>

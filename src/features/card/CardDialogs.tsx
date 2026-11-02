@@ -94,6 +94,7 @@ export function TagDialog({ card, onClose, onSaved }: TagDialogProps) {
     setError('')
     try {
       const updated = await setCardTags(card.id, tags)
+      if (!updated) throw new Error('标签保存失败：后端未返回有效卡片数据')
       onSaved(updated)
       onClose()
     } catch (reason) {
@@ -202,6 +203,7 @@ export function LinkDialog({ card, cards, onClose, onChanged }: LinkDialogProps)
         setLinks((current) => (current ?? []).filter((link) => link.id !== existing.id))
       } else {
         const created = await createCardLink(card.id, targetId)
+        if (!created) throw new Error('链接创建失败：后端未返回有效数据')
         setLinks((current) => [...(current ?? []), created])
       }
       window.dispatchEvent(new Event('pdfnote:links-changed'))
@@ -288,6 +290,7 @@ export function MergeDialog({ cards, initialSelection = [], onClose, onMerged }:
     setError('')
     try {
       const merged = await mergeCards(selected)
+      if (!merged) throw new Error('合并失败：后端未返回有效卡片数据')
       onMerged(merged)
       onClose()
     } catch (reason) {

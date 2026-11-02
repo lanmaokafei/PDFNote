@@ -56,6 +56,7 @@ pub fn run() {
             commands::export_backup,
             commands::import_backup,
             commands::auto_backup,
+            commands::append_crash_log,
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;

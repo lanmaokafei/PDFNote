@@ -330,6 +330,41 @@ pub fn auto_backup(state: State<'_, AppState>) -> Result<String, String> {
     backup::auto_backup(&state)
 }
 
+/// 把前端渲染崩溃（错误消息 + React 组件栈）追加到本地日志，便于离线诊断。
+#[tauri::command(async)]
+pub fn append_crash_log(state: State<'_, AppState>, payload: String) -> Result<String, String> {
+    let logs_dir = state.data_dir.join("logs");
+    std::fs::create_dir_all(&logs_dir).map_err(|error| error.to_string())?;
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let path = logs_dir.join(format!("crash-{timestamp}.log"));
+    // 追加而非覆盖：同一秒内多次崩溃都要留痕。
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| error.to_string())?;
+    writeln!(file, "{payload}").map_err(|error| error.to_string())?;
+    // 只保留最近 20 份崩溃日志，避免无限增长。
+    let mut crashes: Vec<std::path::PathBuf> = std::fs::read_dir(&logs_dir)
+        .map_err(|error| error.to_string())?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .map(|value| value.starts_with("crash-") && value.ends_with(".log"))
+                .unwrap_or(false)
+        })
+        .collect();
+    crashes.sort();
+    while crashes.len() > 20 {
+        let oldest = crashes.remove(0);
+        let _ = std::fs::remove_file(oldest);
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::export_markdown;

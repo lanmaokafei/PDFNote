@@ -44,7 +44,7 @@ interface PdfPageProps {
   registerPage: (pageNumber: number, element: HTMLElement | null) => void
   onSize: (pageNumber: number, size: PageSize) => void
   onSelect: (annotation: Annotation) => void
-  onCreate: (page: PDFPageProxy, rect: NormalizedBBox, excerpt: string, ocrImage?: string) => Promise<void>
+  onCreate: (page: PDFPageProxy, rect: NormalizedBBox, excerpt: string, ocrImage?: string, archiveImage?: string) => Promise<void>
   onMove: (annotation: Annotation, geometry: AnnotationGeometry, bbox: NormalizedBBox) => void
   onReveal: (annotationIds: string[]) => void
   onInk: (bbox: NormalizedBBox, points: Array<[number, number]>) => void
@@ -241,9 +241,13 @@ export function PdfPage({
     })
   }
 
-  const cropSelection = (rect: NormalizedBBox): string | undefined => {
+  /**
+   * 裁剪选区。ocrImage 供 OCR 引擎使用（尽量大以保证识别率），
+   * archiveImage 是随卡片存档的较小版本，避免数据库被大图撑爆。
+   */
+  const cropSelection = (rect: NormalizedBBox, withOcr = true): { ocr?: string; archive?: string } => {
     const canvas = canvasRef.current
-    if (!canvas || !viewport || !view) return undefined
+    if (!canvas || !viewport || !view) return {}
     const display = toDisplayRect(rect, viewport, view)
     const ratioX = canvas.width / Math.max(viewport.width, 1)
     const ratioY = canvas.height / Math.max(viewport.height, 1)
@@ -252,37 +256,51 @@ export function PdfPage({
     const sourceY = Math.max(0, Math.floor((display.top - padding) * ratioY))
     const sourceWidth = Math.min(canvas.width - sourceX, Math.ceil((display.width + padding * 2) * ratioX))
     const sourceHeight = Math.min(canvas.height - sourceY, Math.ceil((display.height + padding * 2) * ratioY))
-    if (sourceWidth <= 0 || sourceHeight <= 0) return undefined
+    if (sourceWidth <= 0 || sourceHeight <= 0) return {}
 
-    const upscale = Math.min(3, Math.max(1, 90 / Math.max(sourceHeight, 1)))
-    let outputWidth = Math.max(1, Math.round(sourceWidth * upscale))
-    let outputHeight = Math.max(1, Math.round(sourceHeight * upscale))
-    const maxDimension = 2400
-    if (outputWidth > maxDimension || outputHeight > maxDimension) {
-      const shrink = maxDimension / Math.max(outputWidth, outputHeight)
-      outputWidth = Math.max(1, Math.round(outputWidth * shrink))
-      outputHeight = Math.max(1, Math.round(outputHeight * shrink))
+    const drawCropped = (output: HTMLCanvasElement, maxDimension: number) => {
+      const upscale = Math.min(3, Math.max(1, 90 / Math.max(sourceHeight, 1)))
+      let outputWidth = Math.max(1, Math.round(sourceWidth * upscale))
+      let outputHeight = Math.max(1, Math.round(sourceHeight * upscale))
+      if (outputWidth > maxDimension || outputHeight > maxDimension) {
+        const shrink = maxDimension / Math.max(outputWidth, outputHeight)
+        outputWidth = Math.max(1, Math.round(outputWidth * shrink))
+        outputHeight = Math.max(1, Math.round(outputHeight * shrink))
+      }
+      output.width = outputWidth
+      output.height = outputHeight
+      const context = output.getContext('2d')
+      if (!context) return
+      context.imageSmoothingEnabled = true
+      context.imageSmoothingQuality = 'high'
+      context.drawImage(
+        canvas,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        output.width,
+        output.height,
+      )
     }
-    const output = window.document.createElement('canvas')
-    output.width = outputWidth
-    output.height = outputHeight
-    const context = output.getContext('2d')
-    if (!context) return undefined
-    context.imageSmoothingEnabled = true
-    context.imageSmoothingQuality = 'high'
-    context.drawImage(
-      canvas,
-      sourceX,
-      sourceY,
-      sourceWidth,
-      sourceHeight,
-      0,
-      0,
-      output.width,
-      output.height,
-    )
-    // JPEG 足以支撑文字识别，且能显著降低 IPC 传输体积。
-    return output.toDataURL('image/jpeg', 0.92)
+
+    // OCR 用大图保证识别率；JPEG 足以支撑文字识别，且能显著降低 IPC 传输体积。
+    // 有文字层时不需要 OCR，只生成存档图，避免无谓地渲染 2400px 画布。
+    let ocrImage: string | undefined
+    if (withOcr) {
+      const ocr = window.document.createElement('canvas')
+      drawCropped(ocr, 2400)
+      ocrImage = ocr.width > 0 ? ocr.toDataURL('image/jpeg', 0.92) : undefined
+    }
+    // 存档图上限 1000px，公式/图表在复习视图中仍清晰可读。
+    const archive = window.document.createElement('canvas')
+    drawCropped(archive, 1000)
+    return {
+      ocr: ocrImage,
+      archive: archive.width > 0 ? archive.toDataURL('image/jpeg', 0.82) : undefined,
+    }
   }
 
   const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
@@ -314,9 +332,14 @@ export function PdfPage({
         void page.getTextContent()
           .then((content) => {
             const excerpt = extractTextInRect(content, rect, view)
-            onCreate(page, rect, excerpt, excerpt ? undefined : cropSelection(rect))
+            // 文字层文本也可能来自公式版式，始终生成存档图；只有无文字层才需要 OCR 大图。
+            const crops = cropSelection(rect, !excerpt)
+            onCreate(page, rect, excerpt, crops.ocr, crops.archive)
           })
-          .catch(() => onCreate(page, rect, '', cropSelection(rect)))
+          .catch(() => {
+            const crops = cropSelection(rect)
+            onCreate(page, rect, '', crops.ocr, crops.archive)
+          })
       }
     } else {
       onMove(interaction.annotation, { rects: interaction.rects }, unionRects(interaction.rects))

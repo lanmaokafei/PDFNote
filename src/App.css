@@ -220,6 +220,10 @@
 .app-crash-card p { margin: 12px 0 0; color: #7b8676; font-size: 11px; line-height: 1.8; }
 .app-crash-card pre { max-height: 100px; overflow: auto; padding: 10px; border-radius: 5px; color: #8b5b50; background: #f7efec; font-size: 9px; white-space: pre-wrap; }
 .app-crash-card button { height: 34px; padding: 0 14px; border: 0; border-radius: 6px; color: #f4f6ee; background: #3a5240; font-size: 10px; cursor: pointer; }
+.app-crash-stack { margin: 12px 0 0; }
+.app-crash-stack summary { color: #8f9989; font-size: 9.5px; cursor: pointer; user-select: none; }
+.app-crash-stack pre { max-height: 220px; margin-top: 8px; color: #6e7869; background: #f1f4ec; }
+.app-crash-note { color: #a4ad99; font-size: 9px; }
 
 @media (max-width: 980px) {
   .app-top { top: 10px; width: calc(100% - 16px); }

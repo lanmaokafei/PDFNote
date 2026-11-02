@@ -192,3 +192,9 @@ export async function autoBackup(): Promise<string> {
   desktopOnly()
   return invoke('auto_backup')
 }
+
+/** 把渲染崩溃的错误与组件栈写入本地日志文件，便于离线诊断。 */
+export async function appendCrashLog(payload: string): Promise<void> {
+  if (!isTauriRuntime()) return
+  await invoke('append_crash_log', { payload }).catch(() => undefined)
+}

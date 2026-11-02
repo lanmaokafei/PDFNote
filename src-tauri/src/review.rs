@@ -271,6 +271,7 @@ mod tests {
                 parent_id: None,
                 sort_order: 0,
                 annotation: None,
+                excerpt_image: None,
             },
         )
         .unwrap();

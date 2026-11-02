@@ -296,6 +296,36 @@ fn document_copy_sql(schema_version: u32, only_missing: bool) -> String {
     )
 }
 
+const CARD_CURRENT_COLUMNS: &str = "id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height, excerpt, user_note, question, parent_id, sort_order, collapsed, stability, difficulty, elapsed_days, scheduled_days, learning_steps, due, last_review, reps, lapses, review_state, surface_pdf, surface_mindmap, surface_review, created_at, updated_at, excerpt_image";
+
+/// v4 起卡片带 excerpt_image；旧备份没有该列，导入时补 NULL，避免 `SELECT *` 列数不匹配。
+fn card_copy_sql(schema_version: u32, condition: &str) -> String {
+    let legacy_columns = CARD_CURRENT_COLUMNS
+        .split(", ")
+        .take(28)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let selected = if schema_version >= 4 {
+        CARD_CURRENT_COLUMNS
+            .split(", ")
+            .map(|column| format!("s.{column}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        format!(
+            "{}, NULL",
+            legacy_columns
+                .split(", ")
+                .map(|column| format!("s.{column}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    format!(
+        "INSERT INTO cards ({CARD_CURRENT_COLUMNS}) SELECT {selected} FROM import_src.cards s{condition}"
+    )
+}
+
 /// 旧备份（0.6.0 之前）没有标签/链接/墨迹表，导入时先判断是否存在。
 fn import_has_table(connection: &rusqlite::Connection, table: &str) -> Result<bool, String> {
     connection
@@ -353,7 +383,7 @@ fn import_overwrite(
         let documents_statement = document_copy_sql(manifest.schema_version, false);
         for statement in [
             documents_statement.as_str(),
-            "INSERT INTO cards SELECT * FROM import_src.cards",
+            card_copy_sql(manifest.schema_version, "").as_str(),
             "INSERT INTO annotations SELECT * FROM import_src.annotations",
             "INSERT INTO mindmap_layout SELECT * FROM import_src.mindmap_layout",
             "INSERT INTO review_logs SELECT * FROM import_src.review_logs",
@@ -407,9 +437,10 @@ fn import_merge(
             .map_err(|error| error.to_string())?;
         transaction
             .execute(
-                "INSERT INTO cards
-                 SELECT s.* FROM import_src.cards s
-                 WHERE NOT EXISTS (SELECT 1 FROM cards c WHERE c.id = s.id)",
+                &card_copy_sql(
+                    manifest.schema_version,
+                    " WHERE NOT EXISTS (SELECT 1 FROM cards c WHERE c.id = s.id)",
+                ),
                 [],
             )
             .map_err(|error| error.to_string())?;
@@ -697,6 +728,7 @@ mod tests {
                 question: "问题".into(),
                 parent_id: None,
                 sort_order: 0,
+                excerpt_image: Some("data:image/jpeg;base64,ZmFrZQ==".into()),
                 annotation: Some(AnnotationInput {
                     kind: "highlight".into(),
                     geometry: AnnotationGeometry { rects: vec![bbox] },
@@ -715,6 +747,21 @@ mod tests {
         assert!(legacy.contains("s.content_hash"));
         let current = document_copy_sql(2, true);
         assert!(current.contains("last_page"));
+        assert!(current.contains("NOT EXISTS"));
+    }
+
+    #[test]
+    fn card_copy_sql_is_compatible_with_legacy_backups() {
+        let legacy = card_copy_sql(3, "");
+        assert!(legacy.contains("s.created_at, s.updated_at, NULL FROM import_src.cards s"));
+        assert!(legacy.contains("INSERT INTO cards ("));
+        assert!(legacy.contains("excerpt_image"));
+        assert!(!legacy.contains("s.excerpt_image"));
+        let current = card_copy_sql(
+            4,
+            " WHERE NOT EXISTS (SELECT 1 FROM cards c WHERE c.id = s.id)",
+        );
+        assert!(current.contains("s.excerpt_image"));
         assert!(current.contains("NOT EXISTS"));
     }
 
@@ -756,6 +803,7 @@ mod tests {
                 parent_id: None,
                 sort_order: 0,
                 annotation: None,
+                excerpt_image: None,
             },
         )
         .unwrap();
@@ -802,6 +850,14 @@ mod tests {
             (1, 1, 1),
             "标签/链接/墨迹必须随备份恢复"
         );
+        let with_image: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM cards WHERE excerpt_image IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(with_image, 1, "摘录图像必须随备份恢复");
         drop(database);
         let document = crate::documents::list_documents(&target_state)
             .unwrap()
@@ -872,6 +928,7 @@ mod overwrite_tests {
                 parent_id: None,
                 sort_order: 0,
                 annotation: None,
+                excerpt_image: None,
             },
         )
         .unwrap();
@@ -940,6 +997,7 @@ mod backup_freshness_tests {
                 parent_id: None,
                 sort_order: 0,
                 annotation: None,
+                excerpt_image: None,
             },
         )
         .unwrap();

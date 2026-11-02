@@ -46,6 +46,13 @@ export function CardEditor({ card, busy, onClose, onSave }: CardEditorProps) {
           {card ? '保存后通过 loadCards 同步文档、脑图与复习视图。' : '不设置父节点；创建后可拖动到另一节点上建立层级。'}
         </p>
         <form onSubmit={(event) => void submit(event)}>
+          {card?.excerpt_image && (
+            <div className="mindmap-editor-image">
+              <span>摘录图像</span>
+              <img src={card.excerpt_image} alt="PDF 选区截图" />
+              <small>此卡片附带 PDF 选区截图。若选区是公式，请把内容补写为文字（可用 LaTeX 语法），图像会始终保留。</small>
+            </div>
+          )}
           <label>
             <span>问题</span>
             <textarea

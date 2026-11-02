@@ -63,11 +63,14 @@ pub struct Card {
     pub surface_pdf: bool,
     pub surface_mindmap: bool,
     pub surface_review: bool,
+    /// 选区截图（data URL）。扫描版 PDF 的公式或图像摘录随卡片存档。
+    #[serde(default)]
+    pub excerpt_image: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
-pub const CARD_COLUMNS: &str = "id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height, excerpt, user_note, question, parent_id, sort_order, collapsed, stability, difficulty, elapsed_days, scheduled_days, learning_steps, due, last_review, reps, lapses, review_state, surface_pdf, surface_mindmap, surface_review, created_at, updated_at";
+pub const CARD_COLUMNS: &str = "id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height, excerpt, user_note, question, parent_id, sort_order, collapsed, stability, difficulty, elapsed_days, scheduled_days, learning_steps, due, last_review, reps, lapses, review_state, surface_pdf, surface_mindmap, surface_review, created_at, updated_at, excerpt_image";
 
 pub fn card_from_row(row: &Row<'_>) -> Result<Card, Error> {
     let document_id: Option<String> = row.get(1)?;
@@ -111,6 +114,7 @@ pub fn card_from_row(row: &Row<'_>) -> Result<Card, Error> {
         surface_review: row.get::<_, i64>(25)? != 0,
         created_at: row.get(26)?,
         updated_at: row.get(27)?,
+        excerpt_image: row.get(28)?,
     })
 }
 
@@ -246,6 +250,8 @@ pub struct CreateCardInput {
     #[serde(default)]
     pub sort_order: i64,
     pub annotation: Option<AnnotationInput>,
+    #[serde(default)]
+    pub excerpt_image: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,10 +1,11 @@
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
 const DOCUMENT_PROGRESS_SQL: &str = include_str!("../../migrations/002_document_progress.sql");
 const COLLABORATION_SQL: &str = include_str!("../../migrations/003_collaboration.sql");
+const EXCERPT_IMAGE_SQL: &str = include_str!("../../migrations/004_card_excerpt_image.sql");
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
@@ -45,13 +46,19 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
         0 => {
             apply_migration(connection, INIT_SQL, 1)?;
             apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2)?;
-            apply_migration(connection, COLLABORATION_SQL, 3)
+            apply_migration(connection, COLLABORATION_SQL, 3)?;
+            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)
         }
         1 => {
             apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2)?;
-            apply_migration(connection, COLLABORATION_SQL, 3)
+            apply_migration(connection, COLLABORATION_SQL, 3)?;
+            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)
         }
-        2 => apply_migration(connection, COLLABORATION_SQL, 3),
+        2 => {
+            apply_migration(connection, COLLABORATION_SQL, 3)?;
+            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)
+        }
+        3 => apply_migration(connection, EXCERPT_IMAGE_SQL, 4),
         newer => Err(format!(
             "数据库 schema 版本 {newer} 高于当前应用支持的版本 {SCHEMA_VERSION}"
         )),
@@ -102,6 +109,7 @@ mod tests {
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
         assert!(columns(&connection, "documents").contains(&"last_page".to_string()));
+        assert!(columns(&connection, "cards").contains(&"excerpt_image".to_string()));
         for table in ["card_tags", "card_links", "page_inks"] {
             let count: i64 = connection
                 .query_row(
@@ -138,7 +146,7 @@ mod tests {
         let version: u32 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
         let last_page: i64 = connection
             .query_row(
                 "INSERT INTO documents (id, title, stored_path, content_hash, created_at, updated_at)

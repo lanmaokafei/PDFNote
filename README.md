@@ -30,6 +30,8 @@ npm run dev
 
 原生依赖：Rust stable、Node.js 20+、各平台 Tauri 系统依赖。
 
+> 构建注意：`public/` 会被整体复制进 `dist` 并嵌入 `.app`。测试用大文件请放在 `test-fixtures/`（已被 `*.pdf` 忽略），不要放进 `public/`；`vite.config.ts` 的 `emptyOutDir: true` 会清理历史构建产物，避免包体积膨胀。
+
 ## 验证
 
 ```bash
@@ -42,9 +44,9 @@ npm run tauri build
 
 2026-11-02 本地验证结果：
 
-- Rust：17 项测试通过 + 1 项 Vision 集成测试（迁移、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、坏包保护等）。
-- 前端：7 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射）。
-- Tauri：debug 原生编译与 `.app` 打包通过；首次启动自动建库 `quick_check=ok`。
+- Rust：26 项测试通过 + 1 项 Vision 集成测试（迁移至 v4、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、旧备份列兼容、坏包保护等）。
+- 前端：13 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、公式特征检测）。
+- Tauri：release 原生编译与 `.app` 打包通过；首次启动自动建库 `quick_check=ok`。
 - 界面：资料库、脑图、复习、备份四视图无头浏览器冒烟无 console error。
 
 ## 目录
@@ -59,7 +61,7 @@ src/features/mindmap/    脑图与脑图回忆
 src/features/review/     FSRS 调度与复习界面
 src/features/backup/     备份与恢复
 src-tauri/src/           Rust 命令、数据访问、备份、文件管理
-src-tauri/migrations/    SQLite schema v2（001 初始化 + 002 阅读进度）
+src-tauri/migrations/    SQLite schema v4（001 初始化 → 002 阅读进度 → 003 协作能力 → 004 摘录图像）
 src-tauri/capabilities/  主窗口最小权限
 public/pdfjs/            离线 PDF.js worker / fonts / cmaps
 docs/                    架构、实施、数据恢复与已知限制
@@ -79,13 +81,15 @@ scripts/ui-smoke.mjs     Playwright 界面冒烟脚本（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.6.0_aarch64.dmg
-release/PDFNote_0.6.0_aarch64.dmg.sha256
+release/PDFNote_0.7.0_aarch64.dmg
+release/PDFNote_0.7.0_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
 
 ## 重要修复
+
+- 0.7.0 处理公式选区：macOS Vision / Tesseract 无法识别公式结构，检测到公式特征时保留选区原图（`cards.excerpt_image`），不写入乱码文本；扫描页图像摘录同样随卡片存档，脑图节点、复习闪卡与编辑器均可查看。schema 升至 v4。崩溃时错误与 React 组件栈写入 app 数据目录 `logs/crash-*.log`。
 
 - 0.6.0 补齐标签、链接、墨迹、合并四项能力，schema 升至 v3，详见 [卡片能力](docs/card-features.md)。
 

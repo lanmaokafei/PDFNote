@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { looksLikeLatex, splitMathText } from './latex'
+import { hasMathContent, looksLikeLatex, splitMathText } from './latex'
 
 describe('looksLikeLatex', () => {
   it('recognizes the formula returned by the AI gateway', () => {
@@ -56,5 +56,20 @@ describe('splitMathText', () => {
     const segments = splitMathText('普通笔记')
     expect(segments).toHaveLength(1)
     expect(segments[0]).toEqual({ kind: 'text', value: '普通笔记', display: false })
+  })
+})
+
+describe('hasMathContent', () => {
+  it('is true for a bare formula', () => {
+    expect(hasMathContent('H = -\\sum_{i=1}^{n} P(x_i) \\log_2 P(x_i)')).toBe(true)
+  })
+
+  it('is true for inline math inside prose', () => {
+    expect(hasMathContent('熵是 $H = -\\sum p \\log p$，单位 bit')).toBe(true)
+  })
+
+  it('is false for plain text and empty excerpts', () => {
+    expect(hasMathContent('典型胸痛 + ST 段改变')).toBe(false)
+    expect(hasMathContent('')).toBe(false)
   })
 })

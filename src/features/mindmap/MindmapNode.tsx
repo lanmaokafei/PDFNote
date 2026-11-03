@@ -7,6 +7,7 @@ export type MindmapFlowNode = Node<{ card_id: string }, 'mindmapCard'>
 
 import { MindmapNodeContext } from './MindmapContext'
 import { MathText } from '../../ui/MathText'
+import { hasMathContent } from '../../ui/latex'
 
 const ratings: Array<{ value: Rating; label: string }> = [
   { value: 1, label: '重来' },
@@ -30,6 +31,9 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
   if (!context) throw new Error('MindmapNode must be rendered inside MindmapWorkspace')
   if (!card) return <div className="mindmap-node mindmap-node-missing">卡片已不可用</div>
 
+  // 摘录能排版成公式时不再显示选区截图：两者内容重复，图片还会把公式挤出卡片。
+  const excerptHasMath = hasMathContent(card.excerpt)
+  const showExcerptImage = Boolean(card.excerpt_image) && !excerptHasMath
   const collapsed = context.collapsedIds.has(card.id)
   const revealed = !context.recallActive || context.revealedIds.has(card.id)
   const rated = context.ratedIds.has(card.id)
@@ -70,10 +74,10 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
         <div className="mindmap-node-content">
           <section>
             <span>摘录</span>
-            {card.excerpt_image && (
+            {showExcerptImage && (
               <img
                 className="mindmap-node-image nodrag"
-                src={card.excerpt_image}
+                src={card.excerpt_image ?? undefined}
                 alt="摘录图像"
                 draggable={false}
                 loading="lazy"

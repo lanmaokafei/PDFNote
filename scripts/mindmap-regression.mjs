@@ -211,8 +211,15 @@ if (STEP === 'math') {
   const fontLoaded = await page.evaluate(() => document.fonts.check('16px KaTeX_Main'))
   if (!fontLoaded) problems.push('KaTeX 字体未加载')
 
+  // 公式卡片的截图必须隐藏（与渲染结果重复，还会把公式挤出卡片）；
+  // 纯图片卡片仍要保留截图。
+  const formulaNodeImages = await page.locator('.mindmap-node').first().locator('.mindmap-node-image').count()
+  const totalImages = await page.locator('.mindmap-node-image').count()
+  if (formulaNodeImages !== 0) problems.push(`公式卡片仍显示截图：${formulaNodeImages}`)
+  if (totalImages < 1) problems.push('无公式的图片卡片被误隐藏')
+
   await browser.close()
-  console.log(JSON.stringify({ problems, step: STEP, katexCount, displayCount, fontLoaded }, null, 2))
+  console.log(JSON.stringify({ problems, step: STEP, katexCount, displayCount, fontLoaded, formulaNodeImages, totalImages }, null, 2))
   if (problems.length) process.exitCode = 1
   process.exit(0)
 }

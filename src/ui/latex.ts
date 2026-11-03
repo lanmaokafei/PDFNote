@@ -84,3 +84,13 @@ export function splitMathText(text: string): MathSegment[] {
   }
   return segments.length > 0 ? segments : [{ kind: 'text', value: text, display: false }]
 }
+
+/**
+ * 这段文本里是否真的有可渲染的公式。
+ *
+ * 用于决定要不要显示选区截图：摘录已经能排版成公式时，
+ * 再叠一张公式截图只会挤占空间、让公式显示不完整。
+ */
+export function hasMathContent(text: string): boolean {
+  return splitMathText(text).some((segment) => segment.kind === 'math')
+}

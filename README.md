@@ -51,7 +51,7 @@ npm run tauri build
 2026-11-02 本地验证结果：
 
 - Rust：50 项测试通过（含 2 项 Vision 真机集成：`OCR_TEST_IMAGE` 中文识别、`OCR_PAGE_TEST_IMAGE` 行级坐标）；覆盖迁移至 v6、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、旧备份列兼容、页面文字缓存、坏包保护、视觉模型设置/连通性测试、任务号解析与异步结果取回、本地 mock 端到端识别等。
-- 前端：64 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、脑图折叠可见性、标注缓存联动清理、公式特征检测与决策、LaTeX 检测与切分、识别失败摘要与任务号提取、文字层行提取与选区文本、右键菜单定位边界、标题链接字典与匹配）。
+- 前端：67 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、脑图折叠可见性、标注缓存联动清理、公式特征检测与决策、LaTeX 检测与切分（含公式内容判定）、识别失败摘要与任务号提取、文字层行提取与选区文本、右键菜单定位边界、标题链接字典与匹配）。
 - 设置面板冒烟：`node scripts/settings-smoke.mjs`（需 dev server），验证模型配置对话框字段、非桌面环境提示与关闭。
 - 脑图稳定性回归：`CARD_COUNT=120 STEP=all node scripts/mindmap-regression.mjs`（需 dev server），覆盖大纲往返、折叠展开、拖拽落盘、连续 resize 与单选/多选，专治 React #185。
 - 文字层冒烟：`node scripts/textlayer-smoke.mjs`，用无头 Chrome 验证透明 DOM 文字可原生拖选并换算出归一化选区。
@@ -96,8 +96,8 @@ scripts/mindmap-regression.mjs 脑图 React #185 回归（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.13.0_aarch64.dmg
-release/PDFNote_0.13.0_aarch64.dmg.sha256
+release/PDFNote_0.13.1_aarch64.dmg
+release/PDFNote_0.13.1_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
@@ -138,6 +138,8 @@ killall Dock
 ```
 
 ## 重要修复
+
+- 0.13.1 修正**公式卡片重复显示**：摘录已经能排版成公式时，不再显示选区截图，避免图片挤占空间把公式遮住；纯图片卡片（OCR 没取到文字）仍保留截图。
 
 - 0.13.0 新增**公式渲染**：KaTeX 本地渲染卡片里的 LaTeX（脑图节点、大纲、复习卡背面），裸 LaTeX 与 `$...$` 混排都能识别，原始源码保留可编辑。同时修正脑图画布导航：**左键拖空白即可平移**、触控板双指滑动平移、`⌘`+滚轮或捏合缩放，框选改为按住 `Shift`。
 

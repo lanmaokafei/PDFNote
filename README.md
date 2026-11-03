@@ -103,9 +103,30 @@ release/PDFNote_0.12.6_aarch64.dmg.sha256
 
 DMG 内已放置 **Applications 快捷方式**：打开镜像后把 PDFNote 拖进「应用程序」即可完成安装（打包时用 staging 目录 + `ln -s /Applications`，再 `hdiutil create -srcfolder`）。
 
+打包完成后记得取消注册构建目录里的副本，否则它会和 `/Applications` 抢 LaunchServices 的“主副本”，表现为启动台 / 应用程序面板里看不到图标：
+
+```bash
+LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+$LSREG -u src-tauri/target/release/bundle/macos/PDFNote.app
+$LSREG -f /Applications/PDFNote.app
+killall Dock
+```
+
 安装后如遇以下情况：
 
-- **启动台（Launchpad）里看不到图标**：Spotlight 能搜到、能打开，但 Launchpad 没刷新。执行 `killall Dock` 重建 Dock/Launchpad 缓存即可；安装新版覆盖旧版后也建议执行一次。
+- **启动台 / 应用程序面板里看不到图标**（Spotlight 能搜到、也能打开）：说明 LaunchServices 里登记了多个同 bundle id 的副本（构建产物、已卸载的 DMG 卷），系统把“主副本”指到了不存在或开发目录的路径。按顺序执行：
+
+```bash
+LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+$LSREG -dump | grep "PDFNote.app"          # 看有哪些残留路径
+$LSREG -u "/Volumes/PDFNote/PDFNote.app"   # 逐个取消（换成上面列出的路径）
+$LSREG -u src-tauri/target/release/bundle/macos/PDFNote.app
+$LSREG -f /Applications/PDFNote.app        # 安装副本重新登记
+killall Dock
+```
+
+  之后 `lsregister -dump | grep PDFNote.app` 应只剩 `/Applications/PDFNote.app`，`open -a PDFNote` 会启动安装版。
+
 - **首次打开提示“无法验证开发者”**：这是未做 Apple 公证的正常结果。在「应用程序」里右键 PDFNote → 打开，或到「系统设置 → 隐私与安全性」点“仍要打开”。
 - **已经装了旧版本**（0.12.2 及更早）导致 Launchpad 异常：旧包是链接器自动签名，bundle 资源未封印。用新版覆盖，或手动修复已安装副本：
 
@@ -117,7 +138,7 @@ killall Dock
 
 ## 重要修复
 
-- 0.12.6 让公式识别真正对齐 Mathpix：提示词先判断图片中是否存在科学公式，有公式则输出 Mathpix 兼容 LaTeX（保留 `\\frac`、`\\sum_{i=1}^{n}`、`\\log_2`、上下标结构），无公式则输出文字。网关 504 后的任务结果解析更宽容（`data.latex`、嵌套 `content` 数组、`result.output` 等），首次立即查询；设置面板新增「按任务号取回结果」，可对已完成任务直接取回 LaTeX 并复制。
+- 0.12.6 让公式识别真正对齐 Mathpix：提示词先判断图片中是否存在科学公式，有公式则输出 Mathpix 兼容 LaTeX（保留 `\frac`、`\sum_{i=1}^{n}`、`\log_2`、上下标结构），无公式则输出文字。网关 504 后的任务结果解析更宽容（`data.latex`、嵌套 `content` 数组、`result.output` 等），首次立即查询；设置面板新增「按任务号取回结果」，可对已完成任务直接取回 LaTeX 并复制。
 
 - 0.12.5 处理**网关 504 超时**：当服务端在自己的 90 秒上限先返回 504 并给出异步任务号时，应用会自动轮询 `/tasks/{task_no}` 取回识别结果，而不是直接失败；设置面板新增可调超时（30–300 秒），提示文案也改用实际配置值。
 

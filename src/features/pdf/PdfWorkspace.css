@@ -1063,8 +1063,12 @@
 }
 .pdf-text-layer.is-active .pdf-text-line::selection,
 .pdf-text-layer.is-active .pdf-text-line > span::selection {
-  color: #16261c;
-  background: rgba(86, 156, 204, .38);
+  /* 文字必须保持透明：这里的 DOM 字形经过 scaleX 拉伸，
+     一旦显示就会与 PDF 真实字形错位形成重影。选区只画底色。 */
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: transparent;
+  background: rgba(86, 156, 204, .32);
 }
 .pdf-page.is-text-mode { cursor: text; }
 .pdf-page.is-text-mode .pdf-annotation-layer { pointer-events: none; }

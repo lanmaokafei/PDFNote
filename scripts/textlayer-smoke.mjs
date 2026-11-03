@@ -12,7 +12,7 @@ await page.setContent(`<!doctype html>
   .layer { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: auto; user-select: none; }
   .line { position: absolute; white-space: pre; line-height: 1; color: transparent; user-select: text; }
   .line > span { display: inline-block; white-space: pre; vertical-align: top; transform-origin: left top; }
-  .line::selection, .line > span::selection { color: #16261c; background: rgba(86,156,204,.38); }
+  .line::selection, .line > span::selection { color: transparent; -webkit-text-fill-color: transparent; caret-color: transparent; background: rgba(86,156,204,.32); }
   .svg-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 </style></head><body>
   <div class="page" id="page">
@@ -72,11 +72,21 @@ const selected = await page.evaluate(() => {
   }
 })
 
+// 选区字形必须保持透明，否则拉伸后的 DOM 字形会与 PDF 真实字形重影。
+const selectionStyle = await page.evaluate(() => {
+  const span = document.querySelector('.line > span')
+  if (!span) return null
+  const style = getComputedStyle(span, '::selection')
+  return { color: style.color, fillColor: style.webkitTextFillColor }
+})
+
 await browser.close()
 
 const ok = selected.text.length > 0
   && geometry[0].text.includes(selected.text)
   && selected.bbox.width > 0
   && selected.bbox.height > 0
-console.log(JSON.stringify({ ok, selected }, null, 2))
+  && !!selectionStyle
+  && selectionStyle.color === 'rgba(0, 0, 0, 0)'
+console.log(JSON.stringify({ ok, selected, selectionStyle }, null, 2))
 if (!ok) process.exitCode = 1

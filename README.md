@@ -86,14 +86,15 @@ scripts/contextmenu-smoke.mjs  右键菜单冒烟脚本（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.10.0_aarch64.dmg
-release/PDFNote_0.10.0_aarch64.dmg.sha256
+release/PDFNote_0.10.1_aarch64.dmg
+release/PDFNote_0.10.1_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
 
 ## 重要修复
 
+- 0.10.1 修复**文字选区重影**：选区高亮此前会把文字层里被拉伸的 DOM 字形一并画出来，与 PDF 真实字形错位形成“双层文字”。现在选区只绘制半透明底色，字形始终保持透明。
 - 0.10.0 用**应用内右键菜单**替代 WKWebView 只有 Reload 的原生菜单：按选中的文字、标注、墨迹、脑图节点等元素提供就地操作；输入框仍保留系统复制/粘贴菜单。详见 [应用内右键菜单](docs/context-menu.md)。
 
 - 0.9.0 加入**可选文字层**：Apple Vision 返回的每行坐标不再丢弃，整页识别一次后铺成透明 DOM 文字层并缓存到 SQLite（`page_ocr`，schema v5）。「文字」工具下可像 Word 一样拖选、复制、建卡；框选建卡也优先读缓存文字，不再每次等待 OCR。有 PDF 文字层的页面直接用精确字形坐标，完全不走 OCR。

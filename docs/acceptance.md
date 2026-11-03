@@ -13,8 +13,8 @@
 | 右键菜单冒烟 | `node scripts/contextmenu-smoke.mjs` | 通过：原生 Reload 菜单被接管、菜单项执行动作、右下角翻转、键盘导航、输入框保留系统菜单、选区读取与跨层判定 |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
-| 原生编译 | `npx tauri build --bundles app` | 通过，0.12.3 生成 release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.12.3 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
+| 原生编译 | `npx tauri build --bundles app` | 通过，0.12.4 生成 release PDFNote.app |
+| DMG | 手动 `hdiutil` 打包 | 0.12.4 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
@@ -65,6 +65,7 @@ Rust 测试覆盖：
 | OCR 建卡 | Rust 真机 + 浏览器实测 | 标注-only 建卡通过；0.8.0 起为 Apple Vision 单引擎，真机中文图识别出「信息化」；已移除 Tesseract 与 63MB 离线模型 |
 | 可选文字层（0.9.0） | Rust 真机 + 无头 Chrome | 4 行中文图返回归一化行坐标（2.81s）；缓存往返与旧备份兼容测试通过；透明 DOM 文字拖选精确到字符，可复制/建卡；0.10.1 起选区字形保持透明（`::selection` color/fill 均为 `rgba(0,0,0,0)`），与 PDF 原字无重影 |
 | 元素右键菜单（0.10.0） | Vitest + 无头 Chrome | 原生 Reload 菜单被接管；文字选区/标注/墨迹/脑图节点/文档卡片按元素给菜单；动作执行、边界翻转、ESC 与键盘导航、输入框系统菜单均通过 |
+| 删卡标注联动（0.12.4） | Vitest + 无头 Chrome | 跨页清理、非命中页复用引用、空缓存共 4 项；mock IPC 下脑图删卡后 PDF 标注 1 → 0 并提示“已同步移除”；后端返回 `annotation not found` 时自愈移除、不再报删除失败 |
 | 安装包签名（0.12.3） | `codesign` | `Identifier=com.pdfnote.local`、`Info.plist entries=14`、`Sealed Resources files=1`；`codesign --verify --strict` 通过（未公证，`spctl` 仍 rejected 属预期） |
 | 右键折叠（0.12.2） | Vitest + 无头 Chrome | 折叠根节点隐藏整棵子树、孤儿与环仍可见；mock IPC 下右键「折叠子节点」使画布节点数确实减少 |
 | 模型连通性（0.12.2） | Rust mock + 无头 Chrome | `GET /models` 返回延迟/模型列表并校验模型名；500 报错、404 退化到最小对话请求；设置面板按钮与失败反馈通过 |

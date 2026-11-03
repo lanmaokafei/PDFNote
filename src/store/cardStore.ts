@@ -49,5 +49,8 @@ export const useCardStore = create<CardState>((set) => ({
       delete next[id]
       return { cardsById: next }
     })
+    // PDF 工作区的标注缓存不依赖卡片列表，必须显式通知它清理，
+    // 否则页面上会残留“幽灵标注”，点击删除时后端返回 annotation not found。
+    window.dispatchEvent(new CustomEvent('pdfnote:card-deleted', { detail: { cardId: id } }))
   },
 }))

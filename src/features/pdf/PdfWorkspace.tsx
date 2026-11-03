@@ -48,6 +48,7 @@ import { reviewCard } from '../review/scheduler'
 import { PdfPage, type PageSize, type PdfContextAction, type PdfTool } from './PdfPage'
 import { recognizeText } from './ocr'
 import { decideFormulaRecognition } from './formulaRecognition'
+import { pruneCardAnnotations } from './annotationCache'
 import { TitleLinkPopover } from './TitleLinkPopover'
 import { buildTitleLinkIndex, type TitleLinkHit } from './titleLink'
 import { getAiSettings, isAiConfigured, recognizeSelection } from '../../services/ai'
@@ -388,7 +389,9 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
           const next = { ...previous }
           pages.forEach((page) => {
             if (annotationRequestsRef.current.get(page) !== requestIds.get(page)) return
-            next[page] = annotations.filter((annotation) => annotation.page === page)
+            next[page] = annotations.filter((annotation) =>
+              annotation.page === page && !deletedCardIdsRef.current.has(annotation.card_id),
+            )
             loadedAnnotationPagesRef.current.add(page)
           })
           return next
@@ -493,6 +496,36 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     annotationRequestsRef.current.set(page, (annotationRequestsRef.current.get(page) ?? 0) + 1)
     setAnnotationVersion((version) => version + 1)
   }, [])
+
+  // 已删除卡片的标注可能在途请求里返回，写入缓存前要过滤掉。
+  const deletedCardIdsRef = useRef<Set<string>>(new Set())
+  // 事件处理器需要读到最新缓存，但不应因为它变化而重建监听。
+  const annotationsByPageRef = useRef(annotationsByPage)
+  useEffect(() => {
+    annotationsByPageRef.current = annotationsByPage
+  }, [annotationsByPage])
+
+  /**
+   * 卡片在别的视图被彻底删除（脑图右键删除、复习删卡等）时，后端级联删除了标注，
+   * 但本工作区的标注缓存是独立的，必须显式清理，否则页面上会留下点不掉的“幽灵标注”。
+   */
+  useEffect(() => {
+    const onCardDeleted = (event: Event) => {
+      const cardId = (event as CustomEvent<{ cardId?: string }>).detail?.cardId
+      if (!cardId) return
+      deletedCardIdsRef.current.add(cardId)
+      const pruned = pruneCardAnnotations(annotationsByPageRef.current, cardId)
+      if (!pruned) return
+      setAnnotationsByPage(pruned.pages)
+      setSelectedAnnotationId((current) => (current && pruned.removedIds.includes(current) ? null : current))
+      setDeleteTarget((current) => (current && pruned.removedIds.includes(current.id) ? null : current))
+      // 让这些页下次进入时与数据库重新对齐，防御并发或多端修改。
+      for (const page of pruned.affectedPages) invalidateAnnotations(page)
+      setNotice(`卡片已删除，PDF 上对应的 ${pruned.removedIds.length} 处标注已同步移除。`)
+    }
+    window.addEventListener('pdfnote:card-deleted', onCardDeleted)
+    return () => window.removeEventListener('pdfnote:card-deleted', onCardDeleted)
+  }, [invalidateAnnotations])
 
   const handleSize = useCallback((pageNumber: number, size: PageSize) => {
     setPageSizes((previous) => {
@@ -757,7 +790,21 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
       callbacksRef.current.onCardsChanged()
       await loadCards()
     } catch (reason) {
-      setOperationError(`删除失败：${errorMessage(reason)}`)
+      const message = errorMessage(reason)
+      // 标注已在别处被删除（如脑图彻底删卡），缓存却还没刷新：
+      // 不要再报错留下点不掉的图层，直接从视图移除并说明。
+      if (/annotation not found/i.test(message)) {
+        setAnnotationsByPage((previous) => ({
+          ...previous,
+          [deleteTarget.page]: (previous[deleteTarget.page] ?? []).filter((item) => item.id !== deleteTarget.id),
+        }))
+        setSelectedAnnotationId(null)
+        setDeleteTarget(null)
+        setNotice('该标注已在其他视图被删除，已从当前页面移除。')
+        callbacksRef.current.onCardsChanged()
+      } else {
+        setOperationError(`删除失败：${message}`)
+      }
     } finally {
       setDeleting(false)
     }

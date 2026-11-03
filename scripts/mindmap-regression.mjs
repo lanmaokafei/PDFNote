@@ -55,21 +55,22 @@ const cards = Array.from({ length: CARD_COUNT }, (_, index) => ({
   sort_order: index,
 }))
 
+const pdfBytes = readFileSync(new URL('../test-fixtures/mini.pdf', import.meta.url))
+const pdfBase64 = pdfBytes.toString('base64')
+
 const document = {
   id: 'doc1',
   title: '测试教材',
   stored_path: 'pdfs/mini.pdf',
   original_path: null,
   content_hash: 'hash',
-  file_size: 11264,
+  file_size: pdfBytes.length,
   page_count: 1,
   file_status: 'ready',
   last_page: 1,
   created_at: '2026-11-03T00:00:00.000Z',
   updated_at: '2026-11-03T00:00:00.000Z',
 }
-
-const pdfBase64 = readFileSync(new URL('../test-fixtures/mini.pdf', import.meta.url)).toString('base64')
 
 await page.addInitScript(({ cards, document, pdfBase64 }) => {
   const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0))
@@ -84,7 +85,24 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
     },
     list_documents: () => [document],
     list_due_cards: () => [],
-    list_annotations: () => [],
+    list_annotations: () => [{
+      id: 'ann-1',
+      card_id: 'c1',
+      kind: 'highlight',
+      page: 1,
+      geometry: { rects: [{ x: 0.1, y: 0.12, width: 0.32, height: 0.05 }] },
+      style: {},
+      created_at: '2026-11-03T00:00:00.000Z',
+      updated_at: '2026-11-03T00:00:00.000Z',
+    }],
+    remove_annotation: () => {
+      throw new Error('annotation not found')
+    },
+    delete_card: (args) => {
+      const index = cardState.findIndex((item) => item.id === args?.id)
+      if (index >= 0) cardState.splice(index, 1)
+      return null
+    },
     list_page_inks: () => [],
     list_mindmap_layout: () => cards.map((card, index) => ({
       card_id: card.id,
@@ -201,6 +219,62 @@ if (STEP === 'context') {
   }
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP }, null, 2))
+  if (problems.length) process.exitCode = 1
+  process.exit(0)
+}
+
+if (STEP === 'stale') {
+  // 后端标注已不存在（缓存过期）：删除应自愈，而不是报“删除失败”。
+  await page.waitForTimeout(1200)
+  const before = await page.locator('.pdf-annotation').count()
+  const rect = page.locator('.pdf-annotation rect').first()
+  const rectBox = await rect.boundingBox()
+  if (!rectBox) {
+    problems.push('标注未渲染')
+  } else {
+    await page.mouse.click(rectBox.x + rectBox.width / 2, rectBox.y + rectBox.height / 2, { button: 'right' })
+    await page.waitForSelector('.context-menu', { timeout: 3000 })
+    await page.locator('.context-menu-item', { hasText: '删除标注' }).first().click()
+    await page.waitForSelector('.pdf-modal', { timeout: 3000 })
+    await page.getByRole('button', { name: '保留卡片，仅删标注' }).click()
+    await page.waitForTimeout(900)
+  }
+  const after = await page.locator('.pdf-annotation').count()
+  const text = await page.locator('body').innerText()
+  if (text.includes('删除失败')) problems.push('仍然显示删除失败')
+  if (!text.includes('已在其他视图被删除')) problems.push('未给出自愈提示')
+  if (after !== 0) problems.push(`幽灵标注未移除：${before} → ${after}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, before, after }, null, 2))
+  if (problems.length) process.exitCode = 1
+  process.exit(0)
+}
+
+if (STEP === 'cascade') {
+  // 脑图彻底删卡后，PDF 上的标注必须立刻消失（不能留下点不掉的幽灵图层）。
+  await page.waitForTimeout(1200)
+  const before = await page.locator('.pdf-annotation').count()
+  const target = page.locator('.mindmap-node').first()
+  const targetBox = await target.boundingBox()
+  if (!targetBox) {
+    problems.push('脑图节点不可见')
+  } else {
+    await page.mouse.click(targetBox.x + targetBox.width / 2, targetBox.y + 16, { button: 'right' })
+    await page.waitForSelector('.context-menu', { timeout: 3000 })
+    await page.locator('.context-menu-item', { hasText: '彻底删除卡片' }).first().click()
+    await page.waitForSelector('.mindmap-confirm', { timeout: 3000 })
+    await page.getByRole('button', { name: /确认彻底删除/ }).click()
+    await page.waitForTimeout(1500)
+  }
+  const after = await page.locator('.pdf-annotation').count()
+  const bodyText = await page.locator('body').innerText()
+  if (before === 0) problems.push('初始标注未渲染，无法验证联动')
+  if (after !== 0) problems.push(`删卡后 PDF 标注未清除：${before} → ${after}`)
+  if (!bodyText.includes('已同步移除')) problems.push('未提示标注已同步移除')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, before, after }, null, 2))
   if (problems.length) process.exitCode = 1
   process.exit(0)
 }

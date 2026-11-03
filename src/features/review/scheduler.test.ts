@@ -12,6 +12,7 @@ function card(overrides: Partial<Card> = {}): Card {
     question: '问题',
   tags: [],
     excerpt_image: null,
+    link_aliases: '',
     parent_id: null,
     sort_order: 0,
     collapsed: false,

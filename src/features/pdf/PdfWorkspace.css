@@ -1122,3 +1122,200 @@
 }
 .pdf-text-action button.is-secondary { color: #3c4a3f; background: #edf0ea; }
 .pdf-text-action button:hover { filter: brightness(1.08); }
+
+/* ---------- 标题链接：过去卡片的关键词在页面文本上高亮 ---------- */
+.pdf-titlelink-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+}
+.pdf-titlelink {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1.5px solid rgba(58, 124, 165, .7);
+  border-radius: 2px;
+  background: rgba(58, 124, 165, .1);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background .12s ease, border-color .12s ease;
+}
+.pdf-titlelink:hover,
+.pdf-titlelink:focus-visible {
+  outline: none;
+  border-bottom-color: rgba(43, 105, 143, .95);
+  background: rgba(58, 124, 165, .22);
+}
+
+.pdf-titlelink-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid #cfd9e2 !important;
+  border-radius: 8px;
+  color: #3c5d75 !important;
+  background: #f2f6f9 !important;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pdf-titlelink-toggle.is-active {
+  border-color: #3f6a85 !important;
+  color: #fff !important;
+  background: #3f6a85 !important;
+}
+
+.pdf-dock-menu-wide.is-active {
+  color: #fff;
+  background: #3f6a85;
+}
+
+.pdf-titlelink-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(560px, 100%);
+  max-height: min(78vh, 720px);
+  overflow: auto;
+}
+.pdf-titlelink-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pdf-titlelink-head small {
+  color: #3f6a85;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.pdf-titlelink-head h2 {
+  margin: 4px 0 0;
+  color: #1f2b24;
+  font-size: 17px;
+  line-height: 1.35;
+}
+.pdf-titlelink-close {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 6px;
+  color: #5f665f;
+  background: #eef1ea;
+  cursor: pointer;
+  place-items: center;
+}
+.pdf-titlelink-keyword {
+  margin: 0;
+  color: #5d665d;
+  font-size: 11px;
+}
+.pdf-titlelink-keyword strong { color: #3f6a85; }
+.pdf-titlelink-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pdf-titlelink-tabs button {
+  max-width: 100%;
+  padding: 4px 9px;
+  border: 1px solid #dbe2e8;
+  border-radius: 999px;
+  overflow: hidden;
+  color: #4c5c66;
+  background: #f7fafb;
+  font-size: 10px;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdf-titlelink-tabs button.is-active {
+  border-color: #3f6a85;
+  color: #fff;
+  background: #3f6a85;
+}
+.pdf-titlelink-image {
+  width: 100%;
+  max-height: 220px;
+  border: 1px solid #e2e6e0;
+  border-radius: 8px;
+  object-fit: contain;
+  background: #fafbf8;
+}
+.pdf-titlelink-excerpt {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #9dc0d4;
+  border-radius: 0 8px 8px 0;
+  color: #33403a;
+  background: #f5f9fb;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+.pdf-titlelink-note {
+  margin: 0;
+  color: #4a544c;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.pdf-titlelink-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.pdf-titlelink-tags span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #55705d;
+  background: #eef3ed;
+  font-size: 9px;
+}
+.pdf-titlelink-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #edf0ea;
+}
+.pdf-titlelink-source {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: #6a736a;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdf-titlelink-actions button {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  color: #3c4a3f;
+  background: #edf0ea;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pdf-titlelink-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff !important;
+  background: #3f6a85 !important;
+}
+.pdf-titlelink-actions button:hover { filter: brightness(1.06); }

@@ -41,6 +41,8 @@ export interface Card {
   surface_review: boolean
   /** 选区截图（data URL）。扫描版 PDF 的公式或图像摘录随卡片存档。 */
   excerpt_image: string | null
+  /** 标题链接别名，分号分隔；为空时只用 question 作为关键词。 */
+  link_aliases: string
   created_at: string
   updated_at: string
 }
@@ -72,6 +74,8 @@ export interface CreateCardInput {
   annotation?: AnnotationInput
   /** 选区截图（data URL），用于无法文字识别的公式或图像摘录。 */
   excerpt_image?: string
+  /** 标题链接别名（分号分隔），创建时可选。 */
+  link_aliases?: string
 }
 
 export interface UpdateCardContentInput {
@@ -79,6 +83,8 @@ export interface UpdateCardContentInput {
   excerpt: string
   user_note: string
   question: string
+  /** 标题链接别名（分号分隔）；不传时保留原值。 */
+  link_aliases?: string
 }
 
 export interface CardLink {

@@ -66,11 +66,14 @@ pub struct Card {
     /// 选区截图（data URL）。扫描版 PDF 的公式或图像摘录随卡片存档。
     #[serde(default)]
     pub excerpt_image: Option<String>,
+    /// 标题链接别名，分号分隔；为空时只用 question 作为关键词。
+    #[serde(default)]
+    pub link_aliases: String,
     pub created_at: String,
     pub updated_at: String,
 }
 
-pub const CARD_COLUMNS: &str = "id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height, excerpt, user_note, question, parent_id, sort_order, collapsed, stability, difficulty, elapsed_days, scheduled_days, learning_steps, due, last_review, reps, lapses, review_state, surface_pdf, surface_mindmap, surface_review, created_at, updated_at, excerpt_image";
+pub const CARD_COLUMNS: &str = "id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height, excerpt, user_note, question, parent_id, sort_order, collapsed, stability, difficulty, elapsed_days, scheduled_days, learning_steps, due, last_review, reps, lapses, review_state, surface_pdf, surface_mindmap, surface_review, created_at, updated_at, excerpt_image, link_aliases";
 
 pub fn card_from_row(row: &Row<'_>) -> Result<Card, Error> {
     let document_id: Option<String> = row.get(1)?;
@@ -115,6 +118,7 @@ pub fn card_from_row(row: &Row<'_>) -> Result<Card, Error> {
         created_at: row.get(26)?,
         updated_at: row.get(27)?,
         excerpt_image: row.get(28)?,
+        link_aliases: row.get(29)?,
     })
 }
 
@@ -252,6 +256,9 @@ pub struct CreateCardInput {
     pub annotation: Option<AnnotationInput>,
     #[serde(default)]
     pub excerpt_image: Option<String>,
+    /// 标题链接别名（分号分隔），创建时可选。
+    #[serde(default)]
+    pub link_aliases: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -260,6 +267,9 @@ pub struct UpdateCardContentInput {
     pub excerpt: String,
     pub user_note: String,
     pub question: String,
+    /// 标题链接别名（分号分隔）。旧前端不传时保留原值由 SQL 处理。
+    #[serde(default)]
+    pub link_aliases: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

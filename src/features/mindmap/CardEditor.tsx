@@ -5,6 +5,8 @@ export interface CardDraft {
   question: string
   excerpt: string
   user_note: string
+  /** 标题链接别名（分号分隔）。 */
+  link_aliases: string
 }
 
 interface CardEditorProps {
@@ -19,6 +21,7 @@ export function CardEditor({ card, busy, onClose, onSave }: CardEditorProps) {
     question: card?.question ?? '',
     excerpt: card?.excerpt ?? '',
     user_note: card?.user_note ?? '',
+    link_aliases: card?.link_aliases ?? '',
   })
   const [validationError, setValidationError] = useState('')
 
@@ -80,6 +83,16 @@ export function CardEditor({ card, busy, onClose, onSave }: CardEditorProps) {
               onChange={(event) => setDraft((current) => ({ ...current, user_note: event.target.value }))}
               placeholder="记录你的理解、联想或补充"
             />
+          </label>
+          <label>
+            <span>标题链接别名</span>
+            <input
+              type="text"
+              value={draft.link_aliases}
+              onChange={(event) => setDraft((current) => ({ ...current, link_aliases: event.target.value }))}
+              placeholder="心肌梗死;MI;myocardial infarction"
+            />
+            <small>开启「标题链接」后，阅读任意文档时命中标题或别名的词会高亮，点击即可回看这张卡。多个别名用分号分隔，每个 2–24 字。</small>
           </label>
           {validationError && <p className="mindmap-form-error" role="alert">{validationError}</p>}
           <footer>

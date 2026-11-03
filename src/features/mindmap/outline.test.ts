@@ -7,6 +7,7 @@ const base = {
   tags: [],
   user_note: '',
   excerpt_image: null,
+  link_aliases: '',
   sort_order: 0,
   collapsed: false,
   stability: 0,

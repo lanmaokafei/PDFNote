@@ -1,12 +1,13 @@
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
 
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
 const DOCUMENT_PROGRESS_SQL: &str = include_str!("../../migrations/002_document_progress.sql");
 const COLLABORATION_SQL: &str = include_str!("../../migrations/003_collaboration.sql");
 const EXCERPT_IMAGE_SQL: &str = include_str!("../../migrations/004_card_excerpt_image.sql");
 const PAGE_TEXT_SQL: &str = include_str!("../../migrations/005_page_text.sql");
+const TITLE_LINK_SQL: &str = include_str!("../../migrations/006_title_link.sql");
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
@@ -42,35 +43,25 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
     let version: u32 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
-    match version {
-        version if version == SCHEMA_VERSION => Ok(()),
-        0 => {
-            apply_migration(connection, INIT_SQL, 1)?;
-            apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2)?;
-            apply_migration(connection, COLLABORATION_SQL, 3)?;
-            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)?;
-            apply_migration(connection, PAGE_TEXT_SQL, 5)
-        }
-        1 => {
-            apply_migration(connection, DOCUMENT_PROGRESS_SQL, 2)?;
-            apply_migration(connection, COLLABORATION_SQL, 3)?;
-            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)?;
-            apply_migration(connection, PAGE_TEXT_SQL, 5)
-        }
-        2 => {
-            apply_migration(connection, COLLABORATION_SQL, 3)?;
-            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)?;
-            apply_migration(connection, PAGE_TEXT_SQL, 5)
-        }
-        3 => {
-            apply_migration(connection, EXCERPT_IMAGE_SQL, 4)?;
-            apply_migration(connection, PAGE_TEXT_SQL, 5)
-        }
-        4 => apply_migration(connection, PAGE_TEXT_SQL, 5),
-        newer => Err(format!(
-            "数据库 schema 版本 {newer} 高于当前应用支持的版本 {SCHEMA_VERSION}"
-        )),
+    if version > SCHEMA_VERSION {
+        return Err(format!(
+            "数据库 schema 版本 {version} 高于当前应用支持的版本 {SCHEMA_VERSION}"
+        ));
     }
+    let migrations: [(&str, u32); 6] = [
+        (INIT_SQL, 1),
+        (DOCUMENT_PROGRESS_SQL, 2),
+        (COLLABORATION_SQL, 3),
+        (EXCERPT_IMAGE_SQL, 4),
+        (PAGE_TEXT_SQL, 5),
+        (TITLE_LINK_SQL, 6),
+    ];
+    for (sql, target_version) in migrations {
+        if target_version > version {
+            apply_migration(connection, sql, target_version)?;
+        }
+    }
+    Ok(())
 }
 
 fn apply_migration(connection: &Connection, sql: &str, target_version: u32) -> Result<(), String> {
@@ -118,6 +109,7 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
         assert!(columns(&connection, "documents").contains(&"last_page".to_string()));
         assert!(columns(&connection, "cards").contains(&"excerpt_image".to_string()));
+        assert!(columns(&connection, "cards").contains(&"link_aliases".to_string()));
         for table in ["card_tags", "card_links", "page_inks", "page_ocr"] {
             let count: i64 = connection
                 .query_row(
@@ -165,6 +157,31 @@ mod tests {
             )
             .unwrap();
         assert_eq!(last_page, 1);
+        quick_check(&connection).unwrap();
+    }
+
+    #[test]
+    fn upgrades_v5_database_with_title_link_aliases() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(INIT_SQL).unwrap();
+        connection.execute_batch(DOCUMENT_PROGRESS_SQL).unwrap();
+        connection.execute_batch(COLLABORATION_SQL).unwrap();
+        connection.execute_batch(EXCERPT_IMAGE_SQL).unwrap();
+        connection.execute_batch(PAGE_TEXT_SQL).unwrap();
+        connection.execute("PRAGMA user_version = 5", []).unwrap();
+        connection
+            .execute(
+                "INSERT INTO cards (id, excerpt, user_note, question, due, review_state, created_at, updated_at)
+                 VALUES ('legacy-card', '', '', '心肌梗死', '2026-01-01T00:00:00.000Z', 'new', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .unwrap();
+        migrate(&connection).unwrap();
+
+        let aliases: String = connection
+            .query_row("SELECT link_aliases FROM cards WHERE id = 'legacy-card'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(aliases, "", "旧卡片升级后别名为空字符串");
         quick_check(&connection).unwrap();
     }
 

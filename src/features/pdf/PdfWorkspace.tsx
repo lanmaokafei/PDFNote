@@ -28,6 +28,7 @@ import {
   updateDocumentProgress,
 } from '../../services/pdfnote'
 import {
+  BookOpen,
   Highlighter,
   Link2,
   Merge,
@@ -46,6 +47,8 @@ import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
 import { PdfPage, type PageSize, type PdfContextAction, type PdfTool } from './PdfPage'
 import { looksLikeMathFormula, recognizeText } from './ocr'
+import { TitleLinkPopover } from './TitleLinkPopover'
+import { buildTitleLinkIndex, type TitleLinkHit } from './titleLink'
 import './PdfWorkspace.css'
 
 GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs'
@@ -62,6 +65,15 @@ const INK_WIDTHS = [
 const MIN_SCALE = 0.5
 const MAX_SCALE = 3
 const EMPTY_ANNOTATIONS: Annotation[] = []
+const TITLE_LINK_STORAGE_KEY = 'pdfnote.titleLink.enabled'
+
+function readTitleLinkPreference(): boolean {
+  try {
+    return window.localStorage.getItem(TITLE_LINK_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 export interface PdfWorkspaceProps {
   document: PdfDocument
@@ -121,6 +133,9 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   const [inkColor, setInkColor] = useState(INK_COLORS[0])
   const [inkWidth, setInkWidth] = useState(INK_WIDTHS[1].value)
   const [inkErase, setInkErase] = useState(false)
+  // 标题链接默认关闭：卡片库还很小时开启只会有开销，没有「过去的笔记」可浮现。
+  const [titleLinkEnabled, setTitleLinkEnabled] = useState(readTitleLinkPreference)
+  const [titleLinkPreview, setTitleLinkPreview] = useState<TitleLinkHit | null>(null)
 
   const cardsById = useCardStore((state) => state.cardsById)
   const createCard = useCardStore((state) => state.createCard)
@@ -706,6 +721,10 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
 
   const allAnnotations = useMemo(() => Object.values(annotationsByPage).flat(), [annotationsByPage])
   const cardList = useMemo(() => Object.values(cardsById), [cardsById])
+  const titleLinkIndex = useMemo(
+    () => (titleLinkEnabled ? buildTitleLinkIndex(cardList) : null),
+    [cardList, titleLinkEnabled],
+  )
   const selectedAnnotation = allAnnotations.find((annotation) => annotation.id === selectedAnnotationId) ?? null
   const selectedCard = selectedAnnotation
     ? reviewedCards[selectedAnnotation.card_id] ?? cardsById[selectedAnnotation.card_id] ?? null
@@ -757,6 +776,19 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     setScale((previous) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round((previous + delta) * 10) / 10)))
   }
 
+  /** 标题链接开关：偏好写入 localStorage，下次打开文档保持。 */
+  const toggleTitleLink = useCallback(() => {
+    setTitleLinkEnabled((previous) => {
+      const next = !previous
+      try {
+        window.localStorage.setItem(TITLE_LINK_STORAGE_KEY, next ? '1' : '0')
+      } catch {
+        // 隐私模式下 localStorage 不可用，仅本次会话生效。
+      }
+      return next
+    })
+  }, [])
+
   const pageNumbers = useMemo(() => Array.from({ length: Math.max(0, pageCount) }, (_, index) => index + 1), [pageCount])
   const visibleAnnotationCount = [...visiblePages].reduce((count, page) => count + (annotationsByPage[page]?.length ?? 0), 0)
   const largeDocument = document.file_size > 200 * 1024 * 1024
@@ -795,6 +827,9 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
         break
       case 'reveal':
         handleReveal(action.annotationIds)
+        break
+      case 'title-link-toggle':
+        toggleTitleLink()
         break
     }
   }
@@ -838,6 +873,11 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
           <span>/ {pageCount || '—'} 页</span>
           <button type="button" onClick={jumpToPage} disabled={!pdf || pageCount === 0}>跳转</button>
         </div>
+
+        <button type="button" className={`pdf-titlelink-toggle ${titleLinkEnabled ? 'is-active' : ''}`} aria-pressed={titleLinkEnabled} onClick={toggleTitleLink} title="标题链接：阅读时自动高亮你过去建过的卡片标题与别名，点击可回看">
+          <BookOpen size={14} />
+          标题链接
+        </button>
 
         <button type="button" className={`pdf-recall-toggle ${recallMode ? 'is-active' : ''}`} aria-pressed={recallMode} onClick={toggleRecall} disabled={!pdf}>
           {recallMode ? '退出回忆' : '文档回忆'}
@@ -907,6 +947,8 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
                   onMove={handleMove}
                   onReveal={handleReveal}
                   onContextAction={handleContextAction}
+                  titleLinkIndex={titleLinkIndex}
+                  onTitleLink={setTitleLinkPreview}
                 />
               ))}
             </div>
@@ -1069,9 +1111,27 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
                 <button type="button" onClick={() => zoom(0.1)} disabled={scale >= MAX_SCALE}>+</button>
               </div>
               <button type="button" className="pdf-dock-menu-wide" onClick={() => { setScale(1); setDockMenuOpen(false) }}>恢复 100%</button>
+              <button
+                type="button"
+                className={`pdf-dock-menu-wide ${titleLinkEnabled ? 'is-active' : ''}`}
+                aria-pressed={titleLinkEnabled}
+                onClick={() => { toggleTitleLink(); setDockMenuOpen(false) }}
+              >
+                {titleLinkEnabled ? '关闭标题链接' : '开启标题链接'}
+              </button>
             </div>
           )}
         </>
+      )}
+
+      {titleLinkPreview && (
+        <TitleLinkPopover
+          keyword={titleLinkPreview.keyword}
+          cards={titleLinkPreview.cardIds.map((id) => cardsById[id]).filter(Boolean)}
+          currentDocumentId={document.id}
+          onJump={goToPage}
+          onClose={() => setTitleLinkPreview(null)}
+        />
       )}
 
       {tagTarget && cardsById[tagTarget] && (

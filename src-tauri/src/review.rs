@@ -272,6 +272,7 @@ mod tests {
                 sort_order: 0,
                 annotation: None,
                 excerpt_image: None,
+                link_aliases: None,
             },
         )
         .unwrap();

@@ -72,7 +72,7 @@
 ## 5. 当前状态（2026-11-02）
 
 - 阶段 1–5 的源码闭环已落地：数据层、PDF 导入/渲染/标注、三视图联动、脑图、FSRS、文档/脑图回忆、备份恢复。
-- Rust 29 项测试（含 v5 迁移、页面文字缓存、旧备份兼容与 2 项 Vision 真机）、前端 25 项测试、TypeScript 构建、Oxlint 0 warning 全部通过。
+- Rust 28 项测试通过（含 v6 迁移、标题链接别名、页面文字缓存、旧备份兼容与 2 项 Vision 真机）、前端 35 项测试、TypeScript 构建、Oxlint 0 warning 全部通过。
 - Tauri release `.app` / DMG 已生成并通过 `hdiutil verify`；首次启动建库且 `quick_check=ok`。
-- 阶段 6：macOS 交付闭环已完成（0.10.0，含扫描页可选文字层与全视图元素右键菜单）。剩余为签名/公证、系统强退恢复演练与性能采样；Windows/Linux 不在交付范围内。
+- 阶段 6：macOS 交付闭环已完成（0.11.0，含扫描页可选文字层、全视图元素右键菜单与标题链接）。剩余为签名/公证、系统强退恢复演练与性能采样；Windows/Linux 不在交付范围内。
 - 详细逐项证据见 `docs/acceptance.md`。

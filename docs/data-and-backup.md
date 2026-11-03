@@ -87,6 +87,12 @@ PDFNote-backup-YYYYMMDD-HHMMSS.zip
 - 翻页停止 700ms 后写入，关闭文档时再补一次；不更新 `updated_at`，避免资料库排序与备份新鲜度被翻页触发。
 - 备份导入时按清单 `schema_version` 选择列：schema v1 旧包没有 `last_page`，导入后为 1；schema v2 包会一并恢复。
 
+## 标题链接别名（schema v6）
+
+- `cards.link_aliases`：分号分隔的关键词别名，默认空字符串。
+- 旧备份（schema < 6）导入时该列补空字符串；schema 6 起随备份完整往返。
+- 关键词由卡片标题与别名共同构成，匹配完全在本地完成，不产生网络请求。
+
 ## 页面文字缓存（schema v5）
 
 - `page_ocr(document_id, page, lines_json, engine, created_at)` 保存扫描页整页 OCR 的行级文字与归一化坐标，使页面再次打开时无需重新识别。

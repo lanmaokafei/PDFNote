@@ -296,30 +296,24 @@ fn document_copy_sql(schema_version: u32, only_missing: bool) -> String {
     )
 }
 
-const CARD_CURRENT_COLUMNS: &str = "id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height, excerpt, user_note, question, parent_id, sort_order, collapsed, stability, difficulty, elapsed_days, scheduled_days, learning_steps, due, last_review, reps, lapses, review_state, surface_pdf, surface_mindmap, surface_review, created_at, updated_at, excerpt_image";
+const CARD_CURRENT_COLUMNS: &str = "id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height, excerpt, user_note, question, parent_id, sort_order, collapsed, stability, difficulty, elapsed_days, scheduled_days, learning_steps, due, last_review, reps, lapses, review_state, surface_pdf, surface_mindmap, surface_review, created_at, updated_at, excerpt_image, link_aliases";
 
-/// v4 起卡片带 excerpt_image；旧备份没有该列，导入时补 NULL，避免 `SELECT *` 列数不匹配。
+/// v4 起卡片带 excerpt_image，v6 起带 link_aliases；旧备份缺列时分别补 NULL 与 ''，避免 `SELECT *` 列数不匹配。
 fn card_copy_sql(schema_version: u32, condition: &str) -> String {
-    let legacy_columns = CARD_CURRENT_COLUMNS
-        .split(", ")
-        .take(28)
-        .collect::<Vec<_>>()
-        .join(", ");
-    let selected = if schema_version >= 4 {
+    let legacy_columns = |take: usize| {
         CARD_CURRENT_COLUMNS
             .split(", ")
+            .take(take)
             .map(|column| format!("s.{column}"))
             .collect::<Vec<_>>()
             .join(", ")
+    };
+    let selected = if schema_version >= 6 {
+        legacy_columns(30)
+    } else if schema_version >= 4 {
+        format!("{}, ''", legacy_columns(29))
     } else {
-        format!(
-            "{}, NULL",
-            legacy_columns
-                .split(", ")
-                .map(|column| format!("s.{column}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        format!("{}, NULL, ''", legacy_columns(28))
     };
     format!(
         "INSERT INTO cards ({CARD_CURRENT_COLUMNS}) SELECT {selected} FROM import_src.cards s{condition}"
@@ -446,10 +440,18 @@ fn import_merge(
                 [],
             )
             .map_err(|error| error.to_string())?;
+        // v6 之前的备份没有 link_aliases 列，同步内容时按版本决定是否引用。
+        let alias_sync = if manifest.schema_version >= 6 {
+            "link_aliases = CASE WHEN c.updated_at < s.updated_at THEN s.link_aliases ELSE c.link_aliases END,"
+        } else {
+            ""
+        };
         transaction
             .execute(
-                "UPDATE cards AS c SET
+                &format!(
+                    "UPDATE cards AS c SET
                     excerpt = s.excerpt, user_note = s.user_note, question = s.question,
+                    {alias_sync}
                     parent_id = CASE WHEN c.parent_id IS NULL THEN s.parent_id ELSE c.parent_id END,
                     sort_order = CASE WHEN c.updated_at < s.updated_at THEN s.sort_order ELSE c.sort_order END,
                     collapsed = CASE WHEN c.updated_at < s.updated_at THEN s.collapsed ELSE c.collapsed END,
@@ -467,7 +469,8 @@ fn import_merge(
                     surface_mindmap = MAX(c.surface_mindmap, s.surface_mindmap),
                     surface_review = MAX(c.surface_review, s.surface_review),
                     updated_at = CASE WHEN c.updated_at < s.updated_at THEN s.updated_at ELSE c.updated_at END
-                 FROM import_src.cards s WHERE c.id = s.id",
+                 FROM import_src.cards s WHERE c.id = s.id"
+                ),
                 [],
             )
             .map_err(|error| error.to_string())?;
@@ -731,6 +734,7 @@ mod tests {
                 parent_id: None,
                 sort_order: 0,
                 excerpt_image: Some("data:image/jpeg;base64,ZmFrZQ==".into()),
+                link_aliases: None,
                 annotation: Some(AnnotationInput {
                     kind: "highlight".into(),
                     geometry: AnnotationGeometry { rects: vec![bbox] },
@@ -755,15 +759,19 @@ mod tests {
     #[test]
     fn card_copy_sql_is_compatible_with_legacy_backups() {
         let legacy = card_copy_sql(3, "");
-        assert!(legacy.contains("s.created_at, s.updated_at, NULL FROM import_src.cards s"));
+        assert!(legacy.contains("s.created_at, s.updated_at, NULL, '' FROM import_src.cards s"));
         assert!(legacy.contains("INSERT INTO cards ("));
         assert!(legacy.contains("excerpt_image"));
+        assert!(legacy.contains("link_aliases"));
         assert!(!legacy.contains("s.excerpt_image"));
+        let v5 = card_copy_sql(5, "");
+        assert!(v5.contains("s.excerpt_image, ''"), "v5 备份别名补空字符串");
+        assert!(!v5.contains("s.link_aliases"));
         let current = card_copy_sql(
-            4,
+            6,
             " WHERE NOT EXISTS (SELECT 1 FROM cards c WHERE c.id = s.id)",
         );
-        assert!(current.contains("s.excerpt_image"));
+        assert!(current.contains("s.excerpt_image, s.link_aliases"));
         assert!(current.contains("NOT EXISTS"));
     }
 
@@ -806,6 +814,7 @@ mod tests {
                 sort_order: 0,
                 annotation: None,
                 excerpt_image: None,
+                link_aliases: None,
             },
         )
         .unwrap();
@@ -931,6 +940,7 @@ mod overwrite_tests {
                 sort_order: 0,
                 annotation: None,
                 excerpt_image: None,
+                link_aliases: None,
             },
         )
         .unwrap();
@@ -1000,6 +1010,7 @@ mod backup_freshness_tests {
                 sort_order: 0,
                 annotation: None,
                 excerpt_image: None,
+                link_aliases: None,
             },
         )
         .unwrap();

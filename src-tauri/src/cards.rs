@@ -88,8 +88,8 @@ pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, Str
             "INSERT INTO cards (
                 id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height,
                 excerpt, user_note, question, parent_id, sort_order, collapsed,
-                due, review_state, created_at, updated_at, excerpt_image
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 'new', ?14, ?14, ?15)",
+                due, review_state, created_at, updated_at, excerpt_image, link_aliases
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 'new', ?14, ?14, ?15, ?16)",
             params![
                 id,
                 document_id,
@@ -106,6 +106,7 @@ pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, Str
                 timestamp,
                 timestamp,
                 input.excerpt_image,
+                input.link_aliases.unwrap_or_default(),
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -163,8 +164,9 @@ pub fn update_card_content(
     let database = state.db()?;
     let affected = database
         .execute(
-            "UPDATE cards SET excerpt = ?1, user_note = ?2, question = ?3, updated_at = ?4 WHERE id = ?5",
-            params![input.excerpt, input.user_note, input.question, now(), input.id],
+            "UPDATE cards SET excerpt = ?1, user_note = ?2, question = ?3,
+                link_aliases = COALESCE(?4, link_aliases), updated_at = ?5 WHERE id = ?6",
+            params![input.excerpt, input.user_note, input.question, input.link_aliases, now(), input.id],
         )
         .map_err(|error| error.to_string())?;
     if affected == 0 {
@@ -769,6 +771,20 @@ pub fn merge_cards(state: &AppState, card_ids: Vec<String>) -> Result<Card, Stri
         None => (None, None, None, None, None, None),
     };
 
+    // 别名合并：分号分隔、去重，保留各卡所有关键词。
+    let link_aliases = {
+        let mut seen: Vec<String> = Vec::new();
+        for card in &cards {
+            for alias in card.link_aliases.split(';') {
+                let trimmed = alias.trim();
+                if !trimmed.is_empty() && !seen.iter().any(|item| item == trimmed) {
+                    seen.push(trimmed.to_string());
+                }
+            }
+        }
+        seen.join(";")
+    };
+
     transaction
         .execute(
             "UPDATE cards SET excerpt = ?1, user_note = ?2, question = ?3,
@@ -776,7 +792,7 @@ pub fn merge_cards(state: &AppState, card_ids: Vec<String>) -> Result<Card, Stri
                 document_id = COALESCE(?8, document_id), page = COALESCE(?9, page),
                 bbox_x = COALESCE(?10, bbox_x), bbox_y = COALESCE(?11, bbox_y),
                 bbox_width = COALESCE(?12, bbox_width), bbox_height = COALESCE(?13, bbox_height),
-                excerpt_image = COALESCE(excerpt_image, ?14)
+                excerpt_image = COALESCE(excerpt_image, ?14), link_aliases = ?16
              WHERE id = ?15",
             params![
                 excerpt,
@@ -793,7 +809,8 @@ pub fn merge_cards(state: &AppState, card_ids: Vec<String>) -> Result<Card, Stri
                 bbox_width,
                 bbox_height,
                 cards.iter().find_map(|card| card.excerpt_image.clone()),
-                target.id
+                target.id,
+                link_aliases,
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -867,6 +884,7 @@ mod tests {
             sort_order: 0,
             annotation: None,
             excerpt_image: None,
+            link_aliases: None,
         }
     }
 
@@ -913,6 +931,7 @@ mod tests {
                 parent_id: None,
                 sort_order: 0,
                 excerpt_image: None,
+                link_aliases: None,
                 annotation: Some(AnnotationInput {
                     kind: "highlight".into(),
                     geometry: AnnotationGeometry { rects: vec![bbox] },
@@ -939,6 +958,7 @@ mod tests {
                 parent_id: None,
                 sort_order: 0,
                 excerpt_image: None,
+                link_aliases: None,
                 annotation: None,
             },
         )

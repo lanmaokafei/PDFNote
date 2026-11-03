@@ -48,6 +48,7 @@ import { ContextMenu } from '../../ui/ContextMenu'
 import { useContextMenu, type ContextMenuItem, type ContextMenuSection } from '../../ui/contextMenuCore'
 import { PageTextLayer, type TextSelectionInfo } from './PageTextLayer'
 import { readTextSelection } from './textSelection'
+import { searchTitleLinks, type TitleLinkHit, type TitleLinkIndex } from './titleLink'
 
 export type PdfTool = 'select' | 'highlight' | 'rectangle' | 'ink' | 'text'
 
@@ -63,6 +64,7 @@ export type PdfContextAction =
   | { type: 'merge' }
   | { type: 'delete-annotation'; annotation: Annotation }
   | { type: 'reveal'; annotationIds: string[] }
+  | { type: 'title-link-toggle' }
 export interface PageSize {
   width: number
   height: number
@@ -106,6 +108,9 @@ interface PdfPageProps {
   onInk: (bbox: NormalizedBBox, points: Array<[number, number]>) => void
   onEraseInk: (id: string) => void
   onContextAction: (action: PdfContextAction) => void
+  /** 标题链接字典；null 表示功能关闭。 */
+  titleLinkIndex: TitleLinkIndex | null
+  onTitleLink: (hit: TitleLinkHit) => void
 }
 
 export function PdfPage({
@@ -134,6 +139,8 @@ export function PdfPage({
   onInk,
   onEraseInk,
   onContextAction,
+  titleLinkIndex,
+  onTitleLink,
 }: PdfPageProps) {
   const [page, setPage] = useState<PDFPageProxy | null>(null)
   const [pageError, setPageError] = useState('')
@@ -319,6 +326,12 @@ export function PdfPage({
     if (!recallMode) return []
     return mergeOverlappingRects(annotations.flatMap((annotation) => annotation.geometry.rects))
   }, [annotations, recallMode])
+
+  // 标题链接命中：页面文本就绪后做一次本地字典匹配，回忆模式下不干扰遮挡。
+  const titleLinkHits = useMemo(() => {
+    if (!titleLinkIndex || recallMode || lines.length === 0) return []
+    return searchTitleLinks(titleLinkIndex, lines)
+  }, [lines, recallMode, titleLinkIndex])
 
   const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     if (recallMode || event.button !== 0 || !viewport || !view) return
@@ -541,7 +554,24 @@ export function PdfPage({
     const maskElement = target?.closest<SVGGElement>('[data-mask-index]')
     const annotationElement = target?.closest<SVGGElement>('[data-annotation-id]')
     const inkElement = target?.closest<SVGPathElement>('[data-ink-id]')
+    const titleLinkElement = target?.closest<HTMLElement>('[data-titlelink-index]')
     const open = (title: string, sections: ContextMenuSection[]) => show(event, { title, sections })
+
+    if (titleLinkElement) {
+      const hit = titleLinkHits[Number(titleLinkElement.dataset.titlelinkIndex)]
+      if (hit) {
+        open(`标题链接「${hit.keyword}」`, [
+          { id: 'titlelink', items: [
+            { id: 'open', label: hit.cardIds.length > 1 ? `查看 ${hit.cardIds.length} 张相关卡片` : '查看过去的卡片', icon: Link2, onSelect: () => onTitleLink(hit) },
+            { id: 'copy', label: '复制关键词', icon: Copy, onSelect: () => void copyText(hit.keyword) },
+          ] },
+          { id: 'titlelink-more', items: [
+            { id: 'toggle', label: '关闭标题链接', icon: Link2, onSelect: () => onContextAction({ type: 'title-link-toggle' }) },
+          ] },
+        ])
+        return
+      }
+    }
 
     if (maskElement) {
       const mask = recallMasks[Number(maskElement.dataset.maskIndex)]
@@ -622,6 +652,7 @@ export function PdfPage({
       ] },
       { id: 'page-actions', items: [
         { id: 'copy-page', label: '复制本页文字', icon: ClipboardCopy, disabled: !pageText, hint: pageText ? `${lines.length} 行` : '文字层未就绪', onSelect: () => void copyText(pageText) },
+        { id: 'titlelink', label: titleLinkIndex ? '关闭标题链接' : '开启标题链接', icon: Link2, checked: !!titleLinkIndex, onSelect: () => onContextAction({ type: 'title-link-toggle' }) },
         { id: 'recall', label: recallMode ? '退出文档回忆' : '开始文档回忆', icon: MessageSquare, checked: recallMode, onSelect: () => onContextAction({ type: 'recall-toggle' }) },
       ] },
     ])
@@ -798,6 +829,30 @@ export function PdfPage({
               )
             })}
           </svg>
+          {titleLinkHits.length > 0 && (
+            <div className="pdf-titlelink-layer">
+              {titleLinkHits.map((hit, index) => (
+                <button
+                  key={`${hit.lineIndex}-${hit.bbox.x.toFixed(4)}-${index}`}
+                  type="button"
+                  data-titlelink-index={index}
+                  className="pdf-titlelink"
+                  style={{
+                    left: `${hit.bbox.x * 100}%`,
+                    top: `${hit.bbox.y * 100}%`,
+                    width: `${hit.bbox.width * 100}%`,
+                    height: `${hit.bbox.height * 100}%`,
+                  }}
+                  title={`${hit.keyword}${hit.cardIds.length > 1 ? ` · ${hit.cardIds.length} 张卡片` : ''}`}
+                  aria-label={`标题链接：${hit.keyword}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onTitleLink(hit)
+                  }}
+                />
+              ))}
+            </div>
+          )}
           {rendering && <div className="pdf-render-status">正在渲染…</div>}
           {pageError && <div className="pdf-render-error">渲染失败：{pageError}</div>}
         </>

@@ -5,7 +5,9 @@ import {
   getAiSettings,
   isAiConfigured,
   saveAiSettings,
+  testAiConnection,
   type AiSettings,
+  type AiTestResult,
 } from '../../services/ai'
 import './SettingsDialog.css'
 
@@ -22,6 +24,9 @@ export function SettingsDialog({ onClose, onSaved }: SettingsDialogProps) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [showKey, setShowKey] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<AiTestResult | null>(null)
+  const [testError, setTestError] = useState('')
 
   useEffect(() => {
     let active = true
@@ -38,6 +43,21 @@ export function SettingsDialog({ onClose, onSaved }: SettingsDialogProps) {
       })
     return () => { active = false }
   }, [])
+
+  /** 用输入框里的当前值探测服务，不需要先保存。 */
+  const runTest = async () => {
+    setTesting(true)
+    setTestError('')
+    setTestResult(null)
+    try {
+      const result = await testAiConnection(draft)
+      setTestResult(result)
+    } catch (reason) {
+      setTestError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setTesting(false)
+    }
+  }
 
   const notify = (saved: AiSettings) => {
     onSaved?.(saved)
@@ -145,10 +165,33 @@ export function SettingsDialog({ onClose, onSaved }: SettingsDialogProps) {
           未配置时，公式选区仍按原逻辑保存原图，由你手动补录；配置后识别结果会写入卡片摘录（LaTeX）并保留原图对照。
         </p>
 
+        {testResult && (
+          <p className={`settings-test ${testResult.modelFound ? 'is-ok' : 'is-warning'}`} role="status">
+            {testResult.modelFound ? '✓ 服务可用' : '⚠ 服务可用，但模型名不在列表中'}
+            <span>
+              耗时 {testResult.latencyMs}ms · 探测方式 {testResult.via === 'models' ? 'GET /models' : '最小对话请求'}
+            </span>
+            {!testResult.modelFound && (
+              <span className="settings-test-models">
+                可用模型：{testResult.models.slice(0, 8).join('、') || '未返回'}{testResult.models.length > 8 ? ' …' : ''}
+              </span>
+            )}
+          </p>
+        )}
+        {testError && <p className="settings-error" role="alert">连接测试失败：{testError}</p>}
         {error && <p className="settings-error" role="alert">{error}</p>}
         {notice && <p className="settings-notice" role="status">{notice}</p>}
 
         <footer>
+          <button
+            type="button"
+            className="settings-test-button"
+            onClick={() => void runTest()}
+            disabled={testing || busy || !isAiConfigured(draft)}
+          >
+            {testing ? '测试中…' : '测试连接'}
+          </button>
+          <span className="settings-footer-spacer" />
           <button type="button" onClick={() => void clear()} disabled={busy || !isAiConfigured(draft)}>清除配置</button>
           <button type="button" onClick={() => void save()} disabled={busy || !loaded} className="primary">
             {busy ? '保存中…' : '保存'}

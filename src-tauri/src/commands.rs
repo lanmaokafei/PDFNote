@@ -15,6 +15,12 @@ pub fn save_ai_settings(
     ai::save_settings(&state, settings)
 }
 
+/// 用当前输入框的配置探测模型服务是否可用（不落盘）。
+#[tauri::command]
+pub async fn test_ai_connection(settings: ai::AiSettings) -> Result<ai::AiTestResult, String> {
+    ai::test_connection(settings).await
+}
+
 /// 识别选区内容（公式 / 表格 / 通用）。仅在用户配置模型后可用。
 #[tauri::command]
 pub async fn recognize_selection(

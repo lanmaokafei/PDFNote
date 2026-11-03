@@ -20,8 +20,10 @@ export function looksLikeMathFormula(text: string): boolean {
   if (/[A-Za-z]\([^)]{1,12}\)/.test(compact) && /[A-Za-z]/.test(compact)) score += 2
   // 变量赋值形：H =、y=、E(X)=。
   if (/^[A-Za-z]{1,3}=.+/i.test(compact) || /[A-Za-z]=-\S/.test(compact)) score += 1
-  // 下标/上标残留：x_i、x1、a²、10⁻³。
-  if (/[A-Za-z][₀-₉]/.test(compact) || /[⁰-⁹°²³]/.test(compact)) score += 1
+  // 下标/上标标记：x_i、x^2、a²、10⁻³；^ 与 _ 在正文里几乎不出现。
+  if (/[\^_]/.test(compact) || /[A-Za-z][₀-₉]/.test(compact) || /[⁰-⁹°²³]/.test(compact)) score += 1
+  // 等式与运算符/上下标混排：x_1 + x_2 = 0、a^n + b^n = c^n。
+  if (/=/.test(compact) && /[+\-*/^_]/.test(compact)) score += 1
   // 高密度运算符与括号混杂（排除普通标点）。
   const mathChars = compact.match(/[=()+\-*/^_[\]{}|,.;:0-9]/g)?.length ?? 0
   if (mathChars / compact.length > 0.45) score += 1

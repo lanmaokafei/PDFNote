@@ -46,7 +46,8 @@ import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
 import { PdfPage, type PageSize, type PdfContextAction, type PdfTool } from './PdfPage'
-import { looksLikeMathFormula, recognizeText } from './ocr'
+import { recognizeText } from './ocr'
+import { decideFormulaRecognition } from './formulaRecognition'
 import { TitleLinkPopover } from './TitleLinkPopover'
 import { buildTitleLinkIndex, type TitleLinkHit } from './titleLink'
 import { getAiSettings, isAiConfigured, recognizeSelection } from '../../services/ai'
@@ -627,22 +628,40 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     // 纯文字 OCR 引擎无法识别公式结构，会把公式输出成乱码。命中公式特征时：
     // - 文字来自 PDF 文字层：保留原始字符（可信），同时附上原图供对照版式；
     // - 文字来自 OCR：丢弃乱码，只存原图，由用户手动补录公式。
-    const isFormula = Boolean(finalExcerpt) && looksLikeMathFormula(finalExcerpt)
-    const ocrFormula = usedOcr && isFormula
+    const formula = decideFormulaRecognition({
+      excerpt: finalExcerpt,
+      fromOcr: usedOcr,
+      aiReady,
+      hasImage: Boolean(ocrImage ?? cardImage),
+    })
+    const isFormula = formula.isFormula
+    const ocrFormula = formula.discardExcerpt
     if (ocrFormula) finalExcerpt = ''
+    // 文字层公式的原文可信，识别失败时回退到它；OCR 公式只有乱码，回退为空。
+    const fallbackExcerpt = finalExcerpt
 
-    // 配置了视觉模型时，把公式选区交给模型转 LaTeX；失败则保留原图由用户补录。
+    // 配置了视觉模型时，把公式选区（优先高清图）交给模型转 LaTeX。
+    // 文字层公式与 OCR 公式都走这里——之前只覆盖了 OCR 来源，导致文字层公式没有识别。
     let aiFormula = false
     let aiError = ''
-    if (ocrFormula && aiReady && cardImage) {
-      setOcrMessage('正在用视觉模型识别公式…')
+    const aiImage = ocrImage ?? cardImage
+    if (formula.useVisionModel && aiImage) {
+      const startedAt = Date.now()
+      setOcrMessage('正在用视觉模型识别公式（最长等待 120 秒）…')
+      // 模型首次加载可能很慢，每 10 秒更新一次进度，避免界面看起来卡死。
+      const watchdog = window.setInterval(() => {
+        const seconds = Math.round((Date.now() - startedAt) / 1000)
+        setOcrMessage(`视觉模型仍在识别公式（已 ${seconds} 秒），最多等待 120 秒…`)
+      }, 10_000)
       try {
-        const latex = await recognizeSelection(cardImage, 'formula')
+        const latex = await recognizeSelection(aiImage, 'formula')
         finalExcerpt = latex.trim()
         aiFormula = Boolean(finalExcerpt)
       } catch (reason) {
+        finalExcerpt = fallbackExcerpt
         aiError = errorMessage(reason)
       } finally {
+        window.clearInterval(watchdog)
         setOcrMessage('')
       }
     }
@@ -674,8 +693,10 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
       callbacksRef.current.onCardsChanged()
       if (aiFormula) {
         setNotice('公式已由视觉模型识别为 LaTeX，原图同时保留，请核对上下标后保存。')
-      } else if (ocrFormula && aiError) {
-        setOperationError(`公式识别失败：${aiError}。已保存选区图像，请编辑卡片手动补录。`)
+      } else if (aiError) {
+        setOperationError(`公式识别失败：${aiError}。${finalExcerpt
+          ? '已保留原文与选区图像，可编辑卡片手动补录。'
+          : '已保存选区图像，请编辑卡片手动补录。'}`)
       } else if (ocrFormula) {
         setNotice('选区疑似数学公式，文字 OCR 无法识别公式结构。已保存选区图像，请编辑卡片手动输入公式内容，或在设置中配置视觉模型自动识别。')
       } else if (isFormula) {

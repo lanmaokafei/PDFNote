@@ -172,6 +172,140 @@ fn decode_image(image_data: &str) -> Result<String, String> {
     ))
 }
 
+/// 连通性测试结果，供设置面板直接展示。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTestResult {
+    /// 往返耗时（毫秒）。
+    pub latency_ms: u64,
+    /// 服务报告的模型列表；退化到 chat 探测时为空。
+    pub models: Vec<String>,
+    /// 配置的模型是否出现在服务列表里（无法枚举时为 true）。
+    pub model_found: bool,
+    /// 实际探测方式：`models` 或 `chat`。
+    pub via: String,
+}
+
+#[derive(Deserialize)]
+struct ModelsResponse {
+    #[serde(default)]
+    data: Vec<ModelEntry>,
+}
+
+#[derive(Deserialize)]
+struct ModelEntry {
+    #[serde(default)]
+    id: String,
+}
+
+fn models_endpoint(settings: &AiSettings) -> String {
+    let base = settings.base_url.trim().trim_end_matches('/');
+    if let Some(stripped) = base.strip_suffix("/chat/completions") {
+        format!("{stripped}/models")
+    } else {
+        format!("{base}/models")
+    }
+}
+
+/// 用当前输入框里的配置探测服务是否可用，不做任何持久化。
+///
+/// 先请求 `GET /models` 验证地址与鉴权，同时校验模型名是否存在；
+/// 若服务不实现该接口（部分自建网关返回 404/405），退化到一次最小 chat 请求。
+pub async fn test_connection(settings: AiSettings) -> Result<AiTestResult, String> {
+    if !settings.configured() {
+        return Err("请先填写 Base URL 与模型名".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| format!("无法初始化测试客户端: {error}"))?;
+    let started = std::time::Instant::now();
+
+    let mut request = client.get(models_endpoint(&settings));
+    if !settings.api_key.is_empty() {
+        request = request.bearer_auth(&settings.api_key);
+    }
+    match request.send().await {
+        Ok(response) if response.status().is_success() => {
+            let body = response.text().await.unwrap_or_default();
+            let parsed: ModelsResponse =
+                serde_json::from_str(&body).unwrap_or(ModelsResponse { data: Vec::new() });
+            let models: Vec<String> = parsed
+                .data
+                .into_iter()
+                .map(|entry| entry.id)
+                .filter(|id| !id.is_empty())
+                .collect();
+            let model_found = models.is_empty() || models.iter().any(|id| id == &settings.model);
+            Ok(AiTestResult {
+                latency_ms: started.elapsed().as_millis() as u64,
+                models,
+                model_found,
+                via: "models".into(),
+            })
+        }
+        Ok(response) => {
+            let status = response.status();
+            if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::METHOD_NOT_ALLOWED {
+                return probe_with_chat(&client, &settings, started).await;
+            }
+            let snippet: String = response.text().await.unwrap_or_default().chars().take(160).collect();
+            Err(format!("服务返回 {status}（{snippet}）。请检查 Base URL 与 API Key。"))
+        }
+        Err(error) => Err(connect_error(&error, &settings.base_url)),
+    }
+}
+
+/// 退化探测：发一条最小消息，只要能拿到 2xx 就说明地址、鉴权与模型名都可用。
+async fn probe_with_chat(
+    client: &reqwest::Client,
+    settings: &AiSettings,
+    started: std::time::Instant,
+) -> Result<AiTestResult, String> {
+    let request = ChatRequest {
+        model: &settings.model,
+        messages: vec![ChatMessage {
+            role: "user",
+            content: MessageContent::Text("ping".into()),
+        }],
+        temperature: 0.0,
+        max_tokens: 1,
+        stream: false,
+    };
+    let mut builder = client.post(settings.endpoint()).json(&request);
+    if !settings.api_key.is_empty() {
+        builder = builder.bearer_auth(&settings.api_key);
+    }
+    let response = builder
+        .send()
+        .await
+        .map_err(|error| connect_error(&error, &settings.base_url))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let snippet: String = response.text().await.unwrap_or_default().chars().take(160).collect();
+        return Err(format!(
+            "模型服务返回 {status}（{snippet}）。请确认模型名「{}」已就绪。",
+            settings.model
+        ));
+    }
+    Ok(AiTestResult {
+        latency_ms: started.elapsed().as_millis() as u64,
+        models: Vec::new(),
+        model_found: true,
+        via: "chat".into(),
+    })
+}
+
+fn connect_error(error: &reqwest::Error, base_url: &str) -> String {
+    if error.is_timeout() {
+        "连接超时（20 秒），服务可能未启动或网络不可达。".to_string()
+    } else if error.is_connect() {
+        format!("无法连接 {base_url}。请确认本机模型已启动，或检查 Base URL。")
+    } else {
+        format!("请求失败: {error}")
+    }
+}
+
 /// 调用 OpenAI 兼容的 chat/completions 接口识别选区内容。
 ///
 /// 这是应用里唯一的网络出口，且只在用户显式配置模型后才会触发；
@@ -378,6 +512,51 @@ mod tests {
             request
         });
         (format!("http://{address}/v1"), handle)
+    }
+
+    #[test]
+    fn test_connection_reports_models_and_latency() {
+        let (base_url, server) = mock_server(
+            200,
+            r#"{"data":[{"id":"mock-vl"},{"id":"other-model"}]}"#,
+        );
+        let settings = AiSettings { base_url, model: "mock-vl".into(), api_key: String::new() };
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let result = runtime.block_on(test_connection(settings)).unwrap();
+        assert_eq!(result.via, "models");
+        assert!(result.model_found);
+        assert_eq!(result.models, vec!["mock-vl", "other-model"]);
+
+        let request = server.join().unwrap();
+        assert!(request.starts_with("GET /v1/models"), "unexpected request: {request}");
+    }
+
+    #[test]
+    fn test_connection_flags_missing_model() {
+        let (base_url, server) = mock_server(200, r#"{"data":[{"id":"other-model"}]}"#);
+        let settings = AiSettings { base_url, model: "missing-vl".into(), api_key: String::new() };
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let result = runtime.block_on(test_connection(settings)).unwrap();
+        assert!(!result.model_found, "模型名不在列表时应标记为未找到");
+        let _ = server.join();
+    }
+
+    #[test]
+    fn test_connection_surfaces_server_errors() {
+        let (base_url, server) = mock_server(500, r#"{"error":"boom"}"#);
+        let settings = AiSettings { base_url, model: "mock-vl".into(), api_key: String::new() };
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let error = runtime.block_on(test_connection(settings)).unwrap_err();
+        assert!(error.contains("服务返回"), "unexpected error: {error}");
+        let _ = server.join();
+    }
+
+    #[test]
+    fn test_connection_requires_configuration() {
+        let settings = AiSettings::default();
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let error = runtime.block_on(test_connection(settings)).unwrap_err();
+        assert!(error.contains("请先填写"));
     }
 
     #[test]

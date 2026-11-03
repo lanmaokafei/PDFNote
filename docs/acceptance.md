@@ -13,8 +13,8 @@
 | 右键菜单冒烟 | `node scripts/contextmenu-smoke.mjs` | 通过：原生 Reload 菜单被接管、菜单项执行动作、右下角翻转、键盘导航、输入框保留系统菜单、选区读取与跨层判定 |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
-| 原生编译 | `npx tauri build --bundles app` | 通过，0.12.1 生成 release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.12.1 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
+| 原生编译 | `npx tauri build --bundles app` | 通过，0.12.2 生成 release PDFNote.app |
+| DMG | 手动 `hdiutil` 打包 | 0.12.2 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
@@ -65,6 +65,8 @@ Rust 测试覆盖：
 | OCR 建卡 | Rust 真机 + 浏览器实测 | 标注-only 建卡通过；0.8.0 起为 Apple Vision 单引擎，真机中文图识别出「信息化」；已移除 Tesseract 与 63MB 离线模型 |
 | 可选文字层（0.9.0） | Rust 真机 + 无头 Chrome | 4 行中文图返回归一化行坐标（2.81s）；缓存往返与旧备份兼容测试通过；透明 DOM 文字拖选精确到字符，可复制/建卡；0.10.1 起选区字形保持透明（`::selection` color/fill 均为 `rgba(0,0,0,0)`），与 PDF 原字无重影 |
 | 元素右键菜单（0.10.0） | Vitest + 无头 Chrome | 原生 Reload 菜单被接管；文字选区/标注/墨迹/脑图节点/文档卡片按元素给菜单；动作执行、边界翻转、ESC 与键盘导航、输入框系统菜单均通过 |
+| 右键折叠（0.12.2） | Vitest + 无头 Chrome | 折叠根节点隐藏整棵子树、孤儿与环仍可见；mock IPC 下右键「折叠子节点」使画布节点数确实减少 |
+| 模型连通性（0.12.2） | Rust mock + 无头 Chrome | `GET /models` 返回延迟/模型列表并校验模型名；500 报错、404 退化到最小对话请求；设置面板按钮与失败反馈通过 |
 | 脑图 #185（0.12.1） | 无头 Chrome + mock IPC | 120 节点下「切大纲」修复前必崩、修复后正常；折叠/展开、拖拽落盘、连续 resize、单选与 Meta 多选全部通过 |
 | 可选 AI 识别（0.12.0） | Rust + 无头 Chrome | 设置往返/校验/围栏清理/未配置不发请求通过；本地 mock 服务验证 POST 路径、Bearer、model、图像字段与 500 报错；设置面板冒烟通过 |
 | 标题链接（0.11.0） | Vitest + 无头 Chrome | 10 项匹配测试通过（中文/别名/词边界/多卡聚合/长句过滤）；浏览器冒烟验证「心肌梗死」「STEMI」「MI」命中，高亮条 top/height 与行框一致（0.1 / 0.03），`XSTEMIX` 不误命中；schema v6 迁移与 v5 备份补空别名通过 |

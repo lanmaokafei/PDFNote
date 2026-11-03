@@ -12,6 +12,15 @@ export interface AiSettings {
 
 export type RecognitionMode = 'formula' | 'table' | 'general'
 
+export interface AiTestResult {
+  latencyMs: number
+  models: string[]
+  /** 配置的模型是否出现在服务列表里（服务无法枚举时为 true）。 */
+  modelFound: boolean
+  /** 实际探测方式：models 或 chat。 */
+  via: 'models' | 'chat'
+}
+
 export const EMPTY_AI_SETTINGS: AiSettings = { baseUrl: '', model: '', apiKey: '' }
 
 export const isAiConfigured = (settings: AiSettings) =>
@@ -31,6 +40,11 @@ export async function getAiSettings(): Promise<AiSettings> {
 export async function saveAiSettings(settings: AiSettings): Promise<AiSettings> {
   desktopOnly()
   return invoke('save_ai_settings', { settings })
+}
+
+export async function testAiConnection(settings: AiSettings): Promise<AiTestResult> {
+  desktopOnly()
+  return invoke('test_ai_connection', { settings })
 }
 
 export async function recognizeSelection(image: string, mode: RecognitionMode): Promise<string> {

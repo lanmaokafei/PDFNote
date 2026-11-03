@@ -9,6 +9,10 @@ describe('looksLikeMathFormula', () => {
     expect(looksLikeMathFormula('f(x) = ax² + bx + c')).toBe(true)
     expect(looksLikeMathFormula('∫f(x)dx = F(b)-F(a)')).toBe(true)
     expect(looksLikeMathFormula('y=1n(x)+C')).toBe(true)
+    // 文字层里的常见写法：单变量等式 + ^ 上标。
+    expect(looksLikeMathFormula('E = mc^2')).toBe(true)
+    expect(looksLikeMathFormula('x_1 + x_2 = 0')).toBe(true)
+    expect(looksLikeMathFormula('a^n + b^n = c^n')).toBe(true)
   })
 
   it('普通中文摘录不误判', () => {

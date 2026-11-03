@@ -73,9 +73,15 @@ const pdfBase64 = readFileSync(new URL('../test-fixtures/mini.pdf', import.meta.
 
 await page.addInitScript(({ cards, document, pdfBase64 }) => {
   const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0))
+  const cardState = cards.map((card) => ({ ...card }))
   const handlers = {
-    get_bootstrap_status: () => ({ database_ready: true, schema_version: 6, document_count: 1, card_count: cards.length }),
-    list_cards: () => cards,
+    get_bootstrap_status: () => ({ database_ready: true, schema_version: 6, document_count: 1, card_count: cardState.length }),
+    list_cards: () => cardState,
+    set_card_collapsed: (args) => {
+      const card = cardState.find((item) => item.id === args?.id)
+      if (card) card.collapsed = Boolean(args?.collapsed)
+      return card ?? null
+    },
     list_documents: () => [document],
     list_due_cards: () => [],
     list_annotations: () => [],
@@ -100,8 +106,11 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
     verify_document: () => document,
     relocate_document: () => document,
   }
+  window.__calls = []
+  window.__cardState = cardState
   window.__TAURI_INTERNALS__ = {
     invoke: (command, args) => {
+      window.__calls.push(command)
       if (command === 'read_pdf_chunk') {
         const begin = args?.begin ?? 0
         const end = args?.end ?? bytes.length
@@ -109,7 +118,7 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
       }
       const handler = handlers[command]
       if (!handler) return Promise.resolve(null)
-      return Promise.resolve(handler())
+      return Promise.resolve(handler(args))
     },
     transformCallback: (callback) => callback,
   }
@@ -164,6 +173,37 @@ for (const width of [1200, 1000, 1400, 900, 1300]) {
 }
 
 const STEP = process.env.STEP ?? 'all'
+
+if (STEP === 'context') {
+  // 右键节点 → 折叠子节点，验证菜单动作真的改变了画布。
+  const before = await page.locator('.mindmap-node').count()
+  const target = page.locator('.mindmap-node').first()
+  const targetBox = await target.boundingBox()
+  if (!targetBox) {
+    problems.push('右键目标节点不可见')
+  } else {
+    await page.mouse.click(targetBox.x + targetBox.width / 2, targetBox.y + 16, { button: 'right' })
+    await page.waitForSelector('.context-menu', { timeout: 3000 })
+    const toggleItem = page.locator('.context-menu-item', { hasText: '折叠子节点' }).first()
+    if (!(await toggleItem.count())) {
+      problems.push('右键菜单缺少折叠项')
+    } else {
+      const disabled = await toggleItem.getAttribute('aria-disabled')
+      if (disabled === 'true') problems.push('折叠项处于禁用状态')
+      await toggleItem.click()
+      await page.waitForTimeout(900)
+      const after = await page.locator('.mindmap-node').count()
+      const calls = await page.evaluate(() => window.__calls.slice(-12))
+      const state = await page.evaluate(() => window.__cardState.find((card) => card.id === 'c1')?.collapsed)
+      const toggleText = await page.locator('.mindmap-collapse').first().innerText().catch(() => '?')
+      if (!(after < before)) problems.push(`右键折叠未生效：${before} → ${after}；calls=${calls.join(',')}；mock.collapsed=${state}；按钮=${toggleText}`)
+    }
+  }
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP }, null, 2))
+  if (problems.length) process.exitCode = 1
+  process.exit(0)
+}
 
 // 折叠/展开：节点尺寸大幅变化，最容易触发测量回写循环。
 const collapse = STEP === 'outline' ? page.locator('.mindmap-collapse--disabled') : page.locator('.mindmap-collapse').first()

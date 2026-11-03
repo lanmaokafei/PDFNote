@@ -22,7 +22,21 @@ if (!title.includes('AI 识别')) problems.push(`标题异常：${title}`)
 const statusText = await page.locator('.settings-dialog').innerText()
 if (!statusText.includes('桌面应用中运行')) problems.push('浏览器环境未提示需要桌面应用')
 
-// ESC/关闭按钮可关闭
+// 填入配置后按钮可用；浏览器环境应给出明确失败原因（不是静默）
+await page.fill('input[placeholder="http://127.0.0.1:11434/v1"]', 'http://127.0.0.1:11434/v1')
+await page.fill('input[placeholder="qwen2.5vl:7b"]', 'qwen2.5vl:7b')
+const testButton = page.locator('.settings-test-button')
+if (!(await testButton.count())) problems.push('缺少测试连接按钮')
+else {
+  const disabled = await testButton.isDisabled()
+  if (disabled) problems.push('填写配置后测试按钮仍禁用')
+  await testButton.click()
+  await page.waitForTimeout(500)
+  const panelText = await page.locator('.settings-dialog').innerText()
+  if (!panelText.includes('连接测试失败')) problems.push('测试连接未给出失败反馈')
+}
+
+// 关闭按钮可关闭
 await page.locator('.settings-dialog button[aria-label="关闭设置"]').click()
 await page.waitForSelector('.settings-dialog', { state: 'detached', timeout: 3000 })
 

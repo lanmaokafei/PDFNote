@@ -61,9 +61,24 @@ export function getOrderedMindmapCards(
     }
   }
 
+  // 记录被折叠隐藏的整棵子树：它们不能在兜底循环里被当成孤儿再加回来。
+  const hiddenByCollapse = new Set<string>()
+  const markCollapsedDescendants = (id: string) => {
+    for (const child of children.get(id) ?? []) {
+      if (hiddenByCollapse.has(child.id)) continue
+      hiddenByCollapse.add(child.id)
+      markCollapsedDescendants(child.id)
+    }
+  }
+  for (const collapsedId of collapsedIds) markCollapsedDescendants(collapsedId)
+
   for (const root of roots) visit(root)
-  // Malformed legacy cycles still remain editable instead of disappearing.
-  for (const card of cards) visit(card)
+  // Malformed legacy cycles and orphans still remain editable instead of
+  // disappearing — but cards hidden by a collapsed ancestor must stay hidden.
+  for (const card of cards) {
+    if (hiddenByCollapse.has(card.id)) continue
+    visit(card)
+  }
   return ordered
 }
 

@@ -23,6 +23,7 @@ pub fn run() {
             commands::ocr_page_lines,
             commands::get_ai_settings,
             commands::save_ai_settings,
+            commands::test_ai_connection,
             commands::recognize_selection,
             commands::get_page_ocr,
             commands::save_page_ocr,

@@ -46,6 +46,7 @@ import {
 } from 'lucide-react'
 import { ContextMenu } from '../../ui/ContextMenu'
 import { useContextMenu, type ContextMenuItem, type ContextMenuSection } from '../../ui/contextMenuCore'
+import { looksLikeMathFormula } from './ocr'
 import { PageTextLayer, type TextSelectionInfo } from './PageTextLayer'
 import { readTextSelection } from './textSelection'
 import { searchTitleLinks, type TitleLinkHit, type TitleLinkIndex } from './titleLink'
@@ -487,14 +488,16 @@ export function PdfPage({
         const fromLayer = extractTextFromLines(lines, rect)
         if (fromLayer) {
           // 文字层已就绪：直接取文字，零延迟建卡，不再调用 OCR。
-          const crops = cropSelection(rect, false)
-          onCreate(page, rect, fromLayer, undefined, crops.archive)
+          // 公式仍需要一张高清图，供可选的视觉模型转 LaTeX。
+          const formula = looksLikeMathFormula(fromLayer)
+          const crops = cropSelection(rect, formula)
+          onCreate(page, rect, fromLayer, crops.ocr, crops.archive)
         } else {
           void page.getTextContent()
             .then((content) => {
               const excerpt = extractTextInRect(content, rect, view)
-              // 文字层文本也可能来自公式版式，始终生成存档图；只有无文字层才需要 OCR 大图。
-              const crops = cropSelection(rect, !excerpt)
+              // 文字层文本也可能来自公式版式：公式要多留一张高清图给可选的视觉模型。
+              const crops = cropSelection(rect, !excerpt || looksLikeMathFormula(excerpt))
               onCreate(page, rect, excerpt, crops.ocr, crops.archive)
             })
             .catch(() => {

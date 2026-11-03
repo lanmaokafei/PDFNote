@@ -25,6 +25,7 @@ import {
   removeAnnotation,
   setCardTags,
   updateAnnotationGeometry,
+  updateCardContent,
   updateDocumentProgress,
 } from '../../services/pdfnote'
 import {
@@ -48,6 +49,7 @@ import { reviewCard } from '../review/scheduler'
 import { PdfPage, type PageSize, type PdfContextAction, type PdfTool } from './PdfPage'
 import { recognizeText } from './ocr'
 import { decideFormulaRecognition } from './formulaRecognition'
+import { describeAiFailure } from './aiFailure'
 import { pruneCardAnnotations } from './annotationCache'
 import { TitleLinkPopover } from './TitleLinkPopover'
 import { buildTitleLinkIndex, type TitleLinkHit } from './titleLink'
@@ -69,11 +71,7 @@ const MIN_SCALE = 0.5
 const MAX_SCALE = 3
 const EMPTY_ANNOTATIONS: Annotation[] = []
 
-/** 从错误信息里揪出异步任务号，好把用户引到「设置 → 按任务号取回结果」。 */
-function extractTaskNo(message: string): string {
-  const match = message.match(/(?:任务\s*|tasks\/)([A-Za-z0-9][A-Za-z0-9_-]{5,})/)
-  return match?.[1] ?? ''
-}
+
 const TITLE_LINK_STORAGE_KEY = 'pdfnote.titleLink.enabled'
 
 function readTitleLinkPreference(): boolean {
@@ -123,6 +121,13 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   const [annotationVersion, setAnnotationVersion] = useState(0)
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
   const [operationError, setOperationError] = useState('')
+  // 完整错误默认折叠：摘要只留一句，避免整条状态栏被堆栈/网关原文淹没。
+  const [operationDetail, setOperationDetail] = useState('')
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailCopied, setDetailCopied] = useState(false)
+  // 公式识别失败后保留重试所需的最小上下文：卡片 id + 当时的选区截图。
+  const [formulaRetry, setFormulaRetry] = useState<{ cardId: string; image: string } | null>(null)
+  const [retrying, setRetrying] = useState(false)
   const [ocrMessage, setOcrMessage] = useState('')
   const [notice, setNotice] = useState('')
   const [creating, setCreating] = useState(false)
@@ -639,6 +644,54 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     }
   }, [])
 
+  const clearOperation = useCallback(() => {
+    setOperationError('')
+    setOperationDetail('')
+    setDetailOpen(false)
+    setDetailCopied(false)
+    setFormulaRetry(null)
+    setNotice('')
+  }, [])
+
+  /** 用失败时保存的截图重新识别公式，并把 LaTeX 写回同一张卡片的摘录。 */
+  const retryFormulaRecognition = useCallback(async () => {
+    if (!formulaRetry || retrying) return
+    setRetrying(true)
+    setOperationError('')
+    setOperationDetail('')
+    setDetailOpen(false)
+    setOcrMessage(`正在重试公式识别（最多等待 ${aiTimeoutSecs} 秒）…`)
+    try {
+      const latex = (await recognizeSelection(formulaRetry.image, 'formula')).trim()
+      if (!latex) throw new Error('模型返回了空内容')
+      const current = cardsById[formulaRetry.cardId]
+      await updateCardContent({
+        id: formulaRetry.cardId,
+        excerpt: latex,
+        user_note: current?.user_note ?? '',
+        question: current?.question ?? '',
+      })
+      setFormulaRetry(null)
+      setNotice('公式已识别为 LaTeX，结果已写入卡片摘录。')
+      callbacksRef.current.onCardsChanged()
+    } catch (reason) {
+      setOperationError('公式识别仍然失败，可查看详情，或稍后按任务号取回。')
+      setOperationDetail(errorMessage(reason))
+    } finally {
+      setOcrMessage('')
+      setRetrying(false)
+    }
+  }, [aiTimeoutSecs, cardsById, formulaRetry, retrying])
+
+  const copyDetail = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(operationDetail)
+      setDetailCopied(true)
+    } catch {
+      // 剪贴板不可用时用户仍可手动选中 pre 里的文本。
+    }
+  }, [operationDetail])
+
   const handleCreate = useCallback(async (
     page: PDFPageProxy,
     rect: NormalizedBBox,
@@ -739,15 +792,12 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
       if (aiFormula) {
         setNotice('公式已由视觉模型识别为 LaTeX，原图同时保留，请核对上下标后保存。')
       } else if (aiError) {
-        const taskNo = extractTaskNo(aiError)
-        setOperationError(
-          `公式识别失败：${aiError}。${finalExcerpt
-            ? '已保留原文与选区图像，可编辑卡片手动补录。'
-            : '已保存选区图像，请编辑卡片手动补录。'}`
-          + (taskNo
-            ? ` 任务 ${taskNo} 通常仍在服务端执行，可在「设置 → 按任务号取回结果」中粘贴取回。`
-            : ''),
-        )
+        const failure = describeAiFailure(aiError, Boolean(finalExcerpt))
+        setOperationError(failure.summary)
+        setOperationDetail(failure.detail)
+        setDetailOpen(false)
+        setDetailCopied(false)
+        if (aiImage) setFormulaRetry({ cardId: card.id, image: aiImage })
       } else if (ocrFormula) {
         setNotice('选区疑似数学公式，文字 OCR 无法识别公式结构。已保存选区图像，请编辑卡片手动输入公式内容，或在设置中配置视觉模型自动识别。')
       } else if (isFormula) {
@@ -1014,7 +1064,37 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
       {(operationError || notice || creating || ocrMessage) && (
         <div className={`pdf-operation-bar${embedded ? ' is-floating' : ''} ${operationError ? 'is-error' : ''}`} role={operationError ? 'alert' : 'status'}>
           <span>{operationError || ocrMessage || (creating ? '正在创建卡片与标注…' : notice)}</span>
-          {(operationError || notice) && <button type="button" onClick={() => { setOperationError(''); setNotice('') }} aria-label="关闭提示">×</button>}
+          {formulaRetry && operationError && !creating && (
+            <button
+              type="button"
+              className="pdf-operation-action is-primary"
+              onClick={() => void retryFormulaRecognition()}
+              disabled={retrying}
+            >
+              {retrying ? '重试中…' : '重试'}
+            </button>
+          )}
+          {operationDetail && (
+            <button
+              type="button"
+              className="pdf-operation-action"
+              aria-expanded={detailOpen}
+              onClick={() => setDetailOpen((open) => !open)}
+            >
+              {detailOpen ? '收起详情' : '查看详情'}
+            </button>
+          )}
+          {(operationError || notice) && <button type="button" onClick={clearOperation} aria-label="关闭提示">×</button>}
+        </div>
+      )}
+
+      {detailOpen && operationDetail && (
+        <div className={`pdf-operation-detail${embedded ? ' is-floating' : ''}`} role="region" aria-label="识别失败详情">
+          <pre>{operationDetail}</pre>
+          <div className="pdf-operation-detail-actions">
+            <button type="button" onClick={() => void copyDetail()}>{detailCopied ? '已复制' : '复制详情'}</button>
+            <button type="button" onClick={() => setDetailOpen(false)}>收起</button>
+          </div>
         </div>
       )}
 

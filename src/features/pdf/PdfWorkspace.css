@@ -1319,3 +1319,80 @@
   background: #3f6a85 !important;
 }
 .pdf-titlelink-actions button:hover { filter: brightness(1.06); }
+
+/* ---------- 操作条：短摘要 + 可折叠详情 + 重试 ---------- */
+.pdf-operation-bar .pdf-operation-action {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  border: 1px solid rgba(153, 77, 66, .32);
+  border-radius: 999px;
+  color: #8c4a40;
+  background: #fff;
+  font-size: 11px;
+  line-height: 1.7;
+  cursor: pointer;
+}
+.pdf-operation-bar .pdf-operation-action:hover {
+  background: #fdeeea;
+}
+.pdf-operation-bar .pdf-operation-action.is-primary {
+  border-color: #994d42;
+  color: #fff;
+  background: #994d42;
+}
+.pdf-operation-bar .pdf-operation-action.is-primary:hover {
+  background: #8a4238;
+}
+.pdf-operation-bar .pdf-operation-action:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.pdf-operation-detail {
+  z-index: 5;
+  flex: 0 0 auto;
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid #edd8d4;
+  color: #7d4a42;
+  background: #fffaf8;
+}
+.pdf-operation-detail pre {
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pdf-operation-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.pdf-operation-detail-actions button {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid rgba(153, 77, 66, .22);
+  border-radius: 6px;
+  color: #7d4a42;
+  background: #fff;
+  font-size: 10px;
+  cursor: pointer;
+}
+.pdf-operation-detail-actions button:hover {
+  background: #fdeeea;
+}
+.pdf-operation-detail.is-floating {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  z-index: 31;
+  width: min(560px, calc(100% - 40px));
+  transform: translateX(-50%);
+  border: 1px solid #edd8d4;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(24, 30, 24, .12);
+}

@@ -502,10 +502,62 @@ enum TaskState {
     Unknown,
 }
 
-/// 结果字段候选：不同网关把同一段 LaTeX 放在 latex / content / result.data 等不同位置。
-const RESULT_KEYS: [&str; 10] = [
-    "latex", "mathpix", "content", "result", "output", "text", "markdown", "answer", "value", "data",
+/// 结果字段候选：不同网关把同一段 LaTeX 放在不同字段里。
+/// `result_text` 是本机网关（10.0.10.5）的实际命名，必须放在前面。
+const RESULT_KEYS: [&str; 14] = [
+    "result_text", "resultText", "latex_text", "latexText", "latex", "mathpix", "content",
+    "result", "output", "text", "markdown", "answer", "value", "data",
 ];
+
+/// 元数据键：即使字符串很长也不能当成识别结果。
+const META_KEYS: [&str; 17] = [
+    "task_no", "task_id", "status", "state", "channel", "capability", "result_url",
+    "error_detail", "created_at", "started_at", "finished_at", "note", "from_status",
+    "to_status", "model", "id", "object",
+];
+
+fn is_meta_key(key: &str) -> bool {
+    let lowered = key.to_lowercase();
+    META_KEYS.iter().any(|meta| lowered == *meta)
+        || lowered.ends_with("_at")
+        || lowered.ends_with("_url")
+        || lowered.ends_with("_id")
+        || lowered.ends_with("_no")
+}
+
+fn collect_texts<'a>(value: &'a serde_json::Value, out: &mut Vec<(&'a str, String)>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                if let Some(text) = value_to_text(child) {
+                    out.push((key.as_str(), text));
+                } else {
+                    collect_texts(child, out);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for child in items {
+                collect_texts(child, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 兜底：任何非元数据字段里最长的、像内容的字符串。
+/// 这样网关下次把字段改名成 `answer_text` / `outputText` 也能取到。
+fn longest_fallback_text(value: &serde_json::Value) -> Option<String> {
+    let mut texts = Vec::new();
+    collect_texts(value, &mut texts);
+    texts
+        .into_iter()
+        .filter(|(key, text)| {
+            !is_meta_key(key) && looks_like_result(text) && text.chars().count() >= 4
+        })
+        .max_by_key(|(_, text)| text.chars().count())
+        .map(|(_, text)| text)
+}
 
 fn status_of(value: &serde_json::Value) -> String {
     for key in ["status", "state", "task_status", "taskStatus", "phase"] {
@@ -575,7 +627,7 @@ fn find_result_text(value: &serde_json::Value) -> Option<String> {
             }
         }
     }
-    None
+    longest_fallback_text(value)
 }
 
 fn extract_task_text(body: &str) -> TaskState {
@@ -1015,6 +1067,39 @@ mod tests {
         match extract_task_text(r#"{"data":{"status":"FAILED","msg":"模型过载"}}"#) {
             TaskState::Failed(message) => assert_eq!(message, "模型过载"),
             _ => panic!("expected failed"),
+        }
+    }
+
+    #[test]
+    fn extract_task_text_reads_real_gateway_payload() {
+        // 用户实际网关（10.0.10.5）的响应：结果只在 result_text 里，且带 events 数组。
+        let body = r#"{"task_no":"20261103-3252","task_id":"e44fd760-05e9-4b12-aac9-5cd760ae089a","status":"SUCCEEDED","channel":"sync","capability":"llm.chat","progress":0,"est_sec":60,"actual_sec":75,"cancel_requested":false,"result_url":null,"result_text":"H = -\\sum_{i=1}^{n} P(x_i) \\log_2 P(x_i)","error_detail":null,"created_at":"2026-11-03T23:31:31.411010+08:00","started_at":"2026-11-03T23:32:34.598480+08:00","finished_at":"2026-11-03T23:33:49.883914+08:00","events":[{"from_status":null,"to_status":"SUBMITTED","note":"created","created_at":"2026-11-03T23:31:31.413771+08:00"},{"from_status":"RUNNING","to_status":"SUCCEEDED","note":"run.ok","created_at":"2026-11-03T23:33:49.884204+08:00"}]}"#;
+        match extract_task_text(body) {
+            TaskState::Done(text) => {
+                assert!(text.starts_with("H = -"), "unexpected: {text}");
+                assert!(text.contains("\\sum"), "unexpected: {text}");
+                assert!(!text.contains("SUCCEEDED"), "元数据被当成结果: {text}");
+                assert!(!text.contains("2026-11-03"), "时间戳被当成结果: {text}");
+            }
+            other => panic!("expected done, got {}", state_name(&other)),
+        }
+    }
+
+    #[test]
+    fn extract_task_text_falls_back_for_unknown_result_field() {
+        // 网关以后把字段改名成 answer_text 也要能取到（最长非元数据字符串兜底）。
+        match extract_task_text(r#"{"status":"SUCCEEDED","answer_text":"E = mc^2","channel":"sync"}"#) {
+            TaskState::Done(text) => assert_eq!(text, "E = mc^2"),
+            other => panic!("expected done, got {}", state_name(&other)),
+        }
+    }
+
+    fn state_name(state: &TaskState) -> &'static str {
+        match state {
+            TaskState::Done(_) => "done",
+            TaskState::Failed(_) => "failed",
+            TaskState::Pending => "pending",
+            TaskState::Unknown => "unknown",
         }
     }
 

@@ -1,3 +1,4 @@
+mod ai;
 mod backup;
 mod cards;
 mod commands;
@@ -20,6 +21,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ocr_image,
             commands::ocr_page_lines,
+            commands::get_ai_settings,
+            commands::save_ai_settings,
+            commands::recognize_selection,
             commands::get_page_ocr,
             commands::save_page_ocr,
             commands::get_bootstrap_status,

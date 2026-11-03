@@ -11,6 +11,7 @@
 - **PDF 工作区**：PDF.js 连续滚动与页级虚拟化、256KB Range 分块读取、缩放、页码跳转、自动回到上次阅读页、高亮/矩形框选建卡、文字层提取、Apple Vision OCR、标注拖拽、标注删除语义选择、文档遮挡主动回忆。
 - **可选文字层（0.9.0）**：切到「文字」工具后可像 Word 一样在页面上随手拖选文字，选中即复制或直接建卡。页面打开时后台整页识别一次（有 PDF 文字层则用精确字形坐标，扫描页用 Apple Vision 行级 OCR），结果带每行坐标并缓存到 SQLite，之后所有点选/框选零延迟。详见 [Apple Vision OCR](docs/ocr.md)。
 - **元素右键菜单（0.10.0）**：接管 WKWebView 只有 Reload 的原生右键菜单。选中文字可复制/引用/建卡，标注可加标签、链接、合并、删除，墨迹可单条删除，页面空白处可切工具、缩放、翻页、复制本页文字；脑图节点、资料库文档、复习卡片与全局空白区也都有对应操作。详见 [应用内右键菜单](docs/context-menu.md)。
+- **可选 AI 识别（0.12.0）**：顶栏齿轮里可配置 OpenAI 兼容的视觉模型（本机 Ollama / LM Studio 或自填云端 Key）。配置后，扫描页的**公式选区**自动转成 LaTeX 写入卡片摘录，原图仍保留对照；未配置时应用完全不联网，公式照旧「原图 + 手动补录」。详见 [可选 AI 识别](docs/ai-recognition.md)。
 - **标题链接（0.11.0）**：卡片标题与别名自动注册为关键词，读到任意文档时页面中命中的词会高亮，点击即可回看当年那张卡的摘录、笔记与来源。纯本地 Aho-Corasick 字典匹配，不走 AI、不联网；默认关闭，卡片库积累后开启。详见 [标题链接](docs/title-link.md)。
 - **Apple Vision OCR**：macOS 原生单引擎（`VNRecognizeTextRequest` accurate / revision 3 / 自动语言检测），不打包离线模型；扫描页无文字层时自动识别选区并建卡，公式与图表保留选区原图。详见 [Apple Vision OCR](docs/ocr.md)。
 - **知识脑图**：React Flow 自定义卡片节点、折叠/展开、拖拽改父级、连线改父级、防环、多选、布局持久化、独立建卡、卡片编辑、脑图逐级主动回忆。
@@ -28,7 +29,8 @@ npm run tauri dev
 浏览器 UI 预览（无数据库与导入能力）：
 
 ```bash
-npm run dev
+npm run dev                      # 默认 http://localhost:1420
+npm run dev -- --host 127.0.0.1  # 跑冒烟脚本时用这个（脚本访问 127.0.0.1）
 ```
 
 原生依赖：Rust stable、Node.js 20+、macOS 上的 Tauri 系统依赖（应用仅在 macOS 运行）。
@@ -47,8 +49,9 @@ npm run tauri build
 
 2026-11-02 本地验证结果：
 
-- Rust：29 项测试通过（含 2 项 Vision 真机集成：`OCR_TEST_IMAGE` 中文识别、`OCR_PAGE_TEST_IMAGE` 行级坐标）；覆盖迁移至 v6、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、旧备份列兼容、页面文字缓存、坏包保护等。
+- Rust：37 项测试通过（含 2 项 Vision 真机集成：`OCR_TEST_IMAGE` 中文识别、`OCR_PAGE_TEST_IMAGE` 行级坐标）；覆盖迁移至 v6、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、旧备份列兼容、页面文字缓存、坏包保护、视觉模型设置与本地 mock 端到端识别等。
 - 前端：35 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、公式特征检测、文字层行提取与选区文本、右键菜单定位边界、标题链接字典与匹配）。
+- 设置面板冒烟：`node scripts/settings-smoke.mjs`（需 dev server），验证模型配置对话框字段、非桌面环境提示与关闭。
 - 文字层冒烟：`node scripts/textlayer-smoke.mjs`，用无头 Chrome 验证透明 DOM 文字可原生拖选并换算出归一化选区。
 - 右键菜单冒烟：`node scripts/contextmenu-smoke.mjs`（需 dev server），验证原生菜单接管、菜单项动作、边界翻转、键盘导航、输入框保留系统菜单与选区读取。
 - 标题链接冒烟：`node scripts/titlelink-smoke.mjs`（需 dev server），在真实浏览器加载模块，验证中文/别名命中、拉丁词边界、多卡聚合与高亮条归一化坐标。
@@ -74,6 +77,7 @@ docs/                    架构、实施、数据恢复与已知限制
 scripts/ui-smoke.mjs           Playwright 界面冒烟脚本（需 dev server）
 scripts/contextmenu-smoke.mjs  右键菜单冒烟脚本（需 dev server）
 scripts/titlelink-smoke.mjs    标题链接匹配与高亮定位冒烟（需 dev server）
+scripts/settings-smoke.mjs     设置面板冒烟（需 dev server）
 ```
 
 ## 关键设计
@@ -89,13 +93,17 @@ scripts/titlelink-smoke.mjs    标题链接匹配与高亮定位冒烟（需 dev
 已生成并校验：
 
 ```text
-release/PDFNote_0.11.0_aarch64.dmg
-release/PDFNote_0.11.0_aarch64.dmg.sha256
+release/PDFNote_0.12.0_aarch64.dmg
+release/PDFNote_0.12.0_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
 
+DMG 内已放置 **Applications 快捷方式**：打开镜像后把 PDFNote 拖进「应用程序」即可完成安装（打包时用 staging 目录 + `ln -s /Applications`，再 `hdiutil create -srcfolder`）。
+
 ## 重要修复
+
+- 0.12.0 新增**可选 AI 识别**：公式选区可交给配置好的视觉模型转 LaTeX，默认不配置即完全离线；设置文件独立于数据库与备份包。详见 [可选 AI 识别](docs/ai-recognition.md)。
 
 - 0.11.0 新增**标题链接**：卡片标题与别名成为本地关键词字典，阅读任意文档时命中词自动高亮，点击回看原卡片并跳回来源页。schema 升至 v6（`cards.link_aliases`），旧备份导入时自动补空别名。详见 [标题链接](docs/title-link.md)。
 
@@ -126,6 +134,7 @@ release/PDFNote_0.11.0_aarch64.dmg.sha256
 ## 文档
 
 - [应用内右键菜单](docs/context-menu.md)
+- [可选 AI 识别](docs/ai-recognition.md)
 - [标题链接](docs/title-link.md)
 - [Apple Vision OCR 与可选文字层](docs/ocr.md)
 - [脑图 React #185 复盘](docs/react-185-regression.md)

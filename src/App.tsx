@@ -5,6 +5,7 @@ import {
   FileText,
   Network,
   Search,
+  Settings,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
@@ -14,6 +15,7 @@ import { useContextMenu } from './ui/contextMenuCore'
 import type { BootstrapStatus, Document } from './domain/card'
 import { LibraryWorkspace } from './features/library/LibraryWorkspace'
 import { StudyWorkspace } from './features/study/StudyWorkspace'
+import { SettingsDialog } from './features/settings/SettingsDialog'
 
 const MindmapWorkspace = lazy(() =>
   import('./features/mindmap/MindmapWorkspace').then((module) => ({ default: module.MindmapWorkspace })),
@@ -45,6 +47,7 @@ function App() {
   const [fatalError, setFatalError] = useState('')
   const [showMindmap, setShowMindmap] = useState(true)
   const [searchToken, setSearchToken] = useState(0)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const { menu, show, close } = useContextMenu()
   const loadCards = useCardStore((state) => state.loadCards)
   const cardsById = useCardStore((state) => state.cardsById)
@@ -205,6 +208,9 @@ function App() {
           <button type="button" className="app-segment-action" onClick={() => goTo('backup')} title="备份与恢复" aria-label="备份与恢复">
             <ShieldCheck size={17} strokeWidth={1.8} />
           </button>
+          <button type="button" className="app-segment-action" onClick={() => setSettingsOpen(true)} title="设置：可选的 AI 识别模型" aria-label="设置">
+            <Settings size={17} strokeWidth={1.8} />
+          </button>
         </div>
       </header>
 
@@ -251,6 +257,7 @@ function App() {
           </>
         )}
       </main>
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       <ContextMenu state={menu} onClose={close} />
     </div>
   )

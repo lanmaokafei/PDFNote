@@ -1,5 +1,29 @@
-use crate::{backup, cards, documents, models, review, state::AppState};
+use crate::{ai, backup, cards, documents, models, review, state::AppState};
 use tauri::{ipc::Response, State};
+
+/// 可选的视觉模型设置。未配置时应用不发任何网络请求。
+#[tauri::command]
+pub fn get_ai_settings(state: State<'_, AppState>) -> Result<ai::AiSettings, String> {
+    ai::load_settings(&state)
+}
+
+#[tauri::command]
+pub fn save_ai_settings(
+    state: State<'_, AppState>,
+    settings: ai::AiSettings,
+) -> Result<ai::AiSettings, String> {
+    ai::save_settings(&state, settings)
+}
+
+/// 识别选区内容（公式 / 表格 / 通用）。仅在用户配置模型后可用。
+#[tauri::command]
+pub async fn recognize_selection(
+    state: State<'_, AppState>,
+    image: String,
+    mode: String,
+) -> Result<String, String> {
+    ai::recognize_selection(&state, image, mode).await
+}
 
 #[tauri::command(async)]
 pub fn ocr_image(image_data: String) -> Result<String, String> {

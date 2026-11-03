@@ -49,6 +49,7 @@ import { PdfPage, type PageSize, type PdfContextAction, type PdfTool } from './P
 import { looksLikeMathFormula, recognizeText } from './ocr'
 import { TitleLinkPopover } from './TitleLinkPopover'
 import { buildTitleLinkIndex, type TitleLinkHit } from './titleLink'
+import { getAiSettings, isAiConfigured, recognizeSelection } from '../../services/ai'
 import './PdfWorkspace.css'
 
 GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs'
@@ -136,6 +137,8 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   // 标题链接默认关闭：卡片库还很小时开启只会有开销，没有「过去的笔记」可浮现。
   const [titleLinkEnabled, setTitleLinkEnabled] = useState(readTitleLinkPreference)
   const [titleLinkPreview, setTitleLinkPreview] = useState<TitleLinkHit | null>(null)
+  // 只有用户配置了视觉模型才尝试公式识别；否则保持原图 + 手动补录。
+  const [aiReady, setAiReady] = useState(false)
 
   const cardsById = useCardStore((state) => state.cardsById)
   const createCard = useCardStore((state) => state.createCard)
@@ -163,6 +166,23 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   useEffect(() => {
     callbacksRef.current = { onPageCount, onCardsChanged }
   }, [onCardsChanged, onPageCount])
+
+  // 读取可选的视觉模型配置；未配置时公式识别完全走本地路径。
+  useEffect(() => {
+    let active = true
+    getAiSettings()
+      .then((settings) => { if (active) setAiReady(isAiConfigured(settings)) })
+      .catch(() => { if (active) setAiReady(false) })
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      setAiReady(Boolean(detail && detail.baseUrl && detail.model))
+    }
+    window.addEventListener('pdfnote:ai-settings-changed', onChanged)
+    return () => {
+      active = false
+      window.removeEventListener('pdfnote:ai-settings-changed', onChanged)
+    }
+  }, [])
 
   useEffect(() => {
     const generation = documentGenerationRef.current + 1
@@ -611,6 +631,22 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     const ocrFormula = usedOcr && isFormula
     if (ocrFormula) finalExcerpt = ''
 
+    // 配置了视觉模型时，把公式选区交给模型转 LaTeX；失败则保留原图由用户补录。
+    let aiFormula = false
+    let aiError = ''
+    if (ocrFormula && aiReady && cardImage) {
+      setOcrMessage('正在用视觉模型识别公式…')
+      try {
+        const latex = await recognizeSelection(cardImage, 'formula')
+        finalExcerpt = latex.trim()
+        aiFormula = Boolean(finalExcerpt)
+      } catch (reason) {
+        aiError = errorMessage(reason)
+      } finally {
+        setOcrMessage('')
+      }
+    }
+
     try {
       const card = await createCard({
         source_ref: { document_id: document.id, page: page.pageNumber, bbox: rect },
@@ -636,8 +672,12 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
       }
       invalidateAnnotations(page.pageNumber)
       callbacksRef.current.onCardsChanged()
-      if (ocrFormula) {
-        setNotice('选区疑似数学公式，文字 OCR 无法识别公式结构。已保存选区图像，请编辑卡片手动输入公式内容。')
+      if (aiFormula) {
+        setNotice('公式已由视觉模型识别为 LaTeX，原图同时保留，请核对上下标后保存。')
+      } else if (ocrFormula && aiError) {
+        setOperationError(`公式识别失败：${aiError}。已保存选区图像，请编辑卡片手动补录。`)
+      } else if (ocrFormula) {
+        setNotice('选区疑似数学公式，文字 OCR 无法识别公式结构。已保存选区图像，请编辑卡片手动输入公式内容，或在设置中配置视觉模型自动识别。')
       } else if (isFormula) {
         setNotice('已识别为公式：保留 PDF 原文并附上选区图像，请核对上下标与符号。')
       } else if (ocrError) {
@@ -654,7 +694,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     } finally {
       setCreating(false)
     }
-  }, [createCard, creating, document.id, invalidateAnnotations, recallMode, tool])
+  }, [aiReady, createCard, creating, document.id, invalidateAnnotations, recallMode, tool])
 
   const handleMove = useCallback((annotation: Annotation, geometry: AnnotationGeometry, bbox: NormalizedBBox) => {
     const requestId = (moveRequestsRef.current.get(annotation.id) ?? 0) + 1

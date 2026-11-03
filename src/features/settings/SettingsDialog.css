@@ -1,0 +1,194 @@
+.settings-backdrop {
+  position: fixed;
+  z-index: 90;
+  inset: 0;
+  display: grid;
+  padding: 24px;
+  background: rgba(28, 36, 30, .34);
+  backdrop-filter: blur(3px);
+  place-items: center;
+}
+
+.settings-dialog {
+  display: flex;
+  width: min(520px, 100%);
+  max-height: min(86vh, 760px);
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+  overflow: auto;
+  border: 1px solid #e2e6e0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(24, 34, 27, .26);
+}
+
+.settings-dialog header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-dialog header small {
+  color: #3f6a85;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+}
+
+.settings-dialog header h2 {
+  margin: 4px 0 0;
+  color: #1f2b24;
+  font-size: 18px;
+}
+
+.settings-dialog header button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 6px;
+  color: #5f665f;
+  background: #eef1ea;
+  font-size: 16px;
+  cursor: pointer;
+  place-items: center;
+}
+
+.settings-intro,
+.settings-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: #4c5a50;
+  background: #f4f8f3;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.settings-intro svg,
+.settings-hint svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #4f7a5a;
+}
+
+.settings-dialog code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(63, 106, 133, .1);
+  color: #345a72;
+  font-size: 10px;
+}
+
+.settings-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-dialog label > span {
+  color: #3a463d;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.settings-dialog label > small {
+  color: #767f76;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.settings-dialog input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #dde3dc;
+  border-radius: 8px;
+  color: #26322b;
+  background: #fbfcfa;
+  font-size: 12px;
+}
+
+.settings-dialog input:focus {
+  border-color: #7fa5bc;
+  outline: 2px solid rgba(63, 106, 133, .16);
+}
+
+.settings-key-row {
+  display: flex;
+  gap: 6px;
+}
+
+.settings-key-row button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid #dde3dc;
+  border-radius: 8px;
+  color: #5f665f;
+  background: #f4f6f1;
+  cursor: pointer;
+  place-items: center;
+}
+
+.settings-status {
+  margin: 0;
+  color: #6a736a;
+  font-size: 11px;
+}
+
+.settings-error,
+.settings-notice {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.settings-error {
+  color: #8c3a2e;
+  background: #fbf0ee;
+}
+
+.settings-notice {
+  color: #3d6b4b;
+  background: #eef6ef;
+}
+
+.settings-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #eef1ea;
+}
+
+.settings-dialog footer button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid #e0e5de;
+  border-radius: 8px;
+  color: #414d44;
+  background: #f7f8f5;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.settings-dialog footer button.primary {
+  border-color: #3f6a85;
+  color: #fff;
+  background: #3f6a85;
+}
+
+.settings-dialog footer button:disabled {
+  cursor: default;
+  opacity: .5;
+}

@@ -96,8 +96,8 @@ scripts/mindmap-regression.mjs 脑图 React #185 回归（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.13.1_aarch64.dmg
-release/PDFNote_0.13.1_aarch64.dmg.sha256
+release/PDFNote_0.13.2_aarch64.dmg
+release/PDFNote_0.13.2_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
@@ -138,6 +138,8 @@ killall Dock
 ```
 
 ## 重要修复
+
+- 0.13.2 修复**卡片里的公式被裁掉**：卡片正文原本按 3 行截断（`-webkit-line-clamp`），块级公式高度远超 3 行，右侧和下半部分会被切掉。现在含公式的段落自动取消截断，公式按卡片宽度等比缩放（基准 11px，下限 70%），过长时才横向滚动。
 
 - 0.13.1 修正**公式卡片重复显示**：摘录已经能排版成公式时，不再显示选区截图，避免图片挤占空间把公式遮住；纯图片卡片（OCR 没取到文字）仍保留截图。
 

@@ -13,8 +13,8 @@
 | 右键菜单冒烟 | `node scripts/contextmenu-smoke.mjs` | 通过：原生 Reload 菜单被接管、菜单项执行动作、右下角翻转、键盘导航、输入框保留系统菜单、选区读取与跨层判定 |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
-| 原生编译 | `npx tauri build --bundles app` | 通过，0.13.1 生成 release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.13.1 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
+| 原生编译 | `npx tauri build --bundles app` | 通过，0.13.2 生成 release PDFNote.app |
+| DMG | 手动 `hdiutil` 打包 | 0.13.2 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
@@ -65,6 +65,7 @@ Rust 测试覆盖：
 | OCR 建卡 | Rust 真机 + 浏览器实测 | 标注-only 建卡通过；0.8.0 起为 Apple Vision 单引擎，真机中文图识别出「信息化」；已移除 Tesseract 与 63MB 离线模型 |
 | 可选文字层（0.9.0） | Rust 真机 + 无头 Chrome | 4 行中文图返回归一化行坐标（2.81s）；缓存往返与旧备份兼容测试通过；透明 DOM 文字拖选精确到字符，可复制/建卡；0.10.1 起选区字形保持透明（`::selection` color/fill 均为 `rgba(0,0,0,0)`），与 PDF 原字无重影 |
 | 元素右键菜单（0.10.0） | Vitest + 无头 Chrome | 原生 Reload 菜单被接管；文字选区/标注/墨迹/脑图节点/文档卡片按元素给菜单；动作执行、边界翻转、ESC 与键盘导航、输入框系统菜单均通过 |
+| 公式不被裁切（0.13.2） | 无头 Chrome 实测 + 截图 | 段落 `scrollHeight = clientHeight`（原 3 行 clamp 已解除）、公式容器 `scrollWidth = clientWidth`（自适应缩放生效）、卡片整体无纵向溢出；截图确认公式完整可读 |
 | 公式卡不显示截图（0.13.1） | Vitest + 无头 Chrome | `hasMathContent` 3 项（裸公式、行内公式、纯文本/空）；脑图实测公式节点截图 0 张、纯图片卡片仍有 2 张 |
 | 公式渲染与画布平移（0.13.0） | Vitest + 无头 Chrome | 裸 LaTeX、`$...$` 混排、普通中英文文本判定共 9 项；脑图渲染出 `.katex` 与 display 模式、字体 `KaTeX_Main` 加载成功；左键拖空白与滚轮均改变 viewport transform（旧版不动） |
 | `result_text` 与失败交互（0.12.7） | Rust mock + Vitest | 真实网关响应体（`result_text` + `events`）解析为 LaTeX 且不误取状态/时间戳；未知字段 `answer_text` 走兜底；前端摘要 ≤40 字、详情含任务号与补救指引，重试/详情按钮渲染 |

@@ -213,13 +213,38 @@ if (STEP === 'math') {
 
   // 公式卡片的截图必须隐藏（与渲染结果重复，还会把公式挤出卡片）；
   // 纯图片卡片仍要保留截图。
+  // 公式不能被段落 line-clamp 或容器高度裁切
+  const clipping = await page.evaluate(() => {
+    const display = document.querySelector('.mindmap-node .katex-display')
+    const paragraph = display?.closest('p')
+    const node = display?.closest('.mindmap-node')
+    return {
+      paragraph: paragraph ? { client: paragraph.clientHeight, scroll: paragraph.scrollHeight } : null,
+      display: display ? { client: display.clientHeight, scroll: display.scrollHeight, width: display.clientWidth, scrollWidth: display.scrollWidth } : null,
+      node: node ? { client: node.clientHeight, scroll: node.scrollHeight } : null,
+    }
+  })
+  if (clipping.paragraph && clipping.paragraph.scroll > clipping.paragraph.client + 1) {
+    problems.push(`公式段落被截断：${JSON.stringify(clipping.paragraph)}`)
+  }
+  if (clipping.node && clipping.node.scroll > clipping.node.client + 1) {
+    problems.push(`卡片高度截断公式：${JSON.stringify(clipping.node)}`)
+  }
+  if (!clipping.display) problems.push('未找到块级公式容器')
+  if (clipping.display && clipping.display.scrollWidth > clipping.display.width + 2) {
+    problems.push(`公式横向溢出：${clipping.display.scrollWidth} > ${clipping.display.width}`)
+  }
+
   const formulaNodeImages = await page.locator('.mindmap-node').first().locator('.mindmap-node-image').count()
   const totalImages = await page.locator('.mindmap-node-image').count()
   if (formulaNodeImages !== 0) problems.push(`公式卡片仍显示截图：${formulaNodeImages}`)
   if (totalImages < 1) problems.push('无公式的图片卡片被误隐藏')
 
+  if (process.env.SHOT) {
+    await page.locator('.mindmap-node').first().screenshot({ path: '/tmp/formula-card.png' })
+  }
   await browser.close()
-  console.log(JSON.stringify({ problems, step: STEP, katexCount, displayCount, fontLoaded, formulaNodeImages, totalImages }, null, 2))
+  console.log(JSON.stringify({ problems, step: STEP, katexCount, displayCount, fontLoaded, clipping, formulaNodeImages, totalImages }, null, 2))
   if (problems.length) process.exitCode = 1
   process.exit(0)
 }

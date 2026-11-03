@@ -48,6 +48,20 @@
 
 PDF 端的原标注与截图始终保留，卡片仍可从来源回跳，所以隐藏的只是脑图里的重复展示。
 
+## 不被裁切
+
+卡片正文为了整齐，默认用 `-webkit-line-clamp: 3` 截断。块级公式的高度远超 3 行，
+会被直接从中间切掉（曾出现只看到公式上半截、右侧也被截的情况）。0.13.2 的处理：
+
+- 含公式的段落（`p:has(.katex)`）取消 `line-clamp` 与 `overflow: hidden`，卡片高度随公式增长；
+- 脑图大纲行同样处理（那里原本是 2 行截断）；
+- 公式基准字号按场景给：脑图卡片与大纲 11px（正文本身只有 9px，用 1em 会太小）；
+- 渲染后测量容器宽度，超宽时按比例缩小字号（最多缩到 70%），再长才出现横向滚动条；
+- 纵向永远不裁：`katex-display` 只做横向滚动。
+
+回归脚本会断言 `scrollHeight` 与 `clientHeight`、`scrollWidth` 与 `clientWidth` 一致，
+并用 `SHOT=1` 输出卡片截图便于目视检查。
+
 ## 实现要点
 
 - `src/ui/MathText.tsx`：`katex.renderToString` + `dangerouslySetInnerHTML`；

@@ -499,11 +499,25 @@
 .math-text .katex {
   font-size: 1em;
 }
+/* 卡片正文只有 9px，公式按 1em 渲染会太小；单独给一个可读的基准字号。 */
+.mindmap-node-content .math-text .katex,
+.mindmap-outline-body .math-text .katex {
+  font-size: 11px;
+}
+/* 卡片正文默认按 3 行截断（line-clamp）；含公式时必须放开，否则块级公式会被裁掉下半部分。 */
+.mindmap-node-content p:has(.katex),
+.mindmap-outline-body p:has(.katex) {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
 .math-text .katex-display {
-  margin: .35em 0;
+  margin: .4em 0 .55em;
+  padding: 2px 0 4px;
+  /* 只做横向滚动；纵向必须可见，避免 KaTeX 的高度被容器裁掉。 */
   overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 2px;
+  overflow-y: visible;
 }
 .math-text .katex-display > .katex {
   text-align: left;

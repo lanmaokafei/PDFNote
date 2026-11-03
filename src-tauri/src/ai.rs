@@ -1,9 +1,9 @@
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf, time::Duration};
+use std::{fs, path::PathBuf, time::{Duration, Instant}};
 
 /// 可选视觉模型配置。未配置时应用完全离线：不发起任何识别请求。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSettings {
     #[serde(default)]
@@ -12,6 +12,27 @@ pub struct AiSettings {
     pub model: String,
     #[serde(default)]
     pub api_key: String,
+    /// 单次识别的总等待上限（秒）。部分网关会在自己的 90 秒上限处先返回 504，
+    /// 因此这里只控制本地最多等多久，不保证服务端会等这么久。
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+pub const MIN_TIMEOUT_SECS: u64 = 30;
+pub const MAX_TIMEOUT_SECS: u64 = 300;
+fn default_timeout_secs() -> u64 {
+    120
+}
+
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self {
+            base_url: String::new(),
+            model: String::new(),
+            api_key: String::new(),
+            timeout_secs: default_timeout_secs(),
+        }
+    }
 }
 
 impl AiSettings {
@@ -57,6 +78,11 @@ pub fn save_settings(state: &AppState, mut settings: AiSettings) -> Result<AiSet
     }
     if settings.base_url.chars().count() > 500 || settings.model.chars().count() > 200 {
         return Err("Base URL 或模型名过长".into());
+    }
+    if !(MIN_TIMEOUT_SECS..=MAX_TIMEOUT_SECS).contains(&settings.timeout_secs) {
+        return Err(format!(
+            "超时时间需要在 {MIN_TIMEOUT_SECS}–{MAX_TIMEOUT_SECS} 秒之间"
+        ));
     }
     let json = serde_json::to_string_pretty(&settings).map_err(|error| error.to_string())?;
     fs::write(settings_path(state), json).map_err(|error| format!("保存设置失败: {error}"))?;
@@ -323,7 +349,7 @@ pub async fn recognize_selection(
     let image_url = decode_image(&image_data)?;
 
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_secs(settings.timeout_secs))
         .build()
         .map_err(|error| format!("无法初始化识别客户端: {error}"))?;
 
@@ -364,6 +390,13 @@ pub async fn recognize_selection(
     let status = response.status();
     let body = response.text().await.map_err(|error| format!("读取响应失败: {error}"))?;
     if !status.is_success() {
+        // 网关常在自己的上限（如 90 秒）先返回 504，但会把异步任务号给我们。
+        // 这时任务仍在服务端执行，按任务号轮询即可拿到结果，而不是直接失败。
+        if let Some(task_no) = extract_task_no(&body) {
+            return poll_task(&client, &settings, &task_no).await.map_err(|error| {
+                format!("识别服务返回 {status}，任务 {task_no} 仍在服务端执行；自动查询结果失败：{error}")
+            });
+        }
         let snippet: String = body.chars().take(300).collect();
         return Err(format!("识别服务返回 {status}: {snippet}"));
     }
@@ -382,6 +415,142 @@ pub async fn recognize_selection(
     Ok(cleaned)
 }
 
+/// 从错误响应里提取异步任务号。
+///
+/// 有的网关给出结构化字段（`task_no` / `task_id`），有的只写在提示文本里
+/// （“等待模型响应超时（90s），任务 20261103-3158 仍在执行…”），两种都要认。
+pub fn extract_task_no(body: &str) -> Option<String> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
+        for key in ["task_no", "task_id", "taskId", "taskNo"] {
+            if let Some(id) = find_string_field(&value, key) {
+                if id.len() >= 6 {
+                    return Some(id);
+                }
+            }
+        }
+    }
+    extract_identifier_after(body, "任务 ")
+        .or_else(|| extract_identifier_after(body, "/tasks/"))
+        .or_else(|| extract_identifier_after(body, "task_no="))
+}
+
+/// 取标记之后连续出现的字母数字/连字符，长度至少 6，避免误抓普通词。
+fn extract_identifier_after(text: &str, marker: &str) -> Option<String> {
+    let mut search = text;
+    while let Some(index) = search.find(marker) {
+        let rest = &search[index + marker.len()..];
+        let candidate: String = rest
+            .trim_start()
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+            .collect();
+        let meaningful = candidate.chars().any(|ch| ch.is_ascii_alphanumeric());
+        if candidate.len() >= 6 && meaningful && candidate != "task_no" {
+            return Some(candidate);
+        }
+        search = rest;
+    }
+    None
+}
+
+fn find_string_field(value: &serde_json::Value, key: &str) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::String(text)) = map.get(key) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+            map.values().find_map(|child| find_string_field(child, key))
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(|child| find_string_field(child, key)),
+        _ => None,
+    }
+}
+
+enum TaskState {
+    Done(String),
+    Failed(String),
+    Pending,
+    Unknown,
+}
+
+fn extract_task_text(body: &str) -> TaskState {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return TaskState::Unknown;
+    };
+    let status = find_string_field(&value, "status")
+        .unwrap_or_default()
+        .to_lowercase();
+    match status.as_str() {
+        "failed" | "error" | "cancelled" | "canceled" => {
+            let message = find_string_field(&value, "message")
+                .or_else(|| find_string_field(&value, "error"))
+                .unwrap_or_else(|| "任务执行失败".into());
+            TaskState::Failed(message)
+        }
+        "succeeded" | "success" | "completed" | "done" | "finished" => {
+            for key in ["content", "text", "result", "output", "markdown"] {
+                if let Some(text) = find_string_field(&value, key) {
+                    let cleaned = clean_model_output(&text);
+                    if !cleaned.is_empty() {
+                        return TaskState::Done(cleaned);
+                    }
+                }
+            }
+            TaskState::Unknown
+        }
+        _ => TaskState::Pending,
+    }
+}
+
+/// 轮询 `{base}/tasks/{task_no}` 直到完成或超过本地等待上限。
+async fn poll_task(
+    client: &reqwest::Client,
+    settings: &AiSettings,
+    task_no: &str,
+) -> Result<String, String> {
+    let url = format!(
+        "{}/tasks/{}",
+        settings.base_url.trim_end_matches('/'),
+        task_no
+    );
+    let deadline = Instant::now() + Duration::from_secs(settings.timeout_secs);
+    let mut last_state = "任务尚未完成".to_string();
+    loop {
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "等待 {} 秒后仍未完成（{last_state}）",
+                settings.timeout_secs
+            ));
+        }
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let mut request = client.get(&url);
+        if !settings.api_key.is_empty() {
+            request = request.bearer_auth(&settings.api_key);
+        }
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(error) => {
+                last_state = connect_error(&error, &settings.base_url);
+                continue;
+            }
+        };
+        if !response.status().is_success() {
+            last_state = format!("查询接口返回 {}", response.status());
+            continue;
+        }
+        let body = response.text().await.unwrap_or_default();
+        match extract_task_text(&body) {
+            TaskState::Done(text) => return Ok(text),
+            TaskState::Failed(message) => return Err(message),
+            TaskState::Pending => last_state = "任务仍在执行".into(),
+            TaskState::Unknown => last_state = "查询结果无法解析".into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,12 +567,14 @@ mod tests {
                 base_url: "  http://127.0.0.1:11434/v1/  ".into(),
                 model: " qwen2.5vl:7b ".into(),
                 api_key: " test-key ".into(),
+                timeout_secs: 180,
             },
         )
         .unwrap();
         assert_eq!(saved.base_url, "http://127.0.0.1:11434/v1");
         assert_eq!(saved.model, "qwen2.5vl:7b");
         assert_eq!(saved.api_key, "test-key");
+        assert_eq!(saved.timeout_secs, 180);
         assert!(saved.configured());
         assert_eq!(saved.endpoint(), "http://127.0.0.1:11434/v1/chat/completions");
 
@@ -418,6 +589,7 @@ mod tests {
             base_url: "https://example.com/v1/chat/completions".into(),
             model: "m".into(),
             api_key: String::new(),
+            timeout_secs: 120,
         };
         assert_eq!(settings.endpoint(), "https://example.com/v1/chat/completions");
     }
@@ -427,7 +599,7 @@ mod tests {
         let (directory, state) = test_state();
         let error = save_settings(
             &state,
-            AiSettings { base_url: "127.0.0.1:11434".into(), model: "m".into(), api_key: String::new() },
+            AiSettings { base_url: "127.0.0.1:11434".into(), model: "m".into(), api_key: String::new(), timeout_secs: 120 },
         )
         .unwrap_err();
         assert!(error.contains("http://"));
@@ -475,41 +647,69 @@ mod tests {
     }
 
     /// 起一个只回应一次的最小 HTTP 服务，验证真实请求、响应解析与围栏清理。
+    fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+        use std::io::Read;
+        // 请求体是 chunked 或分多次到达，必须按 Content-Length 读满。
+        let mut data: Vec<u8> = Vec::new();
+        loop {
+            let mut chunk = [0_u8; 4096];
+            let read = stream.read(&mut chunk).unwrap_or(0);
+            if read == 0 {
+                break;
+            }
+            data.extend_from_slice(&chunk[..read]);
+            if let Some(position) = data.windows(4).position(|window| window == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&data[..position]).to_lowercase();
+                let length = head
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length:"))
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if data.len() >= position + 4 + length {
+                    break;
+                }
+            }
+        }
+        data
+    }
+
+    fn write_http_response(stream: &mut std::net::TcpStream, status: u16, body: &str) {
+        use std::io::Write;
+        let response = format!(
+            "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    }
+
     fn mock_server(status: u16, body: &'static str) -> (String, std::thread::JoinHandle<String>) {
-        use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let handle = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            // 请求体是 chunked 或分多次到达，必须按 Content-Length 读满。
-            let mut data: Vec<u8> = Vec::new();
-            loop {
-                let mut chunk = [0_u8; 4096];
-                let read = stream.read(&mut chunk).unwrap_or(0);
-                if read == 0 {
-                    break;
-                }
-                data.extend_from_slice(&chunk[..read]);
-                if let Some(position) = data.windows(4).position(|window| window == b"\r\n\r\n") {
-                    let head = String::from_utf8_lossy(&data[..position]).to_lowercase();
-                    let length = head
-                        .lines()
-                        .find_map(|line| line.strip_prefix("content-length:"))
-                        .and_then(|value| value.trim().parse::<usize>().ok())
-                        .unwrap_or(0);
-                    if data.len() >= position + 4 + length {
-                        break;
-                    }
-                }
+            let data = read_http_request(&mut stream);
+            write_http_response(&mut stream, status, body);
+            String::from_utf8_lossy(&data).to_string()
+        });
+        (format!("http://{address}/v1"), handle)
+    }
+
+    /// 依次回应多个请求，用于验证“网关超时 → 轮询任务”的完整链路。
+    fn mock_server_sequence(
+        responses: Vec<(u16, &'static str)>,
+    ) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for (status, body) in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let data = read_http_request(&mut stream);
+                requests.push(String::from_utf8_lossy(&data).to_string());
+                write_http_response(&mut stream, status, body);
             }
-            let request = String::from_utf8_lossy(&data).to_string();
-            let response = format!(
-                "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            stream.write_all(response.as_bytes()).unwrap();
-            request
+            requests
         });
         (format!("http://{address}/v1"), handle)
     }
@@ -520,7 +720,7 @@ mod tests {
             200,
             r#"{"data":[{"id":"mock-vl"},{"id":"other-model"}]}"#,
         );
-        let settings = AiSettings { base_url, model: "mock-vl".into(), api_key: String::new() };
+        let settings = AiSettings { base_url, model: "mock-vl".into(), api_key: String::new(), timeout_secs: 120 };
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let result = runtime.block_on(test_connection(settings)).unwrap();
         assert_eq!(result.via, "models");
@@ -534,7 +734,7 @@ mod tests {
     #[test]
     fn test_connection_flags_missing_model() {
         let (base_url, server) = mock_server(200, r#"{"data":[{"id":"other-model"}]}"#);
-        let settings = AiSettings { base_url, model: "missing-vl".into(), api_key: String::new() };
+        let settings = AiSettings { base_url, model: "missing-vl".into(), api_key: String::new(), timeout_secs: 120 };
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let result = runtime.block_on(test_connection(settings)).unwrap();
         assert!(!result.model_found, "模型名不在列表时应标记为未找到");
@@ -544,7 +744,7 @@ mod tests {
     #[test]
     fn test_connection_surfaces_server_errors() {
         let (base_url, server) = mock_server(500, r#"{"error":"boom"}"#);
-        let settings = AiSettings { base_url, model: "mock-vl".into(), api_key: String::new() };
+        let settings = AiSettings { base_url, model: "mock-vl".into(), api_key: String::new(), timeout_secs: 120 };
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let error = runtime.block_on(test_connection(settings)).unwrap_err();
         assert!(error.contains("服务返回"), "unexpected error: {error}");
@@ -560,6 +760,71 @@ mod tests {
     }
 
     #[test]
+    fn extract_task_no_handles_gateway_message_text() {
+        // 用户实际遇到的 504 响应：任务号只出现在 message 文本里。
+        let body = r#"{"error":{"message":"等待模型响应超时（90s），任务 20261103-3158 仍在执行，可稍后经 /api/v1/tasks/{task_no} 查询结果","type":"api_error","code":"upstream_timeout","param":null}}"#;
+        assert_eq!(extract_task_no(body).as_deref(), Some("20261103-3158"));
+
+        let structured = r#"{"error":{"task_no":"abc123def"}}"#;
+        assert_eq!(extract_task_no(structured).as_deref(), Some("abc123def"));
+
+        assert_eq!(extract_task_no(r#"{"error":"model not found"}"#), None);
+        assert_eq!(extract_task_no("plain text"), None);
+    }
+
+    #[test]
+    fn extract_task_text_reads_status_and_result() {
+        match extract_task_text(r#"{"status":"succeeded","result":"E = mc^2"}"#) {
+            TaskState::Done(text) => assert_eq!(text, "E = mc^2"),
+            _ => panic!("expected done"),
+        }
+        match extract_task_text(r#"{"status":"running"}"#) {
+            TaskState::Pending => {}
+            _ => panic!("expected pending"),
+        }
+        match extract_task_text(r#"{"status":"failed","message":"boom"}"#) {
+            TaskState::Failed(message) => assert_eq!(message, "boom"),
+            _ => panic!("expected failed"),
+        }
+        assert!(matches!(extract_task_text("not json"), TaskState::Unknown));
+    }
+
+    #[test]
+    fn recognize_polls_async_task_after_gateway_timeout() {
+        let timeout_body = r#"{"error":{"message":"等待模型响应超时（90s），任务 20261103-3158 仍在执行，可稍后经 /api/v1/tasks/{task_no} 查询结果","type":"api_error","code":"upstream_timeout","param":null}}"#;
+        let (base_url, server) = mock_server_sequence(vec![
+            (504, timeout_body),
+            (200, r#"{"status":"succeeded","result":"```latex\nE = mc^2\n```"}"#),
+        ]);
+        let (directory, state) = test_state();
+        save_settings(
+            &state,
+            AiSettings {
+                base_url,
+                model: "mock-vl".into(),
+                api_key: "k".into(),
+                timeout_secs: 30,
+            },
+        )
+        .unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let result = runtime
+            .block_on(recognize_selection(
+                &state,
+                "data:image/jpeg;base64,QUJD".into(),
+                "formula".into(),
+            ))
+            .unwrap();
+        assert_eq!(result, "E = mc^2", "网关超时后应通过任务号拿到结果");
+
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].starts_with("GET /v1/tasks/20261103-3158"), "unexpected poll: {}", requests[1]);
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
     fn recognize_sends_image_and_cleans_response() {
         let (base_url, server) = mock_server(
             200,
@@ -568,7 +833,7 @@ mod tests {
         let (directory, state) = test_state();
         save_settings(
             &state,
-            AiSettings { base_url, model: "mock-vl".into(), api_key: "k".into() },
+            AiSettings { base_url, model: "mock-vl".into(), api_key: "k".into(), timeout_secs: 120 },
         )
         .unwrap();
 
@@ -596,7 +861,7 @@ mod tests {
         let (directory, state) = test_state();
         save_settings(
             &state,
-            AiSettings { base_url, model: "missing-model".into(), api_key: String::new() },
+            AiSettings { base_url, model: "missing-model".into(), api_key: String::new(), timeout_secs: 120 },
         )
         .unwrap();
 

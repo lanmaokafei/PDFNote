@@ -1,6 +1,6 @@
 [package]
 name = "pdfnote"
-version = "0.12.4"
+version = "0.12.5"
 description = "A local-first, card-centric PDF learning app"
 edition = "2021"
 rust-version = "1.77.2"
@@ -31,6 +31,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 base64 = "0.22"
 # 可选视觉模型通道（本机 Ollama / 自填云端 Key）。默认不配置即不发任何请求。
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# 网关超时后轮询异步任务结果时需要异步 sleep。
+tokio = { version = "1", features = ["time"] }
 
 # Apple Vision is macOS-only; keep the native FFI dependency off other targets.
 [target.'cfg(target_os = "macos")'.dependencies]

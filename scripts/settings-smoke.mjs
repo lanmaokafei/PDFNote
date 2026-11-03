@@ -13,7 +13,7 @@ await page.locator('.app-top button[aria-label="设置"]').click()
 await page.waitForSelector('.settings-dialog', { timeout: 5000 })
 
 const fields = await page.locator('.settings-dialog input').count()
-if (fields !== 3) problems.push(`设置字段数量异常：${fields}`)
+if (fields !== 4) problems.push(`设置字段数量异常：${fields}`)
 
 const title = await page.locator('#settings-title').innerText()
 if (!title.includes('AI 识别')) problems.push(`标题异常：${title}`)

@@ -49,7 +49,7 @@ npm run tauri build
 
 2026-11-02 本地验证结果：
 
-- Rust：41 项测试通过（含 2 项 Vision 真机集成：`OCR_TEST_IMAGE` 中文识别、`OCR_PAGE_TEST_IMAGE` 行级坐标）；覆盖迁移至 v6、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、旧备份列兼容、页面文字缓存、坏包保护、视觉模型设置/连通性测试与本地 mock 端到端识别等。
+- Rust：44 项测试通过（含 2 项 Vision 真机集成：`OCR_TEST_IMAGE` 中文识别、`OCR_PAGE_TEST_IMAGE` 行级坐标）；覆盖迁移至 v6、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、旧备份列兼容、页面文字缓存、坏包保护、视觉模型设置/连通性测试与本地 mock 端到端识别等。
 - 前端：50 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、脑图折叠可见性、标注缓存联动清理、公式特征检测与决策、文字层行提取与选区文本、右键菜单定位边界、标题链接字典与匹配）。
 - 设置面板冒烟：`node scripts/settings-smoke.mjs`（需 dev server），验证模型配置对话框字段、非桌面环境提示与关闭。
 - 脑图稳定性回归：`CARD_COUNT=120 STEP=all node scripts/mindmap-regression.mjs`（需 dev server），覆盖大纲往返、折叠展开、拖拽落盘、连续 resize 与单选/多选，专治 React #185。
@@ -95,8 +95,8 @@ scripts/mindmap-regression.mjs 脑图 React #185 回归（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.12.4_aarch64.dmg
-release/PDFNote_0.12.4_aarch64.dmg.sha256
+release/PDFNote_0.12.5_aarch64.dmg
+release/PDFNote_0.12.5_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
@@ -116,6 +116,8 @@ killall Dock
 ```
 
 ## 重要修复
+
+- 0.12.5 处理**网关 504 超时**：当服务端在自己的 90 秒上限先返回 504 并给出异步任务号时，应用会自动轮询 `/tasks/{task_no}` 取回识别结果，而不是直接失败；设置面板新增可调超时（30–300 秒），提示文案也改用实际配置值。
 
 - 0.12.4 修复**脑图删卡后 PDF 标注不联动**：卡片删除后 PDF 工作区的标注缓存仍是旧值，页面上留下点不掉的“幽灵标注”，点击删除报 `annotation not found`。现在卡片删除会广播事件，PDF 立即清理对应标注并让相关页重新对齐；后端已无此标注时也不再报错，而是自愈移除并说明。
 

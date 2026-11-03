@@ -4,6 +4,8 @@ import {
   EMPTY_AI_SETTINGS,
   getAiSettings,
   isAiConfigured,
+  MAX_TIMEOUT_SECS,
+  MIN_TIMEOUT_SECS,
   saveAiSettings,
   testAiConnection,
   type AiSettings,
@@ -158,6 +160,22 @@ export function SettingsDialog({ onClose, onSaved }: SettingsDialogProps) {
             </button>
           </div>
           <small>Key 以明文保存在本机设置文件，不会进入备份包，也不会随备份导出。</small>
+        </label>
+
+        <label>
+          <span>超时（秒）</span>
+          <input
+            type="number"
+            min={MIN_TIMEOUT_SECS}
+            max={MAX_TIMEOUT_SECS}
+            step={10}
+            value={draft.timeoutSecs}
+            onChange={(event) => setDraft((current) => ({
+              ...current,
+              timeoutSecs: Number(event.target.value) || MIN_TIMEOUT_SECS,
+            }))}
+          />
+          <small>本地最多等待多久（{MIN_TIMEOUT_SECS}–{MAX_TIMEOUT_SECS} 秒）。注意：部分云端网关会在自己的 90 秒上限处先返回 504，此时应用会自动用返回的任务号查询结果，仍可能拿到识别内容。</small>
         </label>
 
         <p className="settings-hint">

@@ -8,6 +8,8 @@ export interface AiSettings {
   baseUrl: string
   model: string
   apiKey: string
+  /** 单次识别最多等待的秒数（30–300）。部分网关会先于这个值返回 504。 */
+  timeoutSecs: number
 }
 
 export type RecognitionMode = 'formula' | 'table' | 'general'
@@ -21,7 +23,9 @@ export interface AiTestResult {
   via: 'models' | 'chat'
 }
 
-export const EMPTY_AI_SETTINGS: AiSettings = { baseUrl: '', model: '', apiKey: '' }
+export const EMPTY_AI_SETTINGS: AiSettings = { baseUrl: '', model: '', apiKey: '', timeoutSecs: 120 }
+export const MIN_TIMEOUT_SECS = 30
+export const MAX_TIMEOUT_SECS = 300
 
 export const isAiConfigured = (settings: AiSettings) =>
   settings.baseUrl.trim().length > 0 && settings.model.trim().length > 0

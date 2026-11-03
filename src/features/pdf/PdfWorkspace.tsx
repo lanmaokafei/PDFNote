@@ -141,6 +141,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   const [titleLinkPreview, setTitleLinkPreview] = useState<TitleLinkHit | null>(null)
   // 只有用户配置了视觉模型才尝试公式识别；否则保持原图 + 手动补录。
   const [aiReady, setAiReady] = useState(false)
+  const [aiTimeoutSecs, setAiTimeoutSecs] = useState(120)
 
   const cardsById = useCardStore((state) => state.cardsById)
   const createCard = useCardStore((state) => state.createCard)
@@ -173,11 +174,16 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   useEffect(() => {
     let active = true
     getAiSettings()
-      .then((settings) => { if (active) setAiReady(isAiConfigured(settings)) })
+      .then((settings) => {
+        if (!active) return
+        setAiReady(isAiConfigured(settings))
+        setAiTimeoutSecs(settings.timeoutSecs || 120)
+      })
       .catch(() => { if (active) setAiReady(false) })
     const onChanged = (event: Event) => {
       const detail = (event as CustomEvent).detail
       setAiReady(Boolean(detail && detail.baseUrl && detail.model))
+      if (detail?.timeoutSecs) setAiTimeoutSecs(Number(detail.timeoutSecs))
     }
     window.addEventListener('pdfnote:ai-settings-changed', onChanged)
     return () => {
@@ -680,11 +686,11 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     const aiImage = ocrImage ?? cardImage
     if (formula.useVisionModel && aiImage) {
       const startedAt = Date.now()
-      setOcrMessage('正在用视觉模型识别公式（最长等待 120 秒）…')
+      setOcrMessage(`正在用视觉模型识别公式（最多等待 ${aiTimeoutSecs} 秒）…`)
       // 模型首次加载可能很慢，每 10 秒更新一次进度，避免界面看起来卡死。
       const watchdog = window.setInterval(() => {
         const seconds = Math.round((Date.now() - startedAt) / 1000)
-        setOcrMessage(`视觉模型仍在识别公式（已 ${seconds} 秒），最多等待 120 秒…`)
+        setOcrMessage(`视觉模型仍在识别公式（已 ${seconds} 秒），最多等待 ${aiTimeoutSecs} 秒…`)
       }, 10_000)
       try {
         const latex = await recognizeSelection(aiImage, 'formula')
@@ -748,7 +754,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     } finally {
       setCreating(false)
     }
-  }, [aiReady, createCard, creating, document.id, invalidateAnnotations, recallMode, tool])
+  }, [aiReady, aiTimeoutSecs, createCard, creating, document.id, invalidateAnnotations, recallMode, tool])
 
   const handleMove = useCallback((annotation: Annotation, geometry: AnnotationGeometry, bbox: NormalizedBBox) => {
     const requestId = (moveRequestsRef.current.get(annotation.id) ?? 0) + 1

@@ -33,25 +33,27 @@
 ## 识别流程
 
 1. 框选扫描页上的公式（高亮 / 矩形工具）→ 文字 OCR 命中公式特征。
-2. 若已配置模型：把选区截图（上限 2400px）发到 `/chat/completions`，提示词要求**只输出 LaTeX**。
+2. 若已配置模型：把选区截图（上限 2400px）发到 `/chat/completions`。提示词要求**先判断图片里是否存在科学公式**：有公式时只输出 Mathpix 兼容的 LaTeX（保留 `\frac`、`\sum_{i=1}^{n}`、`\log_2`、上下标等结构，不带 `$` 定界符与代码围栏）；没有公式时输出图片里的文字本身。
 3. 返回内容去掉 ```latex 围栏后写入卡片摘录；`excerpt_image` 仍保存原图，卡片自动打「公式」标签。
 4. 失败（未启动、超时、返回空）→ 卡片照常创建，保留原图，状态栏给出具体原因与补救方式。
 
-文字层里本来就有可靠文字的公式**不调用模型**：原文比 OCR 可信，只附原图。
+文字层里的公式同样会走模型（额外生成 2400px 高清图）；识别失败才回退到文字层原文，所以原文永远不会丢。
 
 ## 接口约定
 
 - `GET /v1/models` 未使用；只调用 `POST {base}/chat/completions`。
 - 请求：`{ model, messages: [system 提示词, user {text + image_url}], temperature: 0, max_tokens: 1500, stream: false }`。
 - 超时按设置项（默认 120 秒，可调 30–300）；图像上限 12MB。
-- **网关先超时也会自动补救**：部分云端服务在自己的 90 秒上限处返回 504，同时把异步任务号写进错误信息。应用会识别 `task_no` / `任务 xxxx` 并以 3 秒间隔轮询 `{base}/tasks/{task_no}`，直到拿到结果或本地超时；轮询失败时会把任务号一并显示，方便你稍后手动查询。
+- **网关先超时也会自动补救**：部分云端服务在自己的 90 秒上限处返回 504，同时把异步任务号写进错误信息。应用会识别 `task_no` / `任务 xxxx`，**立即**查询一次、之后每 2.5 秒轮询，直到拿到结果或本地超时。查询地址会依次尝试 `{base}/tasks/{id}`、`{origin}/api/v1/tasks/{id}`、`{origin}/v1/tasks/{id}`，避免 Base URL 少写前缀时一直 404。
+- **结果结构兼容**：同时认 `status` / `state` / `phase`，结果是 `latex` / `mathpix` / `content` / `result` / `output` / `text` / `data` 等任意嵌套位置；`content` 是分段数组时会按行拼接。只有状态词没有内容时继续轮询，不会把 `success` 当成结果写进卡片。
+- **手动取回**：设置面板底部有「按任务号取回结果」，粘贴错误信息里的任务号（如 `20261103-3185`）即可直接读回 LaTeX 并复制，不需要重新框选。识别失败的状态栏提示也会把任务号指到这个入口。
 - 错误信息区分：未配置 / 无法连接 / 超时 / 非 2xx / 返回空内容。
 
 ## 涉及文件
 
 | 层 | 位置 |
 |---|---|
-| 调用与设置 | `src-tauri/src/ai.rs`（命令 `get_ai_settings` / `save_ai_settings` / `recognize_selection`） |
+| 调用与设置 | `src-tauri/src/ai.rs`（命令 `get_ai_settings` / `save_ai_settings` / `recognize_selection` / `test_ai_connection` / `fetch_task_result`） |
 | 前端服务 | `src/services/ai.ts` |
 | 设置界面 | `src/features/settings/SettingsDialog.tsx` |
 | 建卡流程 | `PdfWorkspace.handleCreate` 的公式分支 |
@@ -60,7 +62,7 @@
 ## 验收
 
 - Rust 44 项测试通过：设置往返与校验、围栏清理、提示词、未配置不发请求、裸 base64 重组、**本地 mock 服务端到端**（校验 POST 路径 / Bearer / model / 图像字段，返回内容清洗；500 时报错文案）。
-- 前端 50 项 Vitest 通过；`scripts/settings-smoke.mjs` 验证设置面板四个字段（含超时）、标题、测试连接按钮与失败反馈、非 Tauri 环境提示与关闭。
+- 前端 50 项 Vitest 通过；`scripts/settings-smoke.mjs` 验证设置面板四个字段（含超时）、标题、测试连接按钮与失败反馈、任务号取回区块，以及非 Tauri 环境提示与关闭。
 
 ## 已知限制
 

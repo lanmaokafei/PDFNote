@@ -25,6 +25,7 @@ pub fn run() {
             commands::save_ai_settings,
             commands::test_ai_connection,
             commands::recognize_selection,
+            commands::fetch_task_result,
             commands::get_page_ocr,
             commands::save_page_ocr,
             commands::get_bootstrap_status,

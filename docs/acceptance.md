@@ -13,8 +13,8 @@
 | 右键菜单冒烟 | `node scripts/contextmenu-smoke.mjs` | 通过：原生 Reload 菜单被接管、菜单项执行动作、右下角翻转、键盘导航、输入框保留系统菜单、选区读取与跨层判定 |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
-| 原生编译 | `npx tauri build --bundles app` | 通过，0.12.5 生成 release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.12.5 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
+| 原生编译 | `npx tauri build --bundles app` | 通过，0.12.6 生成 release PDFNote.app |
+| DMG | 手动 `hdiutil` 打包 | 0.12.6 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
@@ -65,6 +65,7 @@ Rust 测试覆盖：
 | OCR 建卡 | Rust 真机 + 浏览器实测 | 标注-only 建卡通过；0.8.0 起为 Apple Vision 单引擎，真机中文图识别出「信息化」；已移除 Tesseract 与 63MB 离线模型 |
 | 可选文字层（0.9.0） | Rust 真机 + 无头 Chrome | 4 行中文图返回归一化行坐标（2.81s）；缓存往返与旧备份兼容测试通过；透明 DOM 文字拖选精确到字符，可复制/建卡；0.10.1 起选区字形保持透明（`::selection` color/fill 均为 `rgba(0,0,0,0)`），与 PDF 原字无重影 |
 | 元素右键菜单（0.10.0） | Vitest + 无头 Chrome | 原生 Reload 菜单被接管；文字选区/标注/墨迹/脑图节点/文档卡片按元素给菜单；动作执行、边界翻转、ESC 与键盘导航、输入框系统菜单均通过 |
+| Mathpix 提示词与任务取回（0.12.6） | Rust mock + 无头 Chrome | 提示词含「先判断是否有公式 / Mathpix / 无公式输出文字」；解析 `code+data.status+data.latex`、`content` 分段数组、`result.output`，状态词不会被当结果；查询地址含 `/api/v1/tasks` 候选；`fetch_task_result` 用已保存配置取回 `H = -\\sum...`；设置面板任务号取回入口冒烟通过 |
 | 网关超时轮询（0.12.5） | Rust mock | 504 错误体中的任务号可解析（文本与结构化两种）；自动 `GET /tasks/{id}` 取回并清洗结果；轮询失败保留任务号；超时可配置 30–300 秒 |
 | 删卡标注联动（0.12.4） | Vitest + 无头 Chrome | 跨页清理、非命中页复用引用、空缓存共 4 项；mock IPC 下脑图删卡后 PDF 标注 1 → 0 并提示“已同步移除”；后端返回 `annotation not found` 时自愈移除、不再报删除失败 |
 | 安装包签名（0.12.3） | `codesign` | `Identifier=com.pdfnote.local`、`Info.plist entries=14`、`Sealed Resources files=1`；`codesign --verify --strict` 通过（未公证，`spctl` 仍 rejected 属预期） |

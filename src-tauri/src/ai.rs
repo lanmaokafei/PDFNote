@@ -93,17 +93,43 @@ pub fn save_settings(state: &AppState, mut settings: AiSettings) -> Result<AiSet
 fn prompt_for(mode: &str) -> Result<&'static str, String> {
     match mode {
         "formula" => Ok(
-            "你是数学公式识别器。把图片中的公式转成 LaTeX，只输出 LaTeX 本身。\
-不要解释，不要前后缀，不要代码围栏。多行公式用 aligned 环境。中文用 \\text{} 包裹。\
-若图片里没有公式，只输出图片中的文字本身。",
+            r#"你是科学公式识别器，输出 Mathpix 兼容的 LaTeX。
+
+第一步：判断图片中是否存在科学公式。数学、物理、化学、统计中的等式、不等式、
+分式、根式、求和/连乘/积分/极限、矩阵与行列式、上下标、希腊字母与算子都算公式。
+
+有公式时，只输出公式的 LaTeX 源码：
+- 不要 $ 或 $$ 定界符，不要 \begin{equation} 外壳，不要代码围栏，不要任何解释。
+- 保留结构化写法：\frac{a}{b}、\sum_{i=1}^{n}、\int_{0}^{1}、\log_2、\sqrt{x}、x_i、a^{2}。
+- 分式不要写成 a/b，上下标不要写成普通字符，希腊字母用 \alpha、\beta、\pi 等。
+- 多行公式用 \begin{aligned} ... \end{aligned}，行间用 \\ 分隔。
+- 公式内的中文用 \text{} 包裹；单位用 \mathrm{}。
+- 只保留公式本身，公式编号、题号、正文说明都不要。
+
+没有公式时，只输出图片里的文字本身，保留原始换行，不要添加任何说明。
+
+禁止输出 "LaTeX:"、"答案："、"```" 之类的前缀或包装。"#,
         ),
         "table" => Ok(
-            "识别图片中的表格并输出 Markdown 表格；如同时包含公式，公式用 $$...$$ 包裹。\
-只输出结果本身，不要解释，不要代码围栏。",
+            r#"判断图片内容并输出 Markdown。
+
+- 有表格：输出 Markdown 表格，行列对齐，不要把多个单元格压成一个。
+- 有公式：公式用 $$...$$ 包裹，内部按 Mathpix 兼容的 LaTeX 书写
+  （\frac{a}{b}、\sum_{i=1}^{n}、\log_2、x_i、a^{2} 这类结构要保留）。
+- 只有文字：按原文段落输出。
+
+只输出结果本身，不要解释，不要代码围栏。"#,
         ),
         "general" => Ok(
-            "识别图片中的内容并输出 Markdown：正文用普通段落，公式用 $$...$$，表格用 Markdown 表格。\
-只输出结果本身，不要解释，不要代码围栏。",
+            r#"识别图片内容并输出 Markdown。
+
+先判断图片中是否存在科学公式：
+- 有公式：公式用 $$...$$ 包裹，内部按 Mathpix 兼容的 LaTeX 书写
+  （\frac{a}{b}、\sum_{i=1}^{n}、\int、\log_2、x_i、a^{2} 等结构必须保留，不要退化成纯文本）。
+- 表格：用 Markdown 表格。
+- 其余内容：按段落输出。
+
+只输出结果本身，不要解释，不要代码围栏。"#,
         ),
         other => Err(format!("不支持的识别模式: {other}")),
     }
@@ -476,79 +502,230 @@ enum TaskState {
     Unknown,
 }
 
+/// 结果字段候选：不同网关把同一段 LaTeX 放在 latex / content / result.data 等不同位置。
+const RESULT_KEYS: [&str; 10] = [
+    "latex", "mathpix", "content", "result", "output", "text", "markdown", "answer", "value", "data",
+];
+
+fn status_of(value: &serde_json::Value) -> String {
+    for key in ["status", "state", "task_status", "taskStatus", "phase"] {
+        if let Some(text) = find_string_field(value, key) {
+            return text.to_lowercase();
+        }
+    }
+    String::new()
+}
+
+fn value_to_text(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        // content 有时是分段数组：["H = -\\sum", "P(x_i)"]。
+        serde_json::Value::Array(items) => {
+            let parts: Vec<String> = items.iter().filter_map(value_to_text).collect();
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join("\n"))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn find_result_by_key(value: &serde_json::Value, key: &str) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(child) = map.get(key) {
+                if let Some(text) = value_to_text(child) {
+                    return Some(text);
+                }
+            }
+            map.values().find_map(|child| find_result_by_key(child, key))
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(|child| find_result_by_key(child, key)),
+        _ => None,
+    }
+}
+
+/// 过滤掉状态词，避免把 "success" 当成识别结果写进卡片。
+fn looks_like_result(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.chars().count() < 2 {
+        return false;
+    }
+    !matches!(
+        trimmed.to_lowercase().as_str(),
+        "ok" | "success" | "succeeded" | "completed" | "complete" | "done" | "finished"
+            | "running" | "pending" | "queued" | "processing" | "new"
+    )
+}
+
+fn find_result_text(value: &serde_json::Value) -> Option<String> {
+    for key in RESULT_KEYS {
+        if let Some(text) = find_result_by_key(value, key) {
+            if looks_like_result(&text) {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
 fn extract_task_text(body: &str) -> TaskState {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
         return TaskState::Unknown;
     };
-    let status = find_string_field(&value, "status")
-        .unwrap_or_default()
-        .to_lowercase();
-    match status.as_str() {
-        "failed" | "error" | "cancelled" | "canceled" => {
-            let message = find_string_field(&value, "message")
-                .or_else(|| find_string_field(&value, "error"))
-                .unwrap_or_else(|| "任务执行失败".into());
-            TaskState::Failed(message)
-        }
-        "succeeded" | "success" | "completed" | "done" | "finished" => {
-            for key in ["content", "text", "result", "output", "markdown"] {
-                if let Some(text) = find_string_field(&value, key) {
-                    let cleaned = clean_model_output(&text);
-                    if !cleaned.is_empty() {
-                        return TaskState::Done(cleaned);
-                    }
-                }
-            }
-            TaskState::Unknown
-        }
-        _ => TaskState::Pending,
+    let status = status_of(&value);
+    if ["fail", "error", "cancel", "reject", "timeout"]
+        .iter()
+        .any(|keyword| status.contains(keyword))
+    {
+        let message = find_string_field(&value, "message")
+            .or_else(|| find_string_field(&value, "error"))
+            .or_else(|| find_string_field(&value, "msg"))
+            .unwrap_or_else(|| format!("任务状态：{status}"));
+        return TaskState::Failed(message);
     }
+    // 先看有没有可用的结果内容：很多网关不返回 status，只给 code=0 + data。
+    if let Some(text) = find_result_text(&value) {
+        let cleaned = clean_model_output(&text);
+        if !cleaned.is_empty() {
+            return TaskState::Done(cleaned);
+        }
+    }
+    // 拿不到内容就继续轮询，直到超时；不在这里武断判失败。
+    TaskState::Pending
 }
 
-/// 轮询 `{base}/tasks/{task_no}` 直到完成或超过本地等待上限。
+/// 任务查询地址候选。网关常见三种前缀，逐个尝试，
+/// 避免用户把 Base URL 填成主机根地址（少了 /api/v1）时一直 404。
+fn task_url_candidates(settings: &AiSettings, task_no: &str) -> Vec<String> {
+    let base = settings.base_url.trim().trim_end_matches('/');
+    let base = base.strip_suffix("/chat/completions").unwrap_or(base);
+    let mut urls = vec![format!("{base}/tasks/{task_no}")];
+    if let Some((scheme, rest)) = base.split_once("://") {
+        if let Some(host) = rest.split('/').next() {
+            for candidate in [
+                format!("{scheme}://{host}/api/v1/tasks/{task_no}"),
+                format!("{scheme}://{host}/v1/tasks/{task_no}"),
+                format!("{scheme}://{host}/tasks/{task_no}"),
+            ] {
+                if !urls.contains(&candidate) {
+                    urls.push(candidate);
+                }
+            }
+        }
+    }
+    urls
+}
+
+/// 轮询任务结果，直到拿到内容、任务失败或超过本地等待上限。
 async fn poll_task(
     client: &reqwest::Client,
     settings: &AiSettings,
     task_no: &str,
 ) -> Result<String, String> {
-    let url = format!(
-        "{}/tasks/{}",
-        settings.base_url.trim_end_matches('/'),
-        task_no
-    );
+    let urls = task_url_candidates(settings, task_no);
     let deadline = Instant::now() + Duration::from_secs(settings.timeout_secs);
-    let mut last_state = "任务尚未完成".to_string();
+    let mut last_state = "任务尚未返回结果".to_string();
+    let mut last_body = String::new();
+    let mut first_attempt = true;
+
     loop {
         if Instant::now() >= deadline {
+            let detail = if last_body.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "；最后一次响应：{}",
+                    last_body.chars().take(240).collect::<String>()
+                )
+            };
             return Err(format!(
-                "等待 {} 秒后仍未完成（{last_state}）",
+                "等待 {} 秒后仍未取到结果（{last_state}）{detail}",
                 settings.timeout_secs
             ));
         }
-        tokio::time::sleep(Duration::from_secs(3)).await;
-        let mut request = client.get(&url);
-        if !settings.api_key.is_empty() {
-            request = request.bearer_auth(&settings.api_key);
+        if !first_attempt {
+            // 已就绪的任务第一次就能返回，不必先等；之后每 2.5 秒查一次。
+            tokio::time::sleep(Duration::from_millis(2500)).await;
         }
-        let response = match request.send().await {
-            Ok(response) => response,
-            Err(error) => {
-                last_state = connect_error(&error, &settings.base_url);
+        first_attempt = false;
+
+        let mut reached = false;
+        let mut not_found = 0_usize;
+        for url in &urls {
+            let mut request = client.get(url);
+            if !settings.api_key.is_empty() {
+                request = request.bearer_auth(&settings.api_key);
+            }
+            let response = match request.send().await {
+                Ok(response) => response,
+                Err(error) => {
+                    last_state = connect_error(&error, &settings.base_url);
+                    continue;
+                }
+            };
+            let status = response.status();
+            if status == reqwest::StatusCode::NOT_FOUND
+                || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+            {
+                not_found += 1;
                 continue;
             }
-        };
-        if !response.status().is_success() {
-            last_state = format!("查询接口返回 {}", response.status());
-            continue;
+            if !status.is_success() {
+                last_state = format!("查询接口返回 {status}");
+                continue;
+            }
+            let body = response.text().await.unwrap_or_default();
+            last_body = body.clone();
+            reached = true;
+            match extract_task_text(&body) {
+                TaskState::Done(text) => return Ok(text),
+                TaskState::Failed(message) => return Err(message),
+                TaskState::Pending => last_state = "任务仍在执行".into(),
+                TaskState::Unknown => last_state = "查询结果无法解析".into(),
+            }
+            break;
         }
-        let body = response.text().await.unwrap_or_default();
-        match extract_task_text(&body) {
-            TaskState::Done(text) => return Ok(text),
-            TaskState::Failed(message) => return Err(message),
-            TaskState::Pending => last_state = "任务仍在执行".into(),
-            TaskState::Unknown => last_state = "查询结果无法解析".into(),
+
+        // 所有候选地址都 404：直接说明，别让用户白等到超时。
+        if !reached && not_found == urls.len() {
+            return Err(format!(
+                "找不到任务查询接口（已尝试：{}）。请检查 Base URL 是否包含 /api/v1。",
+                urls.join("、")
+            ));
         }
     }
+}
+
+/// 用已保存的配置按任务号取回识别结果（不需要重新识别图片）。
+///
+/// 网关返回 504 时任务可能仍在执行，用户也可以稍后手动重取。
+pub async fn fetch_task_result(state: &AppState, task_no: String) -> Result<String, String> {
+    let settings = load_settings(state)?;
+    if !settings.configured() {
+        return Err("尚未配置识别模型：请先在设置中填写 Base URL 与模型名".into());
+    }
+    let task_no = task_no.trim();
+    if task_no.is_empty() {
+        return Err("请填写任务号".into());
+    }
+    if task_no.chars().count() > 120 {
+        return Err("任务号过长".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(settings.timeout_secs.min(60)))
+        .build()
+        .map_err(|error| format!("无法初始化查询客户端: {error}"))?;
+    poll_task(&client, &settings, task_no).await
 }
 
 #[cfg(test)]
@@ -787,6 +964,111 @@ mod tests {
             _ => panic!("expected failed"),
         }
         assert!(matches!(extract_task_text("not json"), TaskState::Unknown));
+    }
+
+    #[test]
+    fn formula_prompt_requires_mathpix_output() {
+        let prompt = prompt_for("formula").unwrap();
+        assert!(prompt.contains("Mathpix"));
+        assert!(prompt.contains("没有公式"), "必须要求先判断是否存在公式");
+        assert!(prompt.contains("\\sum"), "应给出结构化 LaTeX 示例");
+        // 提示词里会提到 ``` 作为反面例子，这里只确认它本身没有被围栏包住。
+        assert!(!prompt.starts_with("```"));
+    }
+
+    #[test]
+    fn extract_task_text_handles_nested_and_mathpix_shapes() {
+        // 形态一：code + data.status + data.latex（最常见的网关包装）。
+        let nested = r#"{"code":0,"msg":"ok","data":{"status":"SUCCESS","latex":"H = -\\sum_{i=1}^{n} P(x_i) \\log_2 P(x_i)"}}"#;
+        match extract_task_text(nested) {
+            TaskState::Done(text) => {
+                assert!(text.contains("\\sum"), "unexpected: {text}");
+                assert!(text.contains("\\log_2"), "unexpected: {text}");
+            }
+            _ => panic!("expected done for nested latex"),
+        }
+
+        // 形态二：content 是分段数组。
+        let array = r#"{"status":"completed","data":{"content":["H = -\\sum","P(x_i)"]}}"#;
+        match extract_task_text(array) {
+            TaskState::Done(text) => assert!(text.contains('\n'), "分段数组应拼成多行: {text}"),
+            _ => panic!("expected done for content array"),
+        }
+
+        // 形态三：没有 code、没有 status，只给嵌套 result.output。
+        match extract_task_text(r#"{"result":{"output":"E = mc^2"}}"#) {
+            TaskState::Done(text) => assert_eq!(text, "E = mc^2"),
+            _ => panic!("expected done for result.output"),
+        }
+
+        // 只有状态词、没有内容：继续轮询，不能把 "success" 当结果。
+        assert!(matches!(
+            extract_task_text(r#"{"status":"completed","data":"success"}"#),
+            TaskState::Pending
+        ));
+        assert!(matches!(
+            extract_task_text(r#"{"status":"SUCCESS"}"#),
+            TaskState::Pending
+        ));
+
+        // 失败状态仍然要能识别。
+        match extract_task_text(r#"{"data":{"status":"FAILED","msg":"模型过载"}}"#) {
+            TaskState::Failed(message) => assert_eq!(message, "模型过载"),
+            _ => panic!("expected failed"),
+        }
+    }
+
+    #[test]
+    fn task_url_candidates_cover_common_prefixes() {
+        let bare = AiSettings {
+            base_url: "https://api.example.com".into(),
+            model: "m".into(),
+            api_key: String::new(),
+            timeout_secs: 120,
+        };
+        let urls = task_url_candidates(&bare, "20261103-3185");
+        assert!(urls.contains(&"https://api.example.com/api/v1/tasks/20261103-3185".to_string()));
+
+        let full = AiSettings {
+            base_url: "https://api.example.com/api/v1".into(),
+            model: "m".into(),
+            api_key: String::new(),
+            timeout_secs: 120,
+        };
+        let urls = task_url_candidates(&full, "20261103-3185");
+        assert_eq!(urls[0], "https://api.example.com/api/v1/tasks/20261103-3185");
+        let unique: std::collections::HashSet<_> = urls.iter().collect();
+        assert_eq!(unique.len(), urls.len(), "候选地址不应重复");
+    }
+
+    #[test]
+    fn fetch_task_result_reads_ready_task_with_saved_settings() {
+        let (base_url, server) = mock_server(
+            200,
+            r#"{"code":0,"data":{"status":"SUCCESS","latex":"H = -\\sum_{i=1}^{n} P(x_i) \\log_2 P(x_i)"}}"#,
+        );
+        let (directory, state) = test_state();
+        save_settings(
+            &state,
+            AiSettings {
+                base_url,
+                model: "mock-vl".into(),
+                api_key: "k".into(),
+                timeout_secs: 30,
+            },
+        )
+        .unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let text = runtime
+            .block_on(fetch_task_result(&state, "20261103-3185".into()))
+            .expect("ready task should return immediately");
+        assert!(text.contains("\\sum"), "unexpected: {text}");
+
+        let request = server.join().unwrap();
+        assert!(request.starts_with("GET /v1/tasks/20261103-3185"), "unexpected request: {request}");
+        assert!(request.to_lowercase().contains("authorization: bearer k"));
+        let _ = fs::remove_dir_all(&directory);
     }
 
     #[test]

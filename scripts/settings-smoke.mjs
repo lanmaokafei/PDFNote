@@ -12,7 +12,8 @@ await page.waitForSelector('.app-shell')
 await page.locator('.app-top button[aria-label="设置"]').click()
 await page.waitForSelector('.settings-dialog', { timeout: 5000 })
 
-const fields = await page.locator('.settings-dialog input').count()
+// 只看顶层 label（Base URL / 模型 / Key / 超时），不含「按任务号取回」区块里的输入框。
+const fields = await page.locator('.settings-dialog > label input').count()
 if (fields !== 4) problems.push(`设置字段数量异常：${fields}`)
 
 const title = await page.locator('#settings-title').innerText()
@@ -25,7 +26,7 @@ if (!statusText.includes('桌面应用中运行')) problems.push('浏览器环�
 // 填入配置后按钮可用；浏览器环境应给出明确失败原因（不是静默）
 await page.fill('input[placeholder="http://127.0.0.1:11434/v1"]', 'http://127.0.0.1:11434/v1')
 await page.fill('input[placeholder="qwen2.5vl:7b"]', 'qwen2.5vl:7b')
-const testButton = page.locator('.settings-test-button')
+const testButton = page.locator('.settings-dialog footer .settings-test-button')
 if (!(await testButton.count())) problems.push('缺少测试连接按钮')
 else {
   const disabled = await testButton.isDisabled()
@@ -34,6 +35,19 @@ else {
   await page.waitForTimeout(500)
   const panelText = await page.locator('.settings-dialog').innerText()
   if (!panelText.includes('连接测试失败')) problems.push('测试连接未给出失败反馈')
+}
+
+// 网关超时后的补救入口：展开后应能填任务号，并在浏览器环境给出明确失败原因
+await page.locator('.settings-task summary').click()
+const taskInput = page.locator('.settings-task input')
+if (!(await taskInput.count())) {
+  problems.push('缺少任务号输入框')
+} else {
+  await taskInput.fill('20261103-3185')
+  await page.locator('.settings-task button', { hasText: '取回结果' }).click()
+  await page.waitForTimeout(500)
+  const taskText = await page.locator('.settings-task').innerText()
+  if (!taskText.includes('取回失败')) problems.push('任务号取回未给出失败反馈')
 }
 
 // 关闭按钮可关闭

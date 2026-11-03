@@ -68,6 +68,12 @@ const INK_WIDTHS = [
 const MIN_SCALE = 0.5
 const MAX_SCALE = 3
 const EMPTY_ANNOTATIONS: Annotation[] = []
+
+/** 从错误信息里揪出异步任务号，好把用户引到「设置 → 按任务号取回结果」。 */
+function extractTaskNo(message: string): string {
+  const match = message.match(/(?:任务\s*|tasks\/)([A-Za-z0-9][A-Za-z0-9_-]{5,})/)
+  return match?.[1] ?? ''
+}
 const TITLE_LINK_STORAGE_KEY = 'pdfnote.titleLink.enabled'
 
 function readTitleLinkPreference(): boolean {
@@ -733,9 +739,15 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
       if (aiFormula) {
         setNotice('公式已由视觉模型识别为 LaTeX，原图同时保留，请核对上下标后保存。')
       } else if (aiError) {
-        setOperationError(`公式识别失败：${aiError}。${finalExcerpt
-          ? '已保留原文与选区图像，可编辑卡片手动补录。'
-          : '已保存选区图像，请编辑卡片手动补录。'}`)
+        const taskNo = extractTaskNo(aiError)
+        setOperationError(
+          `公式识别失败：${aiError}。${finalExcerpt
+            ? '已保留原文与选区图像，可编辑卡片手动补录。'
+            : '已保存选区图像，请编辑卡片手动补录。'}`
+          + (taskNo
+            ? ` 任务 ${taskNo} 通常仍在服务端执行，可在「设置 → 按任务号取回结果」中粘贴取回。`
+            : ''),
+        )
       } else if (ocrFormula) {
         setNotice('选区疑似数学公式，文字 OCR 无法识别公式结构。已保存选区图像，请编辑卡片手动输入公式内容，或在设置中配置视觉模型自动识别。')
       } else if (isFormula) {

@@ -31,6 +31,15 @@ pub async fn recognize_selection(
     ai::recognize_selection(&state, image, mode).await
 }
 
+/// 按任务号取回异步识别结果（网关超时后任务仍在执行时使用）。
+#[tauri::command]
+pub async fn fetch_task_result(
+    state: State<'_, AppState>,
+    task_no: String,
+) -> Result<String, String> {
+    ai::fetch_task_result(&state, task_no).await
+}
+
 #[tauri::command(async)]
 pub fn ocr_image(image_data: String) -> Result<String, String> {
     crate::ocr::recognize_image(image_data)

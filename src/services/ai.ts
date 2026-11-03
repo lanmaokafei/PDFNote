@@ -55,3 +55,14 @@ export async function recognizeSelection(image: string, mode: RecognitionMode): 
   desktopOnly()
   return invoke('recognize_selection', { image, mode })
 }
+
+/**
+ * 按任务号取回异步识别结果。
+ *
+ * 云端网关常在自己的上限（如 90 秒）先返回 504，但任务仍在服务端执行；
+ * 拿到任务号后可在设置里稍后重取，不需要重新识别图片。
+ */
+export async function fetchTaskResult(taskNo: string): Promise<string> {
+  desktopOnly()
+  return invoke('fetch_task_result', { taskNo })
+}

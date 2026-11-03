@@ -6,6 +6,7 @@ import {
   isAiConfigured,
   MAX_TIMEOUT_SECS,
   MIN_TIMEOUT_SECS,
+  fetchTaskResult,
   saveAiSettings,
   testAiConnection,
   type AiSettings,
@@ -29,6 +30,12 @@ export function SettingsDialog({ onClose, onSaved }: SettingsDialogProps) {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<AiTestResult | null>(null)
   const [testError, setTestError] = useState('')
+  // 网关 504 后任务仍在服务端执行：用任务号可直接取回结果，不必重新框选。
+  const [taskNo, setTaskNo] = useState('')
+  const [taskBusy, setTaskBusy] = useState(false)
+  const [taskResult, setTaskResult] = useState('')
+  const [taskError, setTaskError] = useState('')
+  const [taskCopied, setTaskCopied] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -58,6 +65,30 @@ export function SettingsDialog({ onClose, onSaved }: SettingsDialogProps) {
       setTestError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setTesting(false)
+    }
+  }
+
+  /** 用已保存的配置按任务号取回结果。 */
+  const runFetchResult = async () => {
+    setTaskBusy(true)
+    setTaskError('')
+    setTaskResult('')
+    setTaskCopied(false)
+    try {
+      setTaskResult(await fetchTaskResult(taskNo.trim()))
+    } catch (reason) {
+      setTaskError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setTaskBusy(false)
+    }
+  }
+
+  const copyTaskResult = async () => {
+    try {
+      await navigator.clipboard.writeText(taskResult)
+      setTaskCopied(true)
+    } catch {
+      setTaskError('复制失败，请手动选中文本复制')
     }
   }
 
@@ -177,6 +208,46 @@ export function SettingsDialog({ onClose, onSaved }: SettingsDialogProps) {
           />
           <small>本地最多等待多久（{MIN_TIMEOUT_SECS}–{MAX_TIMEOUT_SECS} 秒）。注意：部分云端网关会在自己的 90 秒上限处先返回 504，此时应用会自动用返回的任务号查询结果，仍可能拿到识别内容。</small>
         </label>
+
+        <details className="settings-task">
+          <summary>按任务号取回结果（网关超时后）</summary>
+          <p className="settings-task-intro">
+            网关返回 504 时任务通常仍在服务端执行。把错误信息里的任务号（如 <code>20261103-3185</code>）填进来，
+            可直接取回 LaTeX，不需要重新框选。使用<strong>已保存</strong>的配置查询。
+          </p>
+          <div className="settings-task-row">
+            <input
+              value={taskNo}
+              onChange={(event) => setTaskNo(event.target.value)}
+              placeholder="20261103-3185"
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              className="settings-test-button"
+              onClick={() => void runFetchResult()}
+              disabled={taskBusy || !taskNo.trim() || !isAiConfigured(draft)}
+            >
+              {taskBusy ? '查询中…' : '取回结果'}
+            </button>
+          </div>
+          {taskResult && (
+            <div className="settings-task-result">
+              <textarea
+                readOnly
+                rows={4}
+                value={taskResult}
+                onFocus={(event) => event.currentTarget.select()}
+                spellCheck={false}
+              />
+              <button type="button" onClick={() => void copyTaskResult()}>
+                {taskCopied ? '已复制' : '复制'}
+              </button>
+            </div>
+          )}
+          {taskError && <p className="settings-error" role="alert">取回失败：{taskError}</p>}
+        </details>
 
         <p className="settings-hint">
           <Cpu size={14} />

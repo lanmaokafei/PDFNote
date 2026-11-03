@@ -27,6 +27,7 @@ src-tauri/target/
 src-tauri/gen/schemas/
 .workbuddy/
 *.pdf
+!test-fixtures/mini.pdf
 *.pdfnote
 *.zip
 

@@ -63,6 +63,14 @@ import './mindmap.css'
 
 const CANVAS_ID = 'main'
 const nodeTypes = { mindmapCard: MindmapNode }
+// 缺失布局时复用同一对象，避免每次渲染生成新 position 引用。
+const DEFAULT_NODE_POSITION = { x: 80, y: 80 }
+// 传给 React Flow 的对象/数组必须保持引用稳定：StoreUpdater 会逐字段比较，
+// 每次渲染新建会让它在 effect 里重复写入 store，放大成 #185。
+const FIT_VIEW_OPTIONS = { padding: 0.18, maxZoom: 1 }
+const PAN_ON_DRAG: number[] = [1, 2]
+const MULTI_SELECTION_KEYS = ['Meta', 'Control', 'Shift']
+const COMPACT_VIEWPORT = { x: 30, y: 96, zoom: 0.9 }
 
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
@@ -94,6 +102,10 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   const [positions, setPositions] = useState<Record<string, Point>>({})
   const [measuredSizes, setMeasuredSizes] = useState<Record<string, { width: number; height: number }>>({})
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
+
+  // 尺寸回写熔断：极端情况下（容器 0 宽、图片抖动）测量会连续变化，
+  // 超过阈值后本秒内停止回写，直接断开 StoreUpdater ↔ onNodesChange 的回路。
+  const measuredBurstRef = useRef({ windowStart: 0, count: 0 })
   const [loading, setLoading] = useState(true)
   const [hasLoaded, setHasLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -152,20 +164,29 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   )
   const parentCardIds = useMemo(() => new Set(parentIds), [parentIds])
 
+  // 节点 data 与卡片列表同生命周期：位置/选中变化重建 nodes 时复用同一对象，
+  // React Flow 才不会把“位置更新”误判成“节点内容更新”。
+  const nodeData = useMemo(() => {
+    const map = new Map<string, { card_id: string }>()
+    for (const card of orderedVisibleCards) map.set(card.id, { card_id: card.id })
+    return map
+  }, [orderedVisibleCards])
+
   const nodes = useMemo<MindmapFlowNode[]>(
     () => orderedVisibleCards.map((card) => {
       const size = measuredSizes[card.id]
       return {
         id: card.id,
         type: 'mindmapCard',
-        position: positions[card.id] ?? { x: 80, y: 80 },
-        data: { card_id: card.id },
+        position: positions[card.id] ?? DEFAULT_NODE_POSITION,
+        // data 必须保持稳定引用，否则 StoreUpdater 与 onNodesChange 会形成更新回环（React #185）。
+        data: nodeData.get(card.id) ?? { card_id: card.id },
         selected: selectedIds.has(card.id),
         // 保留 React Flow 的实测尺寸，否则拖拽时会提示节点未初始化。
         ...(size ? { measured: size } : {}),
       }
     }),
-    [measuredSizes, orderedVisibleCards, positions, selectedIds],
+    [measuredSizes, nodeData, orderedVisibleCards, positions, selectedIds],
   )
   const edges = useMemo<Edge[]>(() => {
     const hierarchy = orderedVisibleCards.flatMap((card) => {
@@ -299,11 +320,57 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     })
   }, [])
 
+  const selectionFrameRef = useRef<number | null>(null)
+  const pendingSelectRef = useRef<Array<{ id: string; selected: boolean }>>([])
+
+  /**
+   * 受控 nodes 模式下，选中必须由父组件应用 select change，React Flow 不会自己改。
+   * 但它们不能在 React Flow 的更新阶段同步 setState（切换视图时会形成 #185），
+   * 因此合并到下一帧，并保持内容比较。
+   */
+  const queueSelection = useCallback((items: Array<{ id: string; selected: boolean }>) => {
+    pendingSelectRef.current.push(...items)
+    if (selectionFrameRef.current !== null) return
+    selectionFrameRef.current = window.requestAnimationFrame(() => {
+      selectionFrameRef.current = null
+      const batch = pendingSelectRef.current
+      pendingSelectRef.current = []
+      setSelectedIds((current) => {
+        let next: Set<string> | null = null
+        for (const item of batch) {
+          if (current.has(item.id) === item.selected) continue
+          if (!next) next = new Set(current)
+          if (item.selected) next.add(item.id)
+          else next.delete(item.id)
+        }
+        return next ?? current
+      })
+    })
+  }, [])
+
+  useEffect(() => () => {
+    if (selectionFrameRef.current !== null) {
+      window.cancelAnimationFrame(selectionFrameRef.current)
+      selectionFrameRef.current = null
+    }
+  }, [queueSelection])
+
   const handleNodesChange = useCallback((changes: NodeChange<MindmapFlowNode>[]) => {
+    const selectChanges = changes.filter(
+      (change): change is NodeChange<MindmapFlowNode> & { type: 'select'; id: string; selected: boolean } =>
+        change.type === 'select',
+    )
+    if (selectChanges.length) {
+      queueSelection(selectChanges.map((change) => ({ id: change.id, selected: change.selected })))
+    }
+
+    // 拖拽过程中 React Flow 自己维护节点位置。若同时把位置回写到 props，
+    // StoreUpdater 会与拖拽状态互相触发，形成 React #185；松手后统一落盘。
     setPositions((current) => {
       let next = current
       for (const change of changes) {
         if (change.type !== 'position' || !change.position) continue
+        if (change.dragging) continue
         const previous = next[change.id]
         if (previous
           && Math.abs(previous.x - change.position.x) < 0.01
@@ -318,31 +385,33 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     })
 
     setMeasuredSizes((current) => {
+      const now = Date.now()
+      if (now - measuredBurstRef.current.windowStart > 1000) {
+        measuredBurstRef.current = { windowStart: now, count: 0 }
+      }
       let next = current
       for (const change of changes) {
         if (change.type !== 'dimensions' || !change.dimensions) continue
         const { width, height } = change.dimensions
+        // 容器尚未布局时测量值是 0，回写后 React Flow 会立刻重新测量，容易成环。
+        if (width < 2 || height < 2) continue
+        if (measuredBurstRef.current.count > 60) break
         const previous = next[change.id]
-        if (previous && Math.abs(previous.width - width) < 0.5 && Math.abs(previous.height - height) < 0.5) continue
+        // 只同步首次测量与明显布局变化（折叠展开等）。几像素的抖动一律忽略：
+        // 每次回写都会重建整个 nodes 数组并触发 React Flow 重新测量。
+        if (previous
+          && Math.abs(previous.width - width) <= 24
+          && Math.abs(previous.height - height) <= 24) {
+          continue
+        }
         if (next === current) next = { ...current }
         next[change.id] = { width, height }
+        measuredBurstRef.current.count += 1
       }
       return next
     })
-  }, [])
+  }, [queueSelection])
 
-  /**
-   * React Flow 会在每次内部节点变化时回调选择集。这里必须做内容比较：
-   * 直接 setSelectedIds(new Set(...)) 会让 nodes 数组每次重建，StoreUpdater
-   * 再次 setNodes，形成 Maximum update depth exceeded（React #185）。
-   */
-  const handleSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Array<{ id: string }> }) => {
-    const nextIds = selectedNodes.map((node) => node.id)
-    setSelectedIds((current) => {
-      if (current.size === nextIds.length && nextIds.every((id) => current.has(id))) return current
-      return new Set(nextIds)
-    })
-  }, [])
 
   const changeParent = useCallback(async (cardId: string, parentId: string | null) => {
     const latest = useCardStore.getState().cardsById[cardId]
@@ -888,20 +957,19 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
             onNodesChange={handleNodesChange}
             onNodeDragStop={handleNodeDragStop}
             onConnect={handleConnect}
-            onSelectionChange={handleSelectionChange}
             onNodeContextMenu={handleNodeContextMenu}
             onPaneContextMenu={handlePaneContextMenu}
             fitView={!compact}
-            fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
-            defaultViewport={compact ? { x: 30, y: 96, zoom: 0.9 } : undefined}
+            fitViewOptions={FIT_VIEW_OPTIONS}
+            defaultViewport={compact ? COMPACT_VIEWPORT : undefined}
             minZoom={0.15}
             maxZoom={1.8}
             nodesDraggable={!busy}
             nodesConnectable={!busy}
             deleteKeyCode={null}
             selectionOnDrag
-            panOnDrag={[1, 2]}
-            multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
+            panOnDrag={PAN_ON_DRAG}
+            multiSelectionKeyCode={MULTI_SELECTION_KEYS}
           >
             <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#d7ded9" />
             <Controls position="bottom-left" showInteractive={false} />

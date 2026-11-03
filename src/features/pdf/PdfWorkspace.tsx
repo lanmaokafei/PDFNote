@@ -7,6 +7,7 @@ import {
   type PDFDocumentProxy,
   type PDFPageProxy,
 } from 'pdfjs-dist'
+import type { OcrLine } from '../../services/pdfnote'
 import type {
   Annotation,
   AnnotationGeometry,
@@ -22,6 +23,7 @@ import {
   createPageNote,
   deletePageInk,
   deletePageNote,
+  getPageOcr,
   listAnnotations,
   listPageInks,
   listPageNotes,
@@ -43,6 +45,7 @@ import {
   MousePointer2,
   PenLine,
   Scissors,
+  Sparkles,
   Square,
   Tag,
   Trash2,
@@ -52,6 +55,10 @@ import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
 import { PdfPage, type PageSize, type PdfContextAction, type PdfTool } from './PdfPage'
+import { linesFromTextContent } from './pageText'
+import { pageViewBox } from './geometry'
+import { BookDigestDialog } from '../book/BookDigestDialog'
+import type { DigestPage } from '../../services/book'
 import { recognizeText } from './ocr'
 import { decideFormulaRecognition } from './formulaRecognition'
 import { describeAiFailure } from './aiFailure'
@@ -152,6 +159,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   const [inksByPage, setInksByPage] = useState<Record<number, PageInk[]>>({})
   // 留白数量少，打开文档时一次性载入，按页分组渲染。
   const [pageNotes, setPageNotes] = useState<PageNote[]>([])
+  const [digestOpen, setDigestOpen] = useState(false)
   const [inkColor, setInkColor] = useState(INK_COLORS[0])
   const [inkWidth, setInkWidth] = useState(INK_WIDTHS[1].value)
   const [inkErase, setInkErase] = useState(false)
@@ -585,6 +593,38 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
       setOperationError(`删除留白失败：${errorMessage(reason)}`)
     }
   }, [])
+
+  /** 取某页文字：优先 PDF 文字层（精确坐标），扫描页回退到 Vision 行级缓存。 */
+  const collectPageText = useCallback(async (pageNumber: number): Promise<DigestPage> => {
+    const empty: DigestPage = { page: pageNumber, text: '', bbox: null }
+    if (!pdf) return empty
+    try {
+      const page = await pdf.getPage(pageNumber)
+      const content = await page.getTextContent()
+      const lines = linesFromTextContent(content, pageViewBox(page.view))
+      const text = lines.map((line) => line.text).join('\n').trim()
+      if (text && lines.length > 0) {
+        const left = Math.min(...lines.map((line) => line.x))
+        const top = Math.min(...lines.map((line) => line.y))
+        const right = Math.max(...lines.map((line) => line.x + line.width))
+        const bottom = Math.max(...lines.map((line) => line.y + line.height))
+        return { page: pageNumber, text, bbox: [left, top, right - left, bottom - top] }
+      }
+    } catch {
+      // 文字层不可用（扫描页），继续尝试 OCR 缓存。
+    }
+    try {
+      const record = await getPageOcr(document.id, pageNumber)
+      if (record) {
+        const lines = JSON.parse(record.linesJson) as OcrLine[]
+        const text = lines.map((line) => line.text).join('\n').trim()
+        if (text) return { page: pageNumber, text, bbox: null }
+      }
+    } catch {
+      // 没有缓存就跳过这一页。
+    }
+    return empty
+  }, [document.id, pdf])
 
   // 已删除卡片的标注可能在途请求里返回，写入缓存前要过滤掉。
   const deletedCardIdsRef = useRef<Set<string>>(new Set())
@@ -1127,6 +1167,17 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
           标题链接
         </button>
 
+        <button
+          type="button"
+          className="pdf-digest-toggle"
+          onClick={() => setDigestOpen(true)}
+          disabled={!pdf || pageCount === 0}
+          title="AI 拆书：分块抽取要点，生成问题驱动的脑图骨架"
+        >
+          <Sparkles size={14} />
+          AI 拆书
+        </button>
+
         <button type="button" className={`pdf-recall-toggle ${recallMode ? 'is-active' : ''}`} aria-pressed={recallMode} onClick={toggleRecall} disabled={!pdf}>
           {recallMode ? '退出回忆' : '文档回忆'}
         </button>
@@ -1376,6 +1427,7 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
 
           {dockMenuOpen && (
             <div className="pdf-dock-menu" role="dialog" aria-label="缩放与跳页">
+              <button type="button" className="pdf-dock-menu-wide is-highlight" onClick={() => { setDigestOpen(true); setDockMenuOpen(false) }}>AI 拆书</button>
               <div className="pdf-dock-menu-row">
                 <span>跳转</span>
                 <input
@@ -1414,6 +1466,21 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
           currentDocumentId={document.id}
           onJump={goToPage}
           onClose={() => setTitleLinkPreview(null)}
+        />
+      )}
+
+      {digestOpen && (
+        <BookDigestDialog
+          documentId={document.id}
+          documentTitle={document.title}
+          pageCount={pageCount}
+          currentPage={currentPage}
+          getPageText={collectPageText}
+          onClose={() => setDigestOpen(false)}
+          onApplied={() => {
+            void loadCards()
+            callbacksRef.current.onCardsChanged()
+          }}
         />
       )}
 

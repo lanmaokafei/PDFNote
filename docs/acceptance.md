@@ -13,15 +13,15 @@
 | 右键菜单冒烟 | `node scripts/contextmenu-smoke.mjs` | 通过：原生 Reload 菜单被接管、菜单项执行动作、右下角翻转、键盘导航、输入框保留系统菜单、选区读取与跨层判定 |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
-| 原生编译 | `npx tauri build --bundles app` | 通过，0.14.0 生成 release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.14.0 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
+| 原生编译 | `npx tauri build --bundles app` | 通过，0.15.0 生成 release PDFNote.app |
+| DMG | 手动 `hdiutil` 打包 | 0.15.0 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
 
 Rust 测试覆盖：
 
-1. schema v1 → v2 → v3 → v4 → v5 → v6 → v7 迁移（阅读进度、标签/链接/墨迹、摘录图像、页面文字缓存、标题链接别名、留白）、外键与索引。
+1. schema v1 → v2 → v3 → v4 → v5 → v6 → v7 → v8 迁移（阅读进度、标签/链接/墨迹、摘录图像、页面文字缓存、标题链接别名、留白、拆书）、外键与索引。
 2. WAL、foreign_keys 安全设置。
 3. 同内容 PDF 去重、非 PDF 拒绝、缺失/哈希不一致检测。
 4. 删除文档时保留卡片、清理标注与 PDF。
@@ -65,6 +65,7 @@ Rust 测试覆盖：
 | OCR 建卡 | Rust 真机 + 浏览器实测 | 标注-only 建卡通过；0.8.0 起为 Apple Vision 单引擎，真机中文图识别出「信息化」；已移除 Tesseract 与 63MB 离线模型 |
 | 可选文字层（0.9.0） | Rust 真机 + 无头 Chrome | 4 行中文图返回归一化行坐标（2.81s）；缓存往返与旧备份兼容测试通过；透明 DOM 文字拖选精确到字符，可复制/建卡；0.10.1 起选区字形保持透明（`::selection` color/fill 均为 `rgba(0,0,0,0)`），与 PDF 原字无重影 |
 | 元素右键菜单（0.10.0） | Vitest + 无头 Chrome | 原生 Reload 菜单被接管；文字选区/标注/墨迹/脑图节点/文档卡片按元素给菜单；动作执行、边界翻转、ESC 与键盘导航、输入框系统菜单均通过 |
+| AI 拆书（0.15.0） | Rust + 无头 Chrome | JSON 容错（围栏/前后说明）、页码越界丢弃、骨架写入卡片+布局并去重、不生成 annotation、深度与节点上限；冒烟走完分析→汇总→写入并校验分块笔记落库 |
 | 留白（0.14.0） | Rust + 无头 Chrome | 增删改查往返、非法输入拒绝、文档删除级联清除、v6→v7 迁移；冒烟覆盖右键添加 → 输入失焦保存 → 折叠 → 展开 → 删除 |
 | 公式不被裁切（0.13.2） | 无头 Chrome 实测 + 截图 | 段落 `scrollHeight = clientHeight`（原 3 行 clamp 已解除）、公式容器 `scrollWidth = clientWidth`（自适应缩放生效）、卡片整体无纵向溢出；截图确认公式完整可读 |
 | 公式卡不显示截图（0.13.1） | Vitest + 无头 Chrome | `hasMathContent` 3 项（裸公式、行内公式、纯文本/空）；脑图实测公式节点截图 0 张、纯图片卡片仍有 2 张 |

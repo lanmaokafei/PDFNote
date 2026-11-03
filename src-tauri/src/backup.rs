@@ -354,6 +354,8 @@ fn import_overwrite(
         .transaction()
         .map_err(|error| error.to_string())?;
     for table in [
+        "book_outline",
+        "book_analysis",
         "page_notes",
         "page_ocr",
         "review_logs",
@@ -389,7 +391,7 @@ fn import_overwrite(
                 .map_err(|error| error.to_string())?;
         }
         // page_ocr 是纯派生缓存：旧备份没有该表时跳过，页面首次打开会自动重建。
-        for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr"] {
+        for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr", "book_analysis", "book_outline"] {
             copy_table_if_present(&transaction, table)?;
         }
         Ok(())

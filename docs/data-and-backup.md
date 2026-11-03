@@ -87,6 +87,12 @@ PDFNote-backup-YYYYMMDD-HHMMSS.zip
 - 翻页停止 700ms 后写入，关闭文档时再补一次；不更新 `updated_at`，避免资料库排序与备份新鲜度被翻页触发。
 - 备份导入时按清单 `schema_version` 选择列：schema v1 旧包没有 `last_page`，导入后为 1；schema v2 包会一并恢复。
 
+## AI 拆书（schema v8）
+
+- `book_analysis(document_id, mode, chunk_index, page_start, page_end, summary, items_json, pages_json)`：阶段一的块级笔记，`(document_id, mode, chunk_index)` 唯一。
+- `book_outline(document_id, mode, outline_json)`：阶段二的层级骨架。
+- 两表都随整库备份往返；合并导入时连同文档重映射，旧备份没有这些表时自动跳过。
+
 ## 留白（schema v7）
 
 - `page_notes(id, document_id, page, anchor_y, content, collapsed, color, created_at, updated_at)`。

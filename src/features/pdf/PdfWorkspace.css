@@ -1478,3 +1478,26 @@
   place-items: center;
 }
 .pdf-note-dot:hover { background: rgba(120, 104, 64, .14); }
+
+/* AI 拆书入口 */
+.pdf-digest-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid #d8ded2 !important;
+  border-radius: 8px;
+  color: #4d6a52 !important;
+  background: #f3f7f0 !important;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pdf-digest-toggle:hover { background: #eaf1e5 !important; }
+.pdf-digest-toggle:disabled { opacity: .55; cursor: default; }
+.pdf-dock-menu-wide.is-highlight {
+  color: #3f6849 !important;
+  font-weight: 600;
+}

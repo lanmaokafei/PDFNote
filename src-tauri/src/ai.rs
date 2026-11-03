@@ -441,6 +441,70 @@ pub async fn recognize_selection(
     Ok(cleaned)
 }
 
+/// 纯文本补全（拆书用）：只发 system + user 文本，不携带图片。
+///
+/// 与 `recognize_selection` 共用同一套配置、超时、504 任务轮询与围栏清理。
+pub async fn complete_text(
+    state: &AppState,
+    system: &str,
+    user: &str,
+    max_tokens: u32,
+) -> Result<String, String> {
+    let settings = load_settings(state)?;
+    if !settings.configured() {
+        return Err("尚未配置模型：请在设置中填写 Base URL 与模型名".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(settings.timeout_secs))
+        .build()
+        .map_err(|error| format!("无法初始化模型客户端: {error}"))?;
+    let request = ChatRequest {
+        model: &settings.model,
+        messages: vec![
+            ChatMessage { role: "system", content: MessageContent::Text(system.into()) },
+            ChatMessage { role: "user", content: MessageContent::Text(user.into()) },
+        ],
+        temperature: 0.0,
+        max_tokens,
+        stream: false,
+    };
+    let mut builder = client.post(settings.endpoint()).json(&request);
+    if !settings.api_key.is_empty() {
+        builder = builder.bearer_auth(&settings.api_key);
+    }
+    let response = builder
+        .send()
+        .await
+        .map_err(|error| connect_error(&error, &settings.base_url))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("读取响应失败: {error}"))?;
+    if !status.is_success() {
+        if let Some(task_no) = extract_task_no(&body) {
+            return poll_task(&client, &settings, &task_no).await.map_err(|error| {
+                format!("模型服务返回 {status}，任务 {task_no} 仍在服务端执行；自动查询结果失败：{error}")
+            });
+        }
+        let snippet: String = body.chars().take(300).collect();
+        return Err(format!("模型服务返回 {status}: {snippet}"));
+    }
+    let parsed: ChatResponse =
+        serde_json::from_str(&body).map_err(|error| format!("无法解析响应: {error}"))?;
+    let content = parsed
+        .choices
+        .into_iter()
+        .next()
+        .map(|choice| choice.message.content)
+        .unwrap_or_default();
+    let cleaned = clean_model_output(&content);
+    if cleaned.is_empty() {
+        return Err("模型返回了空内容".into());
+    }
+    Ok(cleaned)
+}
+
 /// 从错误响应里提取异步任务号。
 ///
 /// 有的网关给出结构化字段（`task_no` / `task_id`），有的只写在提示文本里

@@ -1,5 +1,6 @@
 mod ai;
 mod backup;
+mod book;
 mod cards;
 mod commands;
 mod db;
@@ -31,6 +32,11 @@ pub fn run() {
             commands::create_page_note,
             commands::update_page_note,
             commands::delete_page_note,
+            commands::analyze_book_chunk,
+            commands::list_book_notes,
+            commands::synthesize_book,
+            commands::apply_book_outline,
+            commands::clear_book_analysis,
             commands::get_page_ocr,
             commands::save_page_ocr,
             commands::get_bootstrap_status,

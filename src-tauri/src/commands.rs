@@ -1,4 +1,4 @@
-use crate::{ai, backup, cards, documents, models, review, state::AppState};
+use crate::{ai, backup, book, cards, documents, models, review, state::AppState};
 use tauri::{ipc::Response, State};
 
 /// 可选的视觉模型设置。未配置时应用不发任何网络请求。
@@ -29,6 +29,55 @@ pub async fn recognize_selection(
     mode: String,
 ) -> Result<String, String> {
     ai::recognize_selection(&state, image, mode).await
+}
+
+/// AI 拆书阶段一：分析一块文本并保存笔记。
+#[tauri::command]
+pub async fn analyze_book_chunk(
+    state: State<'_, AppState>,
+    input: book::DigestChunkInput,
+) -> Result<book::ChunkNote, String> {
+    book::analyze_chunk(&state, input).await
+}
+
+/// 已完成的拆书分块（中断后继续）。
+#[tauri::command(async)]
+pub fn list_book_notes(
+    state: State<'_, AppState>,
+    document_id: String,
+    mode: String,
+) -> Result<Vec<book::ChunkNote>, String> {
+    book::list_notes(&state, document_id, mode)
+}
+
+/// AI 拆书阶段二：把分块笔记汇总成层级骨架。
+#[tauri::command]
+pub async fn synthesize_book(
+    state: State<'_, AppState>,
+    document_id: String,
+    mode: String,
+) -> Result<book::BookOutline, String> {
+    book::synthesize(&state, document_id, mode).await
+}
+
+/// 把骨架写入卡片与脑图（重复应用不会翻倍）。
+#[tauri::command(async)]
+pub fn apply_book_outline(
+    state: State<'_, AppState>,
+    document_id: String,
+    mode: String,
+) -> Result<u32, String> {
+    book::apply_outline(&state, document_id, mode)
+}
+
+/// 清空某模式的拆书中间产物（已生成的卡片保留）。
+#[tauri::command(async)]
+pub fn clear_book_analysis(
+    state: State<'_, AppState>,
+    document_id: String,
+    mode: String,
+) -> Result<(), String> {
+    book::clear(&state, document_id, mode)
 }
 
 /// 列出某文档的全部留白（页边草稿）。

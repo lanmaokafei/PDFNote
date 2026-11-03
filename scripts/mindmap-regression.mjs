@@ -83,6 +83,8 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
   const cardState = cards.map((card) => ({ ...card }))
   const noteState = []
   window.__noteState = noteState
+  const digestNotes = []
+  window.__digestNotes = digestNotes
   const handlers = {
     get_bootstrap_status: () => ({ database_ready: true, schema_version: 6, document_count: 1, card_count: cardState.length }),
     list_cards: () => cardState,
@@ -93,6 +95,40 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
     },
     list_documents: () => [document],
     list_due_cards: () => [],
+    list_book_notes: () => digestNotes,
+    analyze_book_chunk: (args) => {
+      const input = args?.input ?? {}
+      const pages = input.pages ?? []
+      const note = {
+        chunk_index: input.chunk_index,
+        page_start: pages[0]?.page ?? 1,
+        page_end: pages[pages.length - 1]?.page ?? 1,
+        summary: '这一块讲熵的定义',
+        items: [{
+          kind: '定义',
+          title: '信息熵',
+          excerpt: 'H = -sum p log p',
+          page: pages[0]?.page ?? 1,
+          aliases: 'entropy',
+        }],
+        pages,
+      }
+      digestNotes.push(note)
+      return note
+    },
+    synthesize_book: () => ({
+      title: '测试教材',
+      mode: 'structure',
+      nodes: [{
+        title: '背景',
+        excerpt: '熵用来度量不确定性',
+        page: 1,
+        aliases: '',
+        children: [{ title: '为什么需要熵', excerpt: '编码长度的下界', page: 1, aliases: '', children: [] }],
+      }],
+    }),
+    apply_book_outline: () => 2,
+    clear_book_analysis: () => null,
     list_page_notes: (args) => noteState.filter((note) => note.document_id === args?.documentId),
     create_page_note: (args) => {
       const input = args?.input ?? {}
@@ -316,6 +352,48 @@ if (STEP === 'pan') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, before, after, beforeWheel, afterWheel }, null, 2))
+  if (problems.length) process.exitCode = 1
+  process.exit(0)
+}
+
+if (STEP === 'digest') {
+  await page.waitForTimeout(1200)
+  const topButton = page.locator('.pdf-digest-toggle')
+  const dockButton = page.locator('.pdf-dock button[title="更多：缩放与跳页"]')
+  if (await topButton.count()) {
+    await topButton.click()
+  } else if (await dockButton.count()) {
+    await dockButton.click()
+    await page.locator('.pdf-dock-menu-wide', { hasText: 'AI 拆书' }).click()
+  } else {
+    problems.push('缺少 AI 拆书入口')
+  }
+  if (await page.locator('.digest-dialog').count()) {
+
+    await page.locator('.digest-dialog footer button', { hasText: '开始分析' }).click()
+    await page.waitForTimeout(1200)
+    const progressText = await page.locator('.digest-dialog').innerText()
+    if (!progressText.includes('已完成')) problems.push('分块分析未完成')
+
+    await page.locator('.digest-dialog footer button', { hasText: '汇总骨架' }).click()
+    await page.waitForSelector('.digest-outline', { timeout: 5000 })
+    const treeText = await page.locator('.digest-outline').innerText()
+    if (!treeText.includes('背景')) problems.push('骨架预览没有内容')
+
+    await page.locator('.digest-dialog footer button', { hasText: '写入脑图' }).click()
+    await page.waitForTimeout(800)
+    const applied = await page.locator('.digest-dialog').innerText()
+    if (!applied.includes('2 张卡片')) problems.push('写入脑图未给出结果')
+  }
+  const calls = await page.evaluate(() => window.__calls.slice(-12))
+  for (const expected of ['analyze_book_chunk', 'synthesize_book', 'apply_book_outline']) {
+    if (!calls.includes(expected)) problems.push(`缺少命令调用：${expected}`)
+  }
+  const noteCount = await page.evaluate(() => window.__digestNotes?.length ?? 0)
+  if (noteCount < 1) problems.push('分块笔记没有落库')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, noteCount, calls }, null, 2))
   if (problems.length) process.exitCode = 1
   process.exit(0)
 }

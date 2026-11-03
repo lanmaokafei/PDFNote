@@ -81,6 +81,8 @@ const document = {
 await page.addInitScript(({ cards, document, pdfBase64 }) => {
   const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0))
   const cardState = cards.map((card) => ({ ...card }))
+  const noteState = []
+  window.__noteState = noteState
   const handlers = {
     get_bootstrap_status: () => ({ database_ready: true, schema_version: 6, document_count: 1, card_count: cardState.length }),
     list_cards: () => cardState,
@@ -91,6 +93,37 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
     },
     list_documents: () => [document],
     list_due_cards: () => [],
+    list_page_notes: (args) => noteState.filter((note) => note.document_id === args?.documentId),
+    create_page_note: (args) => {
+      const input = args?.input ?? {}
+      const note = {
+        id: `note-${noteState.length + 1}`,
+        document_id: input.document_id,
+        page: input.page,
+        anchor_y: input.anchor_y ?? 0.08,
+        content: '',
+        collapsed: false,
+        color: 'amber',
+        created_at: '2026-11-04T00:00:00.000Z',
+        updated_at: '2026-11-04T00:00:00.000Z',
+      }
+      noteState.push(note)
+      return note
+    },
+    update_page_note: (args) => {
+      const input = args?.input ?? {}
+      const note = noteState.find((item) => item.id === input.id)
+      if (!note) throw new Error('留白不存在')
+      if (input.content !== undefined) note.content = input.content
+      if (input.collapsed !== undefined) note.collapsed = input.collapsed
+      if (input.anchor_y !== undefined) note.anchor_y = input.anchor_y
+      return { ...note }
+    },
+    delete_page_note: (args) => {
+      const index = noteState.findIndex((item) => item.id === args?.id)
+      if (index >= 0) noteState.splice(index, 1)
+      return null
+    },
     list_annotations: () => [{
       id: 'ann-1',
       card_id: 'c1',
@@ -283,6 +316,51 @@ if (STEP === 'pan') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, before, after, beforeWheel, afterWheel }, null, 2))
+  if (problems.length) process.exitCode = 1
+  process.exit(0)
+}
+
+if (STEP === 'notes') {
+  await page.waitForTimeout(1200)
+  const pageBox = await page.locator('.pdf-page').first().boundingBox()
+  if (!pageBox) {
+    problems.push('PDF 页面不可见')
+  } else {
+    await page.mouse.click(pageBox.x + pageBox.width * 0.4, pageBox.y + pageBox.height * 0.35, { button: 'right' })
+    await page.waitForSelector('.context-menu', { timeout: 3000 })
+    const addNote = page.locator('.context-menu-item', { hasText: '在此页添加留白' }).first()
+    if (!(await addNote.count())) problems.push('右键菜单缺少「添加留白」')
+    else {
+      await addNote.click()
+      await page.waitForSelector('.pdf-note', { timeout: 3000 })
+    }
+  }
+  const noteCount = await page.locator('.pdf-note').count()
+  if (noteCount !== 1) problems.push(`留白数量异常：${noteCount}`)
+
+  const textarea = page.locator('.pdf-note textarea')
+  if (await textarea.count()) {
+    await textarea.fill('页边草稿：熵的单位是 bit')
+    await page.locator('.pdf-note header').click()
+    await page.waitForTimeout(500)
+  }
+  const saved = await page.evaluate(() => window.__noteState?.[0]?.content ?? '')
+  if (!saved.includes('bit')) problems.push(`留白未保存：${saved}`)
+
+  await page.locator('.pdf-note header button[aria-label="折叠留白"]').click()
+  await page.waitForTimeout(500)
+  const collapsed = await page.locator('.pdf-note.is-collapsed').count()
+  if (!collapsed) problems.push('留白折叠未生效')
+
+  await page.locator('.pdf-note-dot').click()
+  await page.waitForTimeout(300)
+  await page.locator('.pdf-note header button[aria-label="删除留白"]').click()
+  await page.waitForTimeout(500)
+  const remaining = await page.locator('.pdf-note').count()
+  if (remaining !== 0) problems.push(`删除留白后仍显示：${remaining}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, noteCount, saved, collapsed, remaining }, null, 2))
   if (problems.length) process.exitCode = 1
   process.exit(0)
 }

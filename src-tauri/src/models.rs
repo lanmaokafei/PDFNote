@@ -397,3 +397,77 @@ pub struct BackupResult {
     pub documents: i64,
     pub cards: i64,
 }
+
+/// 留白：贴在页面右边缘的独立草稿，不绑定文字选区。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageNote {
+    pub id: String,
+    pub document_id: String,
+    pub page: u32,
+    /// 归一化纵向锚点（0–1）。
+    pub anchor_y: f64,
+    pub content: String,
+    pub collapsed: bool,
+    pub color: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub const PAGE_NOTE_COLUMNS: &str =
+    "id, document_id, page, anchor_y, content, collapsed, color, created_at, updated_at";
+
+pub fn page_note_from_row(row: &Row<'_>) -> rusqlite::Result<PageNote> {
+    Ok(PageNote {
+        id: row.get(0)?,
+        document_id: row.get(1)?,
+        page: row.get(2)?,
+        anchor_y: row.get(3)?,
+        content: row.get(4)?,
+        collapsed: row.get::<_, i64>(5)? != 0,
+        color: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreatePageNoteInput {
+    pub document_id: String,
+    pub page: u32,
+    #[serde(default = "default_anchor")]
+    pub anchor_y: f64,
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+fn default_anchor() -> f64 {
+    0.08
+}
+
+impl CreatePageNoteInput {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.document_id.trim().is_empty() {
+            return Err("文档 id 不能为空".into());
+        }
+        if self.page == 0 {
+            return Err("页码从 1 开始".into());
+        }
+        if !self.anchor_y.is_finite() || !(0.0..=1.0).contains(&self.anchor_y) {
+            return Err("anchor_y 必须归一化到 0–1".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdatePageNoteInput {
+    pub id: String,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub anchor_y: Option<f64>,
+    #[serde(default)]
+    pub collapsed: Option<bool>,
+    #[serde(default)]
+    pub color: Option<String>,
+}

@@ -14,18 +14,23 @@ import type {
   Document as PdfDocument,
   NormalizedBBox,
   PageInk,
+  PageNote,
   Rating,
 } from '../../domain/card'
 import {
   createPageInk,
+  createPageNote,
   deletePageInk,
+  deletePageNote,
   listAnnotations,
   listPageInks,
+  listPageNotes,
   readPdfChunk,
   removeAnnotation,
   setCardTags,
   updateAnnotationGeometry,
   updateCardContent,
+  updatePageNote,
   updateDocumentProgress,
 } from '../../services/pdfnote'
 import {
@@ -70,6 +75,7 @@ const INK_WIDTHS = [
 const MIN_SCALE = 0.5
 const MAX_SCALE = 3
 const EMPTY_ANNOTATIONS: Annotation[] = []
+const EMPTY_NOTES: PageNote[] = []
 
 
 const TITLE_LINK_STORAGE_KEY = 'pdfnote.titleLink.enabled'
@@ -144,6 +150,8 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
   const [inksByPage, setInksByPage] = useState<Record<number, PageInk[]>>({})
+  // 留白数量少，打开文档时一次性载入，按页分组渲染。
+  const [pageNotes, setPageNotes] = useState<PageNote[]>([])
   const [inkColor, setInkColor] = useState(INK_COLORS[0])
   const [inkWidth, setInkWidth] = useState(INK_WIDTHS[1].value)
   const [inkErase, setInkErase] = useState(false)
@@ -512,6 +520,70 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     pendingAnnotationPagesRef.current.delete(page)
     annotationRequestsRef.current.set(page, (annotationRequestsRef.current.get(page) ?? 0) + 1)
     setAnnotationVersion((version) => version + 1)
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    setPageNotes([])
+    listPageNotes(document.id)
+      .then((notes) => { if (active) setPageNotes(notes) })
+      .catch(() => {
+        // 留白加载失败不影响阅读，静默降级。
+      })
+    return () => { active = false }
+  }, [document.id])
+
+  const notesByPage = useMemo(() => {
+    const map: Record<number, PageNote[]> = {}
+    for (const note of pageNotes) {
+      ;(map[note.page] ??= []).push(note)
+    }
+    return map
+  }, [pageNotes])
+
+  const handleNoteCreate = useCallback(async (page: number, anchorY: number) => {
+    try {
+      const note = await createPageNote({
+        document_id: document.id,
+        page,
+        anchor_y: anchorY,
+      })
+      setPageNotes((previous) => [...previous, note])
+      setNotice('已添加留白，可直接在页边输入。')
+    } catch (reason) {
+      setOperationError(`添加留白失败：${errorMessage(reason)}`)
+    }
+  }, [document.id])
+
+  const handleNoteSave = useCallback(async (id: string, content: string) => {
+    try {
+      const updated = await updatePageNote({ id, content })
+      setPageNotes((previous) => previous.map((note) => (note.id === id ? updated : note)))
+    } catch (reason) {
+      setOperationError(`保存留白失败：${errorMessage(reason)}`)
+    }
+  }, [])
+
+  const handleNoteToggle = useCallback(async (id: string, collapsed: boolean) => {
+    // 先本地切换保证手感，失败再回滚。
+    setPageNotes((previous) => previous.map((note) => (note.id === id ? { ...note, collapsed } : note)))
+    try {
+      const updated = await updatePageNote({ id, collapsed })
+      setPageNotes((previous) => previous.map((note) => (note.id === id ? updated : note)))
+    } catch (reason) {
+      setPageNotes((previous) => previous.map((note) => (note.id === id ? { ...note, collapsed: !collapsed } : note)))
+      setOperationError(`折叠留白失败：${errorMessage(reason)}`)
+    }
+  }, [])
+
+  const handleNoteDelete = useCallback(async (id: string) => {
+    try {
+      await deletePageNote(id)
+      setPageNotes((previous) => previous.filter((note) => note.id !== id))
+      setNotice('留白已删除。')
+    } catch (reason) {
+      setOperationError(`删除留白失败：${errorMessage(reason)}`)
+    }
   }, [])
 
   // 已删除卡片的标注可能在途请求里返回，写入缓存前要过滤掉。
@@ -1153,6 +1225,11 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
                   onMove={handleMove}
                   onReveal={handleReveal}
                   onContextAction={handleContextAction}
+                  notes={notesByPage[pageNumber] ?? EMPTY_NOTES}
+                  onNoteCreate={(anchorY) => void handleNoteCreate(pageNumber, anchorY)}
+                  onNoteSave={(id, content) => void handleNoteSave(id, content)}
+                  onNoteToggle={(id, collapsed) => void handleNoteToggle(id, collapsed)}
+                  onNoteDelete={(id) => void handleNoteDelete(id)}
                   titleLinkIndex={titleLinkIndex}
                   onTitleLink={setTitleLinkPreview}
                 />

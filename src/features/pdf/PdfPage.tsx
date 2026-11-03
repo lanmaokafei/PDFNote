@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PDFPageProxy, RenderTask } from 'pdfjs-dist'
-import type { Annotation, AnnotationGeometry, NormalizedBBox, PageInk } from '../../domain/card'
+import type { Annotation, AnnotationGeometry, NormalizedBBox, PageInk, PageNote } from '../../domain/card'
 import type { OcrLine } from '../../services/pdfnote'
 import {
   clampRect,
@@ -37,6 +37,7 @@ import {
   PenLine,
   Quote,
   Square,
+  StickyNote,
   Tag,
   Trash2,
   Type,
@@ -112,6 +113,12 @@ interface PdfPageProps {
   /** 标题链接字典；null 表示功能关闭。 */
   titleLinkIndex: TitleLinkIndex | null
   onTitleLink: (hit: TitleLinkHit) => void
+  /** 本页的留白（页边草稿）。 */
+  notes: PageNote[]
+  onNoteCreate: (anchorY: number) => void
+  onNoteSave: (id: string, content: string) => void
+  onNoteToggle: (id: string, collapsed: boolean) => void
+  onNoteDelete: (id: string) => void
 }
 
 export function PdfPage({
@@ -142,6 +149,11 @@ export function PdfPage({
   onContextAction,
   titleLinkIndex,
   onTitleLink,
+  notes,
+  onNoteCreate,
+  onNoteSave,
+  onNoteToggle,
+  onNoteDelete,
 }: PdfPageProps) {
   const [page, setPage] = useState<PDFPageProxy | null>(null)
   const [pageError, setPageError] = useState('')
@@ -153,6 +165,8 @@ export function PdfPage({
   const [textStatus, setTextStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [textError, setTextError] = useState('')
   const [selection, setSelection] = useState<TextSelectionInfo | null>(null)
+  // 留白编辑草稿：输入中不回写数据库，失焦时才保存。
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
   const { menu, show, close } = useContextMenu()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -644,8 +658,16 @@ export function PdfPage({
       { id: 'tool-ink', label: '手写墨迹', icon: PenLine, checked: tool === 'ink', disabled: recallMode, onSelect: () => onContextAction({ type: 'tool', tool: 'ink' }) },
     ]
     const pageText = lines.map((line) => line.text).join('\n')
+    // 留白锚点：用右键位置换算成归一化纵向坐标，便签就贴在那附近。
+    const pageRect = event.currentTarget.getBoundingClientRect()
+    const noteAnchorY = pageRect && pageRect.height > 0
+      ? Math.min(0.9, Math.max(0.02, (event.clientY - pageRect.top) / pageRect.height))
+      : 0.1
     open(`第 ${pageNumber} 页`, [
       { id: 'tools', title: '标注工具', items: toolItems },
+      { id: 'notes', items: [
+        { id: 'add-note', label: '在此页添加留白', icon: StickyNote, onSelect: () => onNoteCreate(noteAnchorY) },
+      ] },
       { id: 'view', title: '视图与翻页', items: [
         { id: 'zoom-in', label: '放大', icon: ZoomIn, hint: '+10%', onSelect: () => onContextAction({ type: 'zoom', delta: 0.1 }) },
         { id: 'zoom-out', label: '缩小', icon: ZoomOut, hint: '−10%', onSelect: () => onContextAction({ type: 'zoom', delta: -0.1 }) },
@@ -853,6 +875,60 @@ export function PdfPage({
                     onTitleLink(hit)
                   }}
                 />
+              ))}
+            </div>
+          )}
+          {notes.length > 0 && (
+            <div className="pdf-note-layer">
+              {notes.map((note) => (
+                <article
+                  key={note.id}
+                  className={`pdf-note is-${note.color}${note.collapsed ? ' is-collapsed' : ''}`}
+                  style={{ top: `${Math.min(88, Math.max(2, note.anchor_y * 100))}%` }}
+                  data-note-id={note.id}
+                >
+                  {note.collapsed ? (
+                    <button
+                      type="button"
+                      className="pdf-note-dot"
+                      title="展开留白"
+                      aria-label="展开留白"
+                      onClick={() => onNoteToggle(note.id, false)}
+                    >
+                      <StickyNote size={13} strokeWidth={1.8} />
+                    </button>
+                  ) : (
+                    <>
+                      <header>
+                        <span>留白</span>
+                        <div>
+                          <button type="button" title="折叠留白" aria-label="折叠留白" onClick={() => onNoteToggle(note.id, true)}>−</button>
+                          <button type="button" title="删除留白" aria-label="删除留白" onClick={() => onNoteDelete(note.id)}>×</button>
+                        </div>
+                      </header>
+                      <textarea
+                        value={noteDrafts[note.id] ?? note.content}
+                        placeholder="页边草稿：不绑定文字，随手记下想法…"
+                        rows={4}
+                        spellCheck={false}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          setNoteDrafts((current) => ({ ...current, [note.id]: value }))
+                        }}
+                        onBlur={(event) => {
+                          const value = event.currentTarget.value
+                          if (value !== note.content) onNoteSave(note.id, value)
+                          setNoteDrafts((current) => {
+                            if (!(note.id in current)) return current
+                            const next = { ...current }
+                            delete next[note.id]
+                            return next
+                          })
+                        }}
+                      />
+                    </>
+                  )}
+                </article>
               ))}
             </div>
           )}

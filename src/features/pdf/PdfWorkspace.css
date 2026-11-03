@@ -1396,3 +1396,85 @@
   border-radius: 10px;
   box-shadow: 0 12px 30px rgba(24, 30, 24, .12);
 }
+
+/* ---------- 留白（页边草稿） ---------- */
+.pdf-note-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.pdf-note {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  flex-direction: column;
+  width: min(48%, 210px);
+  max-height: 46%;
+  overflow: hidden;
+  border: 1px solid rgba(183, 154, 82, .38);
+  border-radius: 8px;
+  background: rgba(255, 250, 235, .96);
+  box-shadow: 0 6px 18px rgba(60, 52, 32, .12);
+  pointer-events: auto;
+}
+.pdf-note.is-green { border-color: rgba(93, 138, 96, .4); background: rgba(243, 250, 240, .96); }
+.pdf-note.is-blue { border-color: rgba(96, 130, 168, .4); background: rgba(241, 247, 253, .96); }
+.pdf-note.is-pink { border-color: rgba(178, 112, 135, .4); background: rgba(253, 243, 247, .96); }
+
+.pdf-note header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 3px 8px;
+  color: #7a6a45;
+  font-size: 9px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.pdf-note header div { display: flex; gap: 2px; }
+.pdf-note header button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  place-items: center;
+}
+.pdf-note header button:hover { background: rgba(120, 104, 64, .12); }
+.pdf-note textarea {
+  flex: 1 1 auto;
+  min-height: 64px;
+  margin: 0 6px 6px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 5px;
+  outline: none;
+  color: #4a4433;
+  background: rgba(255, 255, 255, .72);
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.pdf-note textarea:focus { background: #fff; }
+.pdf-note.is-collapsed {
+  width: auto;
+  border-radius: 999px;
+}
+.pdf-note-dot {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 999px;
+  color: #8a7742;
+  background: transparent;
+  cursor: pointer;
+  place-items: center;
+}
+.pdf-note-dot:hover { background: rgba(120, 104, 64, .14); }

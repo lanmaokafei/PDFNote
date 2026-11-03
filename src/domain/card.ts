@@ -181,3 +181,32 @@ export interface BackupResult {
   documents: number
   cards: number
 }
+
+/** 留白：贴在页面右边缘的独立草稿，不绑定文字选区。 */
+export interface PageNote {
+  id: string
+  document_id: string
+  page: number
+  /** 归一化纵向锚点（0–1）。 */
+  anchor_y: number
+  content: string
+  collapsed: boolean
+  color: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CreatePageNoteInput {
+  document_id: string
+  page: number
+  anchor_y: number
+  color?: string
+}
+
+export interface UpdatePageNoteInput {
+  id: string
+  content?: string
+  anchor_y?: number
+  collapsed?: boolean
+  color?: string
+}

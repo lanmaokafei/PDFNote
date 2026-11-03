@@ -31,6 +31,36 @@ pub async fn recognize_selection(
     ai::recognize_selection(&state, image, mode).await
 }
 
+/// 列出某文档的全部留白（页边草稿）。
+#[tauri::command(async)]
+pub fn list_page_notes(
+    state: State<'_, AppState>,
+    document_id: String,
+) -> Result<Vec<models::PageNote>, String> {
+    crate::notes::list_page_notes(&state, document_id)
+}
+
+#[tauri::command(async)]
+pub fn create_page_note(
+    state: State<'_, AppState>,
+    input: models::CreatePageNoteInput,
+) -> Result<models::PageNote, String> {
+    crate::notes::create_page_note(&state, input)
+}
+
+#[tauri::command(async)]
+pub fn update_page_note(
+    state: State<'_, AppState>,
+    input: models::UpdatePageNoteInput,
+) -> Result<models::PageNote, String> {
+    crate::notes::update_page_note(&state, input)
+}
+
+#[tauri::command(async)]
+pub fn delete_page_note(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    crate::notes::delete_page_note(&state, id)
+}
+
 /// 按任务号取回异步识别结果（网关超时后任务仍在执行时使用）。
 #[tauri::command]
 pub async fn fetch_task_result(

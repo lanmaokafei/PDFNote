@@ -354,6 +354,7 @@ fn import_overwrite(
         .transaction()
         .map_err(|error| error.to_string())?;
     for table in [
+        "page_notes",
         "page_ocr",
         "review_logs",
         "mindmap_layout",
@@ -388,7 +389,7 @@ fn import_overwrite(
                 .map_err(|error| error.to_string())?;
         }
         // page_ocr 是纯派生缓存：旧备份没有该表时跳过，页面首次打开会自动重建。
-        for table in ["card_tags", "card_links", "page_inks", "page_ocr"] {
+        for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr"] {
             copy_table_if_present(&transaction, table)?;
         }
         Ok(())
@@ -540,6 +541,29 @@ fn import_merge(
                     "INSERT INTO page_inks
                      SELECT s.* FROM import_src.page_inks s
                      WHERE NOT EXISTS (SELECT 1 FROM page_inks i WHERE i.id = s.id)",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        if import_has_table(&transaction, "page_notes")? {
+            // 留白挂在文档上，与墨迹一样按内容哈希重新指向本地文档；
+            // 找不到对应文档的条目直接跳过，避免外键失败。
+            transaction
+                .execute(
+                    "UPDATE import_src.page_notes SET document_id = (
+                        SELECT d.id FROM documents d
+                        WHERE d.content_hash = (SELECT s2.content_hash FROM import_src.documents s2 WHERE s2.id = import_src.page_notes.document_id)
+                    ) WHERE document_id IS NOT NULL",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO page_notes (id, document_id, page, anchor_y, content, collapsed, color, created_at, updated_at)
+                     SELECT s.id, s.document_id, s.page, s.anchor_y, s.content, s.collapsed, s.color, s.created_at, s.updated_at
+                     FROM import_src.page_notes s
+                     WHERE NOT EXISTS (SELECT 1 FROM page_notes p WHERE p.id = s.id)
+                       AND EXISTS (SELECT 1 FROM documents d WHERE d.id = s.document_id)",
                     [],
                 )
                 .map_err(|error| error.to_string())?;

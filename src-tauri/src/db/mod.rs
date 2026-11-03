@@ -1,13 +1,14 @@
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
 
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
 const DOCUMENT_PROGRESS_SQL: &str = include_str!("../../migrations/002_document_progress.sql");
 const COLLABORATION_SQL: &str = include_str!("../../migrations/003_collaboration.sql");
 const EXCERPT_IMAGE_SQL: &str = include_str!("../../migrations/004_card_excerpt_image.sql");
 const PAGE_TEXT_SQL: &str = include_str!("../../migrations/005_page_text.sql");
 const TITLE_LINK_SQL: &str = include_str!("../../migrations/006_title_link.sql");
+const PAGE_NOTES_SQL: &str = include_str!("../../migrations/007_page_notes.sql");
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
@@ -48,13 +49,14 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
             "数据库 schema 版本 {version} 高于当前应用支持的版本 {SCHEMA_VERSION}"
         ));
     }
-    let migrations: [(&str, u32); 6] = [
+    let migrations: [(&str, u32); 7] = [
         (INIT_SQL, 1),
         (DOCUMENT_PROGRESS_SQL, 2),
         (COLLABORATION_SQL, 3),
         (EXCERPT_IMAGE_SQL, 4),
         (PAGE_TEXT_SQL, 5),
         (TITLE_LINK_SQL, 6),
+        (PAGE_NOTES_SQL, 7),
     ];
     for (sql, target_version) in migrations {
         if target_version > version {
@@ -110,7 +112,7 @@ mod tests {
         assert!(columns(&connection, "documents").contains(&"last_page".to_string()));
         assert!(columns(&connection, "cards").contains(&"excerpt_image".to_string()));
         assert!(columns(&connection, "cards").contains(&"link_aliases".to_string()));
-        for table in ["card_tags", "card_links", "page_inks", "page_ocr"] {
+        for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr"] {
             let count: i64 = connection
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -182,6 +184,43 @@ mod tests {
             .query_row("SELECT link_aliases FROM cards WHERE id = 'legacy-card'", [], |row| row.get(0))
             .unwrap();
         assert_eq!(aliases, "", "旧卡片升级后别名为空字符串");
+        quick_check(&connection).unwrap();
+    }
+
+    #[test]
+    fn upgrades_v6_database_with_page_notes() {
+        let connection = Connection::open_in_memory().unwrap();
+        for sql in [
+            INIT_SQL,
+            DOCUMENT_PROGRESS_SQL,
+            COLLABORATION_SQL,
+            EXCERPT_IMAGE_SQL,
+            PAGE_TEXT_SQL,
+            TITLE_LINK_SQL,
+        ] {
+            connection.execute_batch(sql).unwrap();
+        }
+        connection.execute("PRAGMA user_version = 6", []).unwrap();
+        connection
+            .execute(
+                "INSERT INTO documents (id, title, stored_path, content_hash, created_at, updated_at)
+                 VALUES ('doc1', '旧文档', 'pdfs/a.pdf', 'hash', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .unwrap();
+        migrate(&connection).unwrap();
+
+        let version: u32 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 7);
+        connection
+            .execute(
+                "INSERT INTO page_notes (id, document_id, page, anchor_y, content, collapsed, color, created_at, updated_at)
+                 VALUES ('n1', 'doc1', 1, 0.2, '页边草稿', 0, 'amber', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .unwrap();
         quick_check(&connection).unwrap();
     }
 

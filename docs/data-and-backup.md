@@ -87,6 +87,13 @@ PDFNote-backup-YYYYMMDD-HHMMSS.zip
 - 翻页停止 700ms 后写入，关闭文档时再补一次；不更新 `updated_at`，避免资料库排序与备份新鲜度被翻页触发。
 - 备份导入时按清单 `schema_version` 选择列：schema v1 旧包没有 `last_page`，导入后为 1；schema v2 包会一并恢复。
 
+## 留白（schema v7）
+
+- `page_notes(id, document_id, page, anchor_y, content, collapsed, color, created_at, updated_at)`。
+- `document_id` 外键级联删除：删文档会一并删掉页边草稿。
+- 整库备份/恢复包含该表；合并导入按 `content_hash` 重指向本地文档，找不到文档的条目跳过。
+- 旧备份（schema < 7）没有该表，导入时自动忽略。
+
 ## 标题链接别名（schema v6）
 
 - `cards.link_aliases`：分号分隔的关键词别名，默认空字符串。

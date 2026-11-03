@@ -13,6 +13,9 @@ import type {
   MindmapLayoutInput,
   NormalizedBBox,
   PageInk,
+  PageNote,
+  CreatePageNoteInput,
+  UpdatePageNoteInput,
   ReviewInput,
   ReviewStats,
   UpdateCardContentInput,
@@ -236,4 +239,20 @@ export async function autoBackup(): Promise<string> {
 export async function appendCrashLog(payload: string): Promise<void> {
   if (!isTauriRuntime()) return
   await invoke('append_crash_log', { payload }).catch(() => undefined)
+}
+
+export async function listPageNotes(documentId: string): Promise<PageNote[]> {
+  return invoke('list_page_notes', { documentId })
+}
+
+export async function createPageNote(input: CreatePageNoteInput): Promise<PageNote> {
+  return invoke('create_page_note', { input })
+}
+
+export async function updatePageNote(input: UpdatePageNoteInput): Promise<PageNote> {
+  return invoke('update_page_note', { input })
+}
+
+export async function deletePageNote(id: string): Promise<void> {
+  return invoke('delete_page_note', { id })
 }

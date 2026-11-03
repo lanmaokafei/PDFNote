@@ -5,6 +5,7 @@ mod commands;
 mod db;
 mod documents;
 mod models;
+mod notes;
 mod ocr;
 mod page_text;
 mod review;
@@ -26,6 +27,10 @@ pub fn run() {
             commands::test_ai_connection,
             commands::recognize_selection,
             commands::fetch_task_result,
+            commands::list_page_notes,
+            commands::create_page_note,
+            commands::update_page_note,
+            commands::delete_page_note,
             commands::get_page_ocr,
             commands::save_page_ocr,
             commands::get_bootstrap_status,

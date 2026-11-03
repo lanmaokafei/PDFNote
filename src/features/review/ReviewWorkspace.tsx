@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Eye, Pencil, RefreshCw } from 'lucide-react'
 import type { Card, Rating, ReviewStats } from '../../domain/card'
 import { ContextMenu } from '../../ui/ContextMenu'
+import { MathText } from '../../ui/MathText'
 import { useContextMenu } from '../../ui/contextMenuCore'
 import { getReviewStats, listDueCards, updateCardContent } from '../../services/pdfnote'
 import { useCardStore } from '../../store/cardStore'
@@ -367,11 +368,19 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
                             loading="lazy"
                           />
                         )}
-                        <p>{current.excerpt.trim() || '未填写原文摘录'}</p>
+                        <p>
+                          {current.excerpt.trim()
+                            ? <MathText text={current.excerpt.trim()} />
+                            : '未填写原文摘录'}
+                        </p>
                       </section>
                       <section>
                         <span className="review-face-label">个人笔记</span>
-                        <p>{current.user_note.trim() || '未填写个人笔记'}</p>
+                        <p>
+                          {current.user_note.trim()
+                            ? <MathText text={current.user_note.trim()} />
+                            : '未填写个人笔记'}
+                        </p>
                       </section>
                     </div>
                   )}

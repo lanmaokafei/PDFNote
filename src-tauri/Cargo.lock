@@ -2343,7 +2343,7 @@ dependencies = [
 
 [[package]]
 name = "pdfnote"
-version = "0.12.7"
+version = "0.13.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",

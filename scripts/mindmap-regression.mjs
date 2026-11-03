@@ -49,7 +49,13 @@ const cards = Array.from({ length: CARD_COUNT }, (_, index) => ({
   ...baseCard,
   id: `c${index + 1}`,
   question: `概念卡片 ${index + 1}：心肌梗死与再灌注策略`,
-  excerpt: index % 3 === 0 ? '典型胸痛 + ST 段改变 + 心肌酶升高，需要尽快再灌注。' : '',
+  excerpt: index === 0
+    ? 'H = -\\sum_{i=1}^{n} P(x_i) \\log_2 P(x_i)'
+    : index === 1
+      ? '熵的定义是 $H = -\\sum p \\log p$，单位 bit。'
+      : index % 3 === 0
+        ? '典型胸痛 + ST 段改变 + 心肌酶升高，需要尽快再灌注。'
+        : '',
   excerpt_image: index % 4 === 0 ? THUMB : null,
   parent_id: index === 0 ? null : `c${Math.max(1, Math.floor(index / 3) + 1)}`,
   sort_order: index,
@@ -191,6 +197,63 @@ for (const width of [1200, 1000, 1400, 900, 1300]) {
 }
 
 const STEP = process.env.STEP ?? 'all'
+
+if (STEP === 'math') {
+  await page.waitForTimeout(1200)
+  const katexCount = await page.locator('.mindmap-node .katex').count()
+  const displayCount = await page.locator('.mindmap-node .katex-display').count()
+  if (katexCount < 1) problems.push('脑图卡片没有渲染 LaTeX')
+  if (displayCount < 1) problems.push('块级公式没有按 display 模式渲染')
+  const formulaText = await page.locator('.mindmap-node .katex').first().innerText().catch(() => '')
+  if (!formulaText.includes('H')) problems.push(`公式内容异常：${formulaText.slice(0, 40)}`)
+
+  // 字体是否真正加载（打包后 woff2 走 assets，缺字体会显示成方框）
+  const fontLoaded = await page.evaluate(() => document.fonts.check('16px KaTeX_Main'))
+  if (!fontLoaded) problems.push('KaTeX 字体未加载')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, katexCount, displayCount, fontLoaded }, null, 2))
+  if (problems.length) process.exitCode = 1
+  process.exit(0)
+}
+
+if (STEP === 'pan') {
+  await page.waitForTimeout(1200)
+  const viewport = page.locator('.react-flow__viewport')
+  const before = await viewport.getAttribute('style')
+  const pane = await page.locator('.react-flow__pane').boundingBox()
+  if (!pane) {
+    problems.push('画布不可见')
+  } else {
+    // 左键从空白处拖动：应立即平移画布（旧版本左键是框选，画布不动）
+    const startX = pane.x + pane.width * 0.62
+    const startY = pane.y + pane.height * 0.72
+    await page.mouse.move(startX, startY)
+    await page.mouse.down()
+    for (let step = 1; step <= 8; step += 1) {
+      await page.mouse.move(startX - step * 9, startY - step * 5, { steps: 2 })
+    }
+    await page.mouse.up()
+    await page.waitForTimeout(300)
+  }
+  const after = await viewport.getAttribute('style')
+  if (before === after) problems.push(`左键拖拽空白未平移画布：${before}`)
+
+  // 触控板双指滑动（wheel）也应平移
+  const beforeWheel = await viewport.getAttribute('style')
+  if (pane) {
+    await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2)
+    await page.mouse.wheel(0, 160)
+    await page.waitForTimeout(300)
+  }
+  const afterWheel = await viewport.getAttribute('style')
+  if (beforeWheel === afterWheel) problems.push('滚动/双指滑动未平移画布')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, before, after, beforeWheel, afterWheel }, null, 2))
+  if (problems.length) process.exitCode = 1
+  process.exit(0)
+}
 
 if (STEP === 'context') {
   // 右键节点 → 折叠子节点，验证菜单动作真的改变了画布。

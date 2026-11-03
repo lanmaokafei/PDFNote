@@ -11,6 +11,7 @@
 - **PDF 工作区**：PDF.js 连续滚动与页级虚拟化、256KB Range 分块读取、缩放、页码跳转、自动回到上次阅读页、高亮/矩形框选建卡、文字层提取、Apple Vision OCR、标注拖拽、标注删除语义选择、文档遮挡主动回忆。
 - **可选文字层（0.9.0）**：切到「文字」工具后可像 Word 一样在页面上随手拖选文字，选中即复制或直接建卡。页面打开时后台整页识别一次（有 PDF 文字层则用精确字形坐标，扫描页用 Apple Vision 行级 OCR），结果带每行坐标并缓存到 SQLite，之后所有点选/框选零延迟。详见 [Apple Vision OCR](docs/ocr.md)。
 - **元素右键菜单（0.10.0）**：接管 WKWebView 只有 Reload 的原生右键菜单。选中文字可复制/引用/建卡，标注可加标签、链接、合并、删除，墨迹可单条删除，页面空白处可切工具、缩放、翻页、复制本页文字；脑图节点、资料库文档、复习卡片与全局空白区也都有对应操作。详见 [应用内右键菜单](docs/context-menu.md)。
+- **公式渲染（0.13.0）**：卡片摘录里的 LaTeX 会在脑图节点、大纲、复习卡背面直接排版显示；裸 LaTeX（AI 识别的常见输出）也能自动识别，混排文本里的 `$...$` 同样生效。渲染完全本地（离线 KaTeX），原始 LaTeX 始终保留可编辑。详见 [公式渲染](docs/math-rendering.md)。
 - **可选 AI 识别（0.12.0）**：顶栏齿轮里可配置 OpenAI 兼容的视觉模型（本机 Ollama / LM Studio 或自填云端 Key）。配置后，扫描页的**公式选区**自动转成 LaTeX 写入卡片摘录，原图仍保留对照；未配置时应用完全不联网，公式照旧「原图 + 手动补录」。详见 [可选 AI 识别](docs/ai-recognition.md)。
 - **标题链接（0.11.0）**：卡片标题与别名自动注册为关键词，读到任意文档时页面中命中的词会高亮，点击即可回看当年那张卡的摘录、笔记与来源。纯本地 Aho-Corasick 字典匹配，不走 AI、不联网；默认关闭，卡片库积累后开启。详见 [标题链接](docs/title-link.md)。
 - **Apple Vision OCR**：macOS 原生单引擎（`VNRecognizeTextRequest` accurate / revision 3 / 自动语言检测），不打包离线模型；扫描页无文字层时自动识别选区并建卡，公式与图表保留选区原图。详见 [Apple Vision OCR](docs/ocr.md)。
@@ -50,7 +51,7 @@ npm run tauri build
 2026-11-02 本地验证结果：
 
 - Rust：50 项测试通过（含 2 项 Vision 真机集成：`OCR_TEST_IMAGE` 中文识别、`OCR_PAGE_TEST_IMAGE` 行级坐标）；覆盖迁移至 v6、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、旧备份列兼容、页面文字缓存、坏包保护、视觉模型设置/连通性测试、任务号解析与异步结果取回、本地 mock 端到端识别等。
-- 前端：55 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、脑图折叠可见性、标注缓存联动清理、公式特征检测与决策、识别失败摘要与任务号提取、文字层行提取与选区文本、右键菜单定位边界、标题链接字典与匹配）。
+- 前端：64 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、脑图折叠可见性、标注缓存联动清理、公式特征检测与决策、LaTeX 检测与切分、识别失败摘要与任务号提取、文字层行提取与选区文本、右键菜单定位边界、标题链接字典与匹配）。
 - 设置面板冒烟：`node scripts/settings-smoke.mjs`（需 dev server），验证模型配置对话框字段、非桌面环境提示与关闭。
 - 脑图稳定性回归：`CARD_COUNT=120 STEP=all node scripts/mindmap-regression.mjs`（需 dev server），覆盖大纲往返、折叠展开、拖拽落盘、连续 resize 与单选/多选，专治 React #185。
 - 文字层冒烟：`node scripts/textlayer-smoke.mjs`，用无头 Chrome 验证透明 DOM 文字可原生拖选并换算出归一化选区。
@@ -95,8 +96,8 @@ scripts/mindmap-regression.mjs 脑图 React #185 回归（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.12.7_aarch64.dmg
-release/PDFNote_0.12.7_aarch64.dmg.sha256
+release/PDFNote_0.13.0_aarch64.dmg
+release/PDFNote_0.13.0_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
@@ -137,6 +138,8 @@ killall Dock
 ```
 
 ## 重要修复
+
+- 0.13.0 新增**公式渲染**：KaTeX 本地渲染卡片里的 LaTeX（脑图节点、大纲、复习卡背面），裸 LaTeX 与 `$...$` 混排都能识别，原始源码保留可编辑。同时修正脑图画布导航：**左键拖空白即可平移**、触控板双指滑动平移、`⌘`+滚轮或捏合缩放，框选改为按住 `Shift`。
 
 - 0.12.7 修好**任务结果取不回来**：本机网关把识别结果放在 `result_text`，此前解析器只认 `latex`/`content`/`result`，于是明明 `SUCCEEDED` 却轮询到超时。现在 `result_text` 优先解析，并加了“最长非元数据字符串”兜底，网关改字段名也能取到。识别失败的状态栏改为**一句摘要 + 重试按钮 + 默认折叠的「查看详情」**，详情里可复制完整错误与任务号。
 
@@ -183,6 +186,7 @@ killall Dock
 ## 文档
 
 - [应用内右键菜单](docs/context-menu.md)
+- [公式渲染与脑图画布导航](docs/math-rendering.md)
 - [可选 AI 识别](docs/ai-recognition.md)
 - [标题链接](docs/title-link.md)
 - [Apple Vision OCR 与可选文字层](docs/ocr.md)

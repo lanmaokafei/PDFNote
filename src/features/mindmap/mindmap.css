@@ -481,3 +481,34 @@
   background: #eef3e8;
   font-size: 7.5px;
 }
+
+/* 画布操作提示：只做引导，不阻挡拖拽 */
+.mindmap-canvas-hint {
+  padding: 5px 10px;
+  border: 0.5px solid rgba(120, 138, 126, .28);
+  border-radius: 999px;
+  color: #5d6b60;
+  background: rgba(250, 252, 250, .88);
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 卡片内的 LaTeX：块级公式单独占行并可横向滚动，避免撑破节点 */
+.math-text .katex {
+  font-size: 1em;
+}
+.math-text .katex-display {
+  margin: .35em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+.math-text .katex-display > .katex {
+  text-align: left;
+  white-space: nowrap;
+}
+.math-text-plain {
+  white-space: pre-wrap;
+}

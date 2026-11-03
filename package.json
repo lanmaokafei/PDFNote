@@ -1,7 +1,7 @@
 {
   "name": "pdfnote",
   "private": true,
-  "version": "0.12.7",
+  "version": "0.13.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,9 @@
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-dialog": "^2.8.4",
+    "@types/katex": "^0.16.8",
     "@xyflow/react": "^12.12.0",
+    "katex": "^0.19.1",
     "lucide-react": "^1.66.0",
     "pdfjs-dist": "^6.4.299",
     "react": "^19.3.1",

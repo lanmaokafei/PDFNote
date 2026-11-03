@@ -6,6 +6,7 @@ import { useCardStore } from '../../store/cardStore'
 export type MindmapFlowNode = Node<{ card_id: string }, 'mindmapCard'>
 
 import { MindmapNodeContext } from './MindmapContext'
+import { MathText } from '../../ui/MathText'
 
 const ratings: Array<{ value: Rating; label: string }> = [
   { value: 1, label: '重来' },
@@ -78,11 +79,15 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
                 loading="lazy"
               />
             )}
-            <p className={!card.excerpt ? 'is-empty' : ''}>{card.excerpt || '未填写摘录'}</p>
+            <p className={!card.excerpt ? 'is-empty' : ''}>
+              {card.excerpt ? <MathText text={card.excerpt} /> : '未填写摘录'}
+            </p>
           </section>
           <section>
             <span>笔记</span>
-            <p className={!card.user_note ? 'is-empty' : ''}>{card.user_note || '未填写笔记'}</p>
+            <p className={!card.user_note ? 'is-empty' : ''}>
+              {card.user_note ? <MathText text={card.user_note} /> : '未填写笔记'}
+            </p>
           </section>
         </div>
       )}

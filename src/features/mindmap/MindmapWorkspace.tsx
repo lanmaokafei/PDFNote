@@ -5,6 +5,7 @@ import {
   Controls,
   MarkerType,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -50,6 +51,7 @@ import { CardEditor, ConfirmationDialog, type CardDraft, type ConfirmationKind }
 import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
+import { MathText } from '../../ui/MathText'
 import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown } from './outline'
 import {
   TREE_Y_GAP,
@@ -68,7 +70,8 @@ const DEFAULT_NODE_POSITION = { x: 80, y: 80 }
 // 传给 React Flow 的对象/数组必须保持引用稳定：StoreUpdater 会逐字段比较，
 // 每次渲染新建会让它在 effect 里重复写入 store，放大成 #185。
 const FIT_VIEW_OPTIONS = { padding: 0.18, maxZoom: 1 }
-const PAN_ON_DRAG: number[] = [1, 2]
+// 0=左键、1=中键、2=右键。左键拖空白即可平移；框选改为按住 Shift。
+const PAN_ON_DRAG: number[] = [0, 1, 2]
 const MULTI_SELECTION_KEYS = ['Meta', 'Control', 'Shift']
 const COMPACT_VIEWPORT = { x: 30, y: 96, zoom: 0.9 }
 
@@ -930,7 +933,9 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
                       <button type="button" className="mindmap-outline-title" onClick={() => setEditor(card.id)}>
                         {outlineTitle(card)}
                       </button>
-                      {card.excerpt.trim() && <p>{card.excerpt.trim()}</p>}
+                      {card.excerpt.trim() && (
+                        <p><MathText text={card.excerpt.trim()} /></p>
+                      )}
                       {card.tags.length > 0 && (
                         <div className="mindmap-outline-tags">
                           {card.tags.map((tag) => <span key={tag}>#{tag}</span>)}
@@ -967,11 +972,20 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
             nodesDraggable={!busy}
             nodesConnectable={!busy}
             deleteKeyCode={null}
-            selectionOnDrag
+            selectionKeyCode="Shift"
             panOnDrag={PAN_ON_DRAG}
+            panOnScroll
+            zoomOnScroll={false}
+            zoomActivationKeyCode="Meta"
+            zoomOnDoubleClick={false}
             multiSelectionKeyCode={MULTI_SELECTION_KEYS}
           >
             <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#d7ded9" />
+            {!compact && (
+              <Panel position="top-left" className="mindmap-canvas-hint">
+                拖拽空白或双指滑动平移 · ⌘+滚轮 / 捏合缩放 · Shift 拖拽框选
+              </Panel>
+            )}
             <Controls position="bottom-left" showInteractive={false} />
             {!compact && (
               <MiniMap

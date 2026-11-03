@@ -95,15 +95,29 @@ scripts/mindmap-regression.mjs 脑图 React #185 回归（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.12.2_aarch64.dmg
-release/PDFNote_0.12.2_aarch64.dmg.sha256
+release/PDFNote_0.12.3_aarch64.dmg
+release/PDFNote_0.12.3_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
 
 DMG 内已放置 **Applications 快捷方式**：打开镜像后把 PDFNote 拖进「应用程序」即可完成安装（打包时用 staging 目录 + `ln -s /Applications`，再 `hdiutil create -srcfolder`）。
 
+安装后如遇以下情况：
+
+- **启动台（Launchpad）里看不到图标**：Spotlight 能搜到、能打开，但 Launchpad 没刷新。执行 `killall Dock` 重建 Dock/Launchpad 缓存即可；安装新版覆盖旧版后也建议执行一次。
+- **首次打开提示“无法验证开发者”**：这是未做 Apple 公证的正常结果。在「应用程序」里右键 PDFNote → 打开，或到「系统设置 → 隐私与安全性」点“仍要打开”。
+- **已经装了旧版本**（0.12.2 及更早）导致 Launchpad 异常：旧包是链接器自动签名，bundle 资源未封印。用新版覆盖，或手动修复已安装副本：
+
+```bash
+codesign --force --deep --sign - --identifier com.pdfnote.local /Applications/PDFNote.app
+xattr -dr com.apple.quarantine /Applications/PDFNote.app
+killall Dock
+```
+
 ## 重要修复
+
+- 0.12.3 修复**安装后 Launchpad 找不到图标**：此前 Tauri 产物只有链接器自动签名（`Identifier` 与 bundle id 不一致、`Info.plist` 未绑定、资源未封印），LaunchServices 无法正确注册。现在 `bundle.macOS.signingIdentity` 固定为 `-`，每次构建都对整个 bundle 做 ad-hoc 签名并封印资源（`codesign --verify --strict` 通过）。
 
 - 0.12.2 修复**画布右键折叠节点不生效**：可见性算法的兜底循环把被折叠的子节点又加了回来。同时：设置面板新增「测试连接」（验证地址、鉴权与模型名）；公式识别不再只覆盖 OCR 来源，文字层公式也会走视觉模型，并带秒级进度与 120 秒超时提示。
 

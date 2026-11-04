@@ -128,7 +128,7 @@ STEP=outline-back CARD_COUNT=12 node scripts/mindmap-regression.mjs
 `card-actions` 覆盖页码标签渲染 → 点击派发跳页事件 → AI 解析调用模型并写回笔记；
 `outline-back` 覆盖大纲切回画布后画布实例不被卸载、节点仍在可视区域（独立与嵌入两种模式）。
 
-Rust 侧另有 11 项测试：JSON 容错解析、页码越界丢弃、骨架写入卡片与布局（含重复应用去重、
+Rust 侧另有 10 项测试：JSON 容错解析、页码越界丢弃、骨架写入卡片与布局（含重复应用去重、
 不生成 annotation）、分组节点继承子节点页码、按读者层数截断、depth 合法性与节点预算、
 4 层提示词与嵌套示例、阶段一深层提示词、旧 `outline_json` 兼容、4 层父子链与布局落库。
 前端 `depth.test.ts` 另覆盖取值收敛、持久化与层数/节点数统计。

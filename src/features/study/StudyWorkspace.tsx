@@ -7,6 +7,8 @@ import './StudyWorkspace.css'
 interface StudyWorkspaceProps {
   document: Document
   showMindmap: boolean
+  jumpTarget?: { documentId: string; page: number; token: number } | null
+  onJumpHandled?: () => void
   onPageCount: (count: number) => void
   onCardsChanged: () => void
 }
@@ -18,6 +20,8 @@ const MAX_RATIO = 74
 export function StudyWorkspace({
   document,
   showMindmap,
+  jumpTarget,
+  onJumpHandled,
   onPageCount,
   onCardsChanged,
 }: StudyWorkspaceProps) {
@@ -54,6 +58,8 @@ export function StudyWorkspace({
         <PdfWorkspace
           document={document}
           embedded
+          jumpTarget={jumpTarget}
+          onJumpHandled={onJumpHandled}
           onPageCount={onPageCount}
           onCardsChanged={onCardsChanged}
         />

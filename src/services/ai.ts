@@ -66,3 +66,9 @@ export async function fetchTaskResult(taskNo: string): Promise<string> {
   desktopOnly()
   return invoke('fetch_task_result', { taskNo })
 }
+
+/** 让模型解析卡片问题，返回纯文本解释（调用方负责写回笔记）。 */
+export async function explainCardQuestion(cardId: string): Promise<string> {
+  desktopOnly()
+  return invoke('explain_card', { cardId })
+}

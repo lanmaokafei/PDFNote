@@ -32,6 +32,7 @@ pub fn run() {
             commands::create_page_note,
             commands::update_page_note,
             commands::delete_page_note,
+            commands::explain_card,
             commands::analyze_book_chunk,
             commands::list_book_notes,
             commands::synthesize_book,

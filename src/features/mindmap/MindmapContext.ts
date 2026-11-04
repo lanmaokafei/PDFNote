@@ -17,6 +17,10 @@ export interface MindmapNodeContextValue {
   onRate: (id: string, rating: Rating) => void
   onRemove: (id: string) => void
   onDelete: (id: string) => void
+  /** 点击页码标签：切到文档并跳到对应页。 */
+  onOpenSource: (id: string) => void
+  /** 用模型解析卡片问题，写回笔记。 */
+  onExplain: (id: string) => void
 }
 
 export const MindmapNodeContext = createContext<MindmapNodeContextValue | null>(null)

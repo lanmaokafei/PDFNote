@@ -119,6 +119,9 @@
 .mindmap-node-header { display: flex; align-items: center; gap: 8px; padding: 10px 11px 8px; }
 .mindmap-node-index { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 4px; color: #f2f5ed; background: #4a614d; font-family: Georgia, serif; font-size: 10px; }
 .mindmap-node-header h3 { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: #344237; font-size: 10px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+/* 来源页码：点击后左侧 PDF 跳到对应页 */
+.mindmap-node-page { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #d5e0cb; border-radius: 4px; color: #54734f; background: #eff5e9; font-size: 8px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; cursor: pointer; }
+.mindmap-node-page:hover { border-color: #b3c9a6; background: #e2eed8; }
 .mindmap-collapse { display: inline-flex; align-items: center; gap: 2px; padding: 3px 5px; border: 1px solid #e1e6db; border-radius: 4px; color: #7c8875; background: #f5f7f0; font-size: 8px; cursor: pointer; }
 .mindmap-collapse span { font-size: 10px; line-height: 1; }
 .mindmap-node-content { padding: 0 11px 8px; }
@@ -144,6 +147,8 @@
 .mindmap-node-actions button { padding: 4px 6px; border: 0; border-radius: 3px; color: #828c7c; background: transparent; font-size: 7px; cursor: pointer; }
 .mindmap-node-actions button:hover { color: #4d5f48; background: #eef2e8; }
 .mindmap-node-actions .mindmap-delete-action:hover { color: #985447; background: #f8eae5; }
+.mindmap-node-actions .mindmap-explain-action { color: #4d6a52; font-weight: 600; }
+.mindmap-node-actions .mindmap-explain-action:hover { color: #31583a; background: #e6f0df; }
 .mindmap-handle { width: 7px !important; height: 7px !important; border: 1px solid #84987b !important; background: #f7faf3 !important; }
 
 .mindmap-editor {
@@ -313,7 +318,12 @@
   box-shadow: 0 1px 3px rgba(30, 40, 30, .12);
 }
 
+/* 画布常驻：大纲只是覆盖层，不卸载 React Flow，切回时 viewport 与测量都保留 */
+.mindmap-flow-host { position: absolute; inset: 0; }
+.mindmap-flow-host.is-hidden { visibility: hidden; pointer-events: none; }
+
 .mindmap-outline {
+  z-index: 5;
   position: absolute;
   inset: 0;
   display: flex;

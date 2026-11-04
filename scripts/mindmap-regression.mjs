@@ -57,6 +57,9 @@ const cards = Array.from({ length: CARD_COUNT }, (_, index) => ({
         ? '典型胸痛 + ST 段改变 + 心肌酶升高，需要尽快再灌注。'
         : '',
   excerpt_image: index % 4 === 0 ? THUMB : null,
+  source_ref: index === 0
+    ? { document_id: 'doc1', page: 1, bbox: { x: 0.1, y: 0.1, width: 0.3, height: 0.1 } }
+    : null,
   parent_id: index === 0 ? null : `c${Math.max(1, Math.floor(index / 3) + 1)}`,
   sort_order: index,
 }))
@@ -189,6 +192,17 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
     list_card_links: () => [],
     list_tags: () => [],
     get_ai_settings: () => ({ baseUrl: '', model: '', apiKey: '' }),
+    explain_card: () => '是什么：信息熵度量不确定性。\n为什么：概率分布越均匀熵越大。\n怎么用：计算编码长度下界。\n易错点：单位取决于对数底。',
+    update_card_content: (args) => {
+      const input = args?.input ?? args ?? {}
+      const card = cardState.find((item) => item.id === input.id)
+      if (card) {
+        if (input.question !== undefined) card.question = input.question
+        if (input.excerpt !== undefined) card.excerpt = input.excerpt
+        if (input.user_note !== undefined) card.user_note = input.user_note
+      }
+      return card ?? null
+    },
     auto_backup: () => null,
     get_page_ocr: () => null,
     ocr_page_lines: () => [],
@@ -314,8 +328,7 @@ if (STEP === 'math') {
   }
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, katexCount, displayCount, fontLoaded, clipping, formulaNodeImages, totalImages }, null, 2))
-  if (problems.length) process.exitCode = 1
-  process.exit(0)
+  process.exit(problems.length ? 1 : 0)
 }
 
 if (STEP === 'pan') {
@@ -352,8 +365,109 @@ if (STEP === 'pan') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, before, after, beforeWheel, afterWheel }, null, 2))
-  if (problems.length) process.exitCode = 1
-  process.exit(0)
+  process.exit(problems.length ? 1 : 0)
+}
+
+if (STEP === 'card-actions') {
+  await page.waitForTimeout(1500)
+  await page.evaluate(() => {
+    window.__sourceEvents = []
+    window.addEventListener('pdfnote:open-source', (event) => {
+      window.__sourceEvents.push(event.detail)
+    })
+  })
+
+  const pageTag = page.locator('.mindmap-node-page').first()
+  if (!(await pageTag.count())) {
+    problems.push('带来源的卡片缺少页码标签')
+  } else {
+    const label = await pageTag.innerText()
+    if (!label.includes('P1')) problems.push(`页码标签内容异常：${label}`)
+    await pageTag.click()
+    await page.waitForTimeout(500)
+  }
+  const events = await page.evaluate(() => window.__sourceEvents ?? [])
+  if (!events.some((item) => item?.documentId === 'doc1' && item?.page === 1)) {
+    problems.push('点击页码标签没有派发跳页事件')
+  }
+
+  const explain = page.locator('.mindmap-explain-action').first()
+  if (!(await explain.count())) {
+    problems.push('有 Q 的卡片缺少 AI 解析入口')
+  } else {
+    await explain.click()
+    await page.waitForTimeout(1000)
+  }
+  const calls = await page.evaluate(() => window.__calls.slice(-20))
+  if (!calls.includes('explain_card')) problems.push('AI 解析未调用模型命令')
+  if (!calls.includes('update_card_content')) problems.push('AI 解析结果未写回卡片')
+  const note = await page.evaluate(() => window.__cardState?.[0]?.user_note ?? '')
+  if (!note.includes('AI 解析')) problems.push('AI 解析结果未写入笔记')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, events, calls: calls.slice(-8), note: note.slice(0, 80) }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+if (STEP === 'outline-back') {
+  await page.waitForTimeout(1200)
+  // 独立脑图视图（非嵌入，fitView 生效）才可能复现；刷新后文档关闭，顶栏「脑图」可直接进入。
+  if (process.env.STANDALONE !== '0') {
+    const topButtons = page.locator('.app-top button')
+    const topCount = await topButtons.count()
+    if (topCount >= 4) {
+      await topButtons.nth(0).click()   // 资料库：关闭当前文档
+      await page.waitForTimeout(800)
+      await topButtons.nth(3).click()   // 脑图：进入独立视图
+      await page.waitForTimeout(1600)
+    } else {
+      problems.push(`顶栏按钮数量异常：${topCount}`)
+    }
+  }
+  const workspaceCount = await page.locator('.mindmap-workspace').count()
+  const standalone = await page.locator('.mindmap-workspace.is-embedded').count() === 0
+  if (!workspaceCount) {
+    const bodyText = (await page.locator('body').innerText()).slice(0, 300)
+    problems.push(`没有进入脑图视图：${bodyText}`)
+  }
+  const nodesBefore = await page.locator('.mindmap-node').count()
+  // 给画布 DOM 打标记：若大纲切换把 React Flow 卸载重建，标记会消失。
+  await page.evaluate(() => {
+    const flow = document.querySelector('.react-flow')
+    if (flow) flow.dataset.persistenceProbe = 'kept'
+  })
+  await page.getByRole('button', { name: /大纲/ }).first().click()
+  await page.waitForTimeout(600)
+  const flowInOutline = await page.locator('.react-flow[data-persistence-probe="kept"]').count()
+  if (!flowInOutline) problems.push('切到大纲时画布被卸载')
+  await page.getByRole('button', { name: /返回画布|画布/ }).first().click()
+  await page.waitForTimeout(1200)
+  const flowAfter = await page.locator('.react-flow[data-persistence-probe="kept"]').count()
+  if (!flowAfter) problems.push('切回画布时 React Flow 被重建')
+  const nodesAfter = await page.locator('.mindmap-node').count()
+  const viewport = await page.locator('.react-flow__viewport').getAttribute('style')
+  const nodeBox = await page.locator('.mindmap-node').first().boundingBox().catch(() => null)
+  const paneBox = await page.locator('.react-flow').first().boundingBox().catch(() => null)
+  const visible = Boolean(
+    nodeBox && paneBox
+    && nodeBox.x < paneBox.x + paneBox.width && nodeBox.x + nodeBox.width > paneBox.x
+    && nodeBox.y < paneBox.y + paneBox.height && nodeBox.y + nodeBox.height > paneBox.y
+  )
+  if (nodesAfter === 0) problems.push('切回画布后节点消失')
+  if (!visible) problems.push('切回画布后节点不在可视区域')
+
+  // 滚轮缩小一次，看看是否仍不可见（判断是 viewport 还是渲染问题）
+  if (paneBox) {
+    await page.mouse.move(paneBox.x + paneBox.width / 2, paneBox.y + paneBox.height / 2)
+    await page.mouse.wheel(0, -200)
+    await page.waitForTimeout(500)
+  }
+  const viewportAfterZoom = await page.locator('.react-flow__viewport').getAttribute('style')
+  const nodeBoxAfterZoom = await page.locator('.mindmap-node').first().boundingBox().catch(() => null)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, standalone, nodesBefore, nodesAfter, viewport, viewportAfterZoom, nodeBox, paneBox, visible, nodeBoxAfterZoom }, null, 2))
+  process.exit(problems.length ? 1 : 0)
 }
 
 if (STEP === 'digest') {
@@ -394,8 +508,7 @@ if (STEP === 'digest') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, noteCount, calls }, null, 2))
-  if (problems.length) process.exitCode = 1
-  process.exit(0)
+  process.exit(problems.length ? 1 : 0)
 }
 
 if (STEP === 'notes') {
@@ -439,8 +552,7 @@ if (STEP === 'notes') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, noteCount, saved, collapsed, remaining }, null, 2))
-  if (problems.length) process.exitCode = 1
-  process.exit(0)
+  process.exit(problems.length ? 1 : 0)
 }
 
 if (STEP === 'context') {
@@ -470,8 +582,7 @@ if (STEP === 'context') {
   }
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP }, null, 2))
-  if (problems.length) process.exitCode = 1
-  process.exit(0)
+  process.exit(problems.length ? 1 : 0)
 }
 
 if (STEP === 'stale') {
@@ -498,8 +609,7 @@ if (STEP === 'stale') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, before, after }, null, 2))
-  if (problems.length) process.exitCode = 1
-  process.exit(0)
+  process.exit(problems.length ? 1 : 0)
 }
 
 if (STEP === 'cascade') {
@@ -526,8 +636,7 @@ if (STEP === 'cascade') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, before, after }, null, 2))
-  if (problems.length) process.exitCode = 1
-  process.exit(0)
+  process.exit(problems.length ? 1 : 0)
 }
 
 // 折叠/展开：节点尺寸大幅变化，最容易触发测量回写循环。

@@ -46,6 +46,20 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
       <header className="mindmap-node-header">
         <span className="mindmap-node-index" aria-hidden="true">Q</span>
         <h3 title={cardTitle(card)}>{cardTitle(card)}</h3>
+        {card.source_ref && (
+          <button
+            type="button"
+            className="mindmap-node-page nodrag"
+            title={`跳到第 ${card.source_ref.page} 页`}
+            aria-label={`跳到第 ${card.source_ref.page} 页`}
+            onClick={(event) => {
+              event.stopPropagation()
+              context.onOpenSource(card.id)
+            }}
+          >
+            P{card.source_ref.page}
+          </button>
+        )}
         {childCount > 0 && (
           <button
             className="mindmap-collapse nodrag"
@@ -120,6 +134,15 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
       )}
 
       <footer className="mindmap-node-actions">
+        {card.question.trim() && (
+          <button
+            className="nodrag mindmap-explain-action"
+            type="button"
+            disabled={context.busy}
+            title="让 AI 解析这个问题，结果写入卡片笔记"
+            onClick={() => context.onExplain(card.id)}
+          >AI 解析</button>
+        )}
         <button className="nodrag" type="button" disabled={context.busy} onClick={() => context.onEdit(card.id)}>编辑</button>
         <button className="nodrag" type="button" disabled={context.busy} onClick={() => context.onRemove(card.id)}>从脑图移除</button>
         <button className="mindmap-delete-action nodrag" type="button" disabled={context.busy} onClick={() => context.onDelete(card.id)}>彻底删除</button>

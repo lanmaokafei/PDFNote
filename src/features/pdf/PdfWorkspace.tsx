@@ -101,6 +101,9 @@ export interface PdfWorkspaceProps {
   onCardsChanged: () => void
   /** 嵌入分栏工作区：隐藏独立页头与标注检查器，改用底部悬浮工具坞。 */
   embedded?: boolean
+  /** 外部请求跳到某页（脑图卡片点击页码）。token 保证同一页再次点击也能触发。 */
+  jumpTarget?: { documentId: string; page: number; token: number } | null
+  onJumpHandled?: () => void
 }
 
 function errorMessage(reason: unknown): string {
@@ -115,7 +118,14 @@ function updateSet(previous: Set<number>, page: number, included: boolean): Set<
   return next
 }
 
-export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded = false }: PdfWorkspaceProps) {
+export function PdfWorkspace({
+  document,
+  onPageCount,
+  onCardsChanged,
+  jumpTarget,
+  onJumpHandled,
+  embedded = false,
+}: PdfWorkspaceProps) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [pageCount, setPageCount] = useState(document.page_count)
   const [loading, setLoading] = useState(true)
@@ -717,6 +727,31 @@ export function PdfWorkspace({ document, onPageCount, onCardsChanged, embedded =
     setPageInput(String(target))
     root.scrollTo({ top: Math.max(0, element.offsetTop - 20), behavior: 'smooth' })
   }
+
+  // 脑图卡片点击页码：文档加载完成、页面占位元素注册后跳到目标页。
+  // 与「恢复阅读进度」一致，用短时多次重试等待元素与尺寸稳定；直接调 goToPage
+  // 会因为元素尚未注册而静默失败（尤其是刚切到另一份文档时）。
+  useEffect(() => {
+    if (loading || !pdf || !jumpTarget || jumpTarget.documentId !== document.id) return
+    const target = Math.min(Math.max(Math.round(jumpTarget.page), 1), pageCount || 1)
+    const jump = () => {
+      const element = pageElementsRef.current.get(target)
+      const root = scrollRef.current
+      if (!element || !root) return
+      setOperationError('')
+      userNavigatedRef.current = true
+      setCurrentPage(target)
+      setPageInput(String(target))
+      root.scrollTo({ top: Math.max(0, element.offsetTop - 20), behavior: 'smooth' })
+    }
+    const timers = [60, 400, 1_200].map((delay) => window.setTimeout(jump, delay))
+    // 等重试跑完再清空请求，避免 cleanup 把定时器取消掉。
+    const done = window.setTimeout(() => onJumpHandled?.(), 1_600)
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer))
+      window.clearTimeout(done)
+    }
+  }, [document.id, jumpTarget, loading, onJumpHandled, pageCount, pdf])
 
   const jumpToPage = () => {
     const page = Number(pageInput)

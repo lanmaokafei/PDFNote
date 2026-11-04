@@ -16,9 +16,11 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { save as saveDialog } from '@tauri-apps/plugin-dialog'
+import { explainCardQuestion } from '../../services/ai'
 import {
   ChevronRight,
   Copy,
+  Sparkles,
   Download,
   Focus,
   LayoutGrid,
@@ -28,7 +30,6 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  Sparkles,
   Tag,
   Trash2,
 } from 'lucide-react'
@@ -100,7 +101,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   const createCardInStore = useCardStore((state) => state.createCard)
   const removeFromMindmap = useCardStore((state) => state.removeFromMindmap)
   const deleteCard = useCardStore((state) => state.deleteCard)
-  const { getIntersectingNodes } = useReactFlow<MindmapFlowNode, Edge>()
+  const { getIntersectingNodes, fitView: fitViewInstance } = useReactFlow<MindmapFlowNode, Edge>()
 
   const [positions, setPositions] = useState<Record<string, Point>>({})
   const [measuredSizes, setMeasuredSizes] = useState<Record<string, { width: number; height: number }>>({})
@@ -156,6 +157,62 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     [cards, collapsedIds, recallActive, recallSort],
   )
   const visibleIds = useMemo(() => new Set(orderedVisibleCards.map((card) => card.id)), [orderedVisibleCards])
+  /** 点击页码标签：切到该文档并跳到对应页。 */
+  const openSource = useCallback((cardId: string) => {
+    const card = cardsById[cardId]
+    const source = card?.source_ref
+    if (!source) return
+    window.dispatchEvent(new CustomEvent('pdfnote:open-source', {
+      detail: { documentId: source.document_id, page: source.page },
+    }))
+  }, [cardsById])
+
+  /** 让模型解析卡片问题，结果追加到笔记。 */
+  const explainCard = useCallback(async (cardId: string) => {
+    const card = cardsById[cardId]
+    if (!card || busy) return
+    if (!card.question.trim()) {
+      setError('这张卡片没有填写问题，先补一个 Q 再让 AI 解析。')
+      return
+    }
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const explanation = (await explainCardQuestion(cardId)).trim()
+      const merged = [card.user_note.trim(), `【AI 解析】\n${explanation}`]
+        .filter(Boolean)
+        .join('\n\n')
+      await updateCardContent({
+        id: cardId,
+        question: card.question,
+        excerpt: card.excerpt,
+        user_note: merged,
+      })
+      await loadCards()
+      setNotice('AI 解析已写入卡片笔记。')
+      onCardsChanged?.()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, cardsById, loadCards, onCardsChanged])
+
+  // 画布常驻（大纲只是覆盖层），切换视图不会卸载 React Flow，因此 viewport、节点测量
+  // 与交互状态都保留，切回画布不会出现空白。仅在独立视图切回时延迟重新适配一次，
+  // 兜住用户在大纲期间调整窗口尺寸的情况；嵌入视图保留固定的 defaultViewport。
+  const previousViewModeRef = useRef(viewMode)
+  useEffect(() => {
+    const previous = previousViewModeRef.current
+    previousViewModeRef.current = viewMode
+    if (viewMode !== 'canvas' || previous !== 'outline' || compact) return
+    const timer = window.setTimeout(() => {
+      fitViewInstance({ ...FIT_VIEW_OPTIONS, duration: 0 })
+    }, 180)
+    return () => window.clearTimeout(timer)
+  }, [compact, fitViewInstance, viewMode])
+
   const outlineForest = useMemo(() => buildOutlineForest(cards), [cards])
   const outlineCollapsedIds = useMemo(
     () => new Set(cards.filter((card) => card.collapsed).map((card) => card.id)),
@@ -703,6 +760,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
         { id: 'edit', label: '编辑卡片', icon: Pencil, disabled: busy, onSelect: () => setEditor(cardId) },
         { id: 'copy', label: '复制卡片标题', icon: Copy, onSelect: () => copyToClipboard(title) },
         { id: 'toggle', label: options.toggleLabel, icon: ChevronRight, disabled: !options.canToggle || busy, onSelect: options.onToggle },
+        { id: 'explain', label: 'AI 解析这个问题', icon: Sparkles, disabled: busy || !cardsById[cardId]?.question.trim(), onSelect: () => void explainCard(cardId) },
       ] },
       { id: 'relations', title: '卡片关系', items: [
         { id: 'tags', label: '编辑标签…', icon: Tag, onSelect: () => setTagTarget(cardId) },
@@ -807,6 +865,8 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       onRate: (id, rating) => void rateCard(id, rating),
       onRemove: (id) => setConfirmation({ kind: 'remove', id }),
       onDelete: (id) => setConfirmation({ kind: 'delete', id }),
+      onOpenSource: openSource,
+      onExplain: (id) => void explainCard(id),
     }}>
     <section className={`mindmap-workspace${compact ? ' is-embedded' : ''}`} aria-label="知识脑图工作区">
       {!compact && (
@@ -892,70 +952,16 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       {notice && <div className="mindmap-notice" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice('')}>关闭</button></div>}
 
       <div className="mindmap-canvas">
-        {viewMode === 'outline' && hasLoaded ? (
-          <div className="mindmap-outline" onContextMenu={handleOutlinePaneContextMenu}>
-            <div className="mindmap-outline-head">
-              <div>
-                <strong>大纲视图</strong>
-                <span>{cards.length} 张卡片 · 点击标题可编辑，折叠状态与脑图同步</span>
-              </div>
-              <div className="mindmap-outline-actions">
-                {compact && (
-                  <button type="button" onClick={() => setViewMode('canvas')}>返回画布</button>
-                )}
-                <button type="button" className="is-primary" onClick={() => void handleExportMarkdown()} disabled={exporting || !cards.length}>
-                  {exporting ? '导出中…' : '导出 Markdown'}
-                </button>
-              </div>
-            </div>
-            <div className="mindmap-outline-list">
-              {outlineRows.map(({ card, depth }) => {
-                const hasChildren = parentCardIds.has(card.id)
-                const collapsed = outlineCollapsedIds.has(card.id)
-                return (
-                  <div
-                    className="mindmap-outline-row"
-                    key={card.id}
-                    style={{ paddingLeft: `${12 + depth * 22}px` }}
-                    onContextMenu={(event) => handleOutlineContextMenu(event, card)}
-                  >
-                    <button
-                      type="button"
-                      className="mindmap-outline-toggle"
-                      onClick={() => toggleOutlineCollapse(card.id)}
-                      disabled={!hasChildren || busy}
-                      aria-label={hasChildren ? (collapsed ? '展开子节点' : '折叠子节点') : '没有子节点'}
-                    >
-                      {hasChildren ? (collapsed ? '▸' : '▾') : '·'}
-                    </button>
-                    <span className="mindmap-outline-badge" aria-hidden="true">Q</span>
-                    <div className="mindmap-outline-body">
-                      <button type="button" className="mindmap-outline-title" onClick={() => setEditor(card.id)}>
-                        {outlineTitle(card)}
-                      </button>
-                      {card.excerpt.trim() && (
-                        <p><MathText text={card.excerpt.trim()} /></p>
-                      )}
-                      {card.tags.length > 0 && (
-                        <div className="mindmap-outline-tags">
-                          {card.tags.map((tag) => <span key={tag}>#{tag}</span>)}
-                        </div>
-                      )}
-                    </div>
-                    <span className="mindmap-outline-level">L{depth + 1}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        ) : loading && !hasLoaded ? (
+        {loading && !hasLoaded ? (
           <div className="mindmap-state"><span className="mindmap-spinner" /><h2>正在读取脑图</h2><p>加载最新卡片与已保存的布局…</p></div>
         ) : !hasLoaded ? (
           <div className="mindmap-state"><span className="mindmap-state-mark">!</span><h2>暂时无法打开脑图</h2><p>{error}</p><button type="button" className="mindmap-button primary" onClick={() => void refresh()}>重试</button></div>
         ) : cards.length === 0 ? (
           <div className="mindmap-state"><span className="mindmap-state-mark">◇</span><h2>从第一张知识卡片开始</h2><p>创建一张不依赖 PDF 的独立卡片，之后可连线或拖拽建立层级。</p><button type="button" className="mindmap-button primary" onClick={() => setEditor('new')}>新建独立卡片</button></div>
         ) : (
-          <ReactFlow<MindmapFlowNode, Edge>
+          <>
+            <div className={`mindmap-flow-host${viewMode === 'outline' ? ' is-hidden' : ''}`}>
+              <ReactFlow<MindmapFlowNode, Edge>
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
@@ -997,7 +1003,66 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
                 maskColor="rgba(244, 247, 244, .78)"
               />
             )}
-          </ReactFlow>
+              </ReactFlow>
+            </div>
+            {viewMode === 'outline' && (
+            <div className="mindmap-outline" onContextMenu={handleOutlinePaneContextMenu}>
+              <div className="mindmap-outline-head">
+                <div>
+                  <strong>大纲视图</strong>
+                  <span>{cards.length} 张卡片 · 点击标题可编辑，折叠状态与脑图同步</span>
+                </div>
+                <div className="mindmap-outline-actions">
+                  {compact && (
+                    <button type="button" onClick={() => setViewMode('canvas')}>返回画布</button>
+                  )}
+                  <button type="button" className="is-primary" onClick={() => void handleExportMarkdown()} disabled={exporting || !cards.length}>
+                    {exporting ? '导出中…' : '导出 Markdown'}
+                  </button>
+                </div>
+              </div>
+              <div className="mindmap-outline-list">
+                {outlineRows.map(({ card, depth }) => {
+                  const hasChildren = parentCardIds.has(card.id)
+                  const collapsed = outlineCollapsedIds.has(card.id)
+                  return (
+                    <div
+                      className="mindmap-outline-row"
+                      key={card.id}
+                      style={{ paddingLeft: `${12 + depth * 22}px` }}
+                      onContextMenu={(event) => handleOutlineContextMenu(event, card)}
+                    >
+                      <button
+                        type="button"
+                        className="mindmap-outline-toggle"
+                        onClick={() => toggleOutlineCollapse(card.id)}
+                        disabled={!hasChildren || busy}
+                        aria-label={hasChildren ? (collapsed ? '展开子节点' : '折叠子节点') : '没有子节点'}
+                      >
+                        {hasChildren ? (collapsed ? '▸' : '▾') : '·'}
+                      </button>
+                      <span className="mindmap-outline-badge" aria-hidden="true">Q</span>
+                      <div className="mindmap-outline-body">
+                        <button type="button" className="mindmap-outline-title" onClick={() => setEditor(card.id)}>
+                          {outlineTitle(card)}
+                        </button>
+                        {card.excerpt.trim() && (
+                          <p><MathText text={card.excerpt.trim()} /></p>
+                        )}
+                        {card.tags.length > 0 && (
+                          <div className="mindmap-outline-tags">
+                            {card.tags.map((tag) => <span key={tag}>#{tag}</span>)}
+                          </div>
+                        )}
+                      </div>
+                      <span className="mindmap-outline-level">L{depth + 1}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            )}
+          </>
         )}
 
         {editor && (

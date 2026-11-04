@@ -491,10 +491,10 @@ pub fn load_outline(state: &AppState, document_id: String, mode: String) -> Resu
     serde_json::from_str(&raw).map_err(|error| format!("骨架数据损坏: {error}"))
 }
 
-fn node_bbox(node: &OutlineNode) -> Option<[f64; 4]> {
-    node.page?;
-    // 不建标注，bbox 只用于卡片来源定位；给一个页内安全区即可。
-    Some([0.06, 0.06, 0.88, 0.88])
+/// 骨架里的分组节点常常没有 page（按 CEFR 等级、按主题分组），
+/// 从子树里借一个页码，保证每张拆书卡片都带来源、都能点击跳回原文。
+fn effective_page(node: &OutlineNode) -> Option<u32> {
+    node.page.or_else(|| node.children.iter().find_map(effective_page))
 }
 
 /// 阶段二之后：把骨架写成卡片与脑图节点（同一事务）。
@@ -564,7 +564,9 @@ fn place_node(
     }
 
     let id = Uuid::new_v4().to_string();
-    let bbox = node_bbox(node);
+    // 分组节点没有页码时继承子树页码；不建标注，bbox 只用于来源定位。
+    let source_page = effective_page(node);
+    let bbox = source_page.map(|_| [0.06_f64, 0.06, 0.88, 0.88]);
     connection
         .execute(
             "INSERT INTO cards (
@@ -575,8 +577,8 @@ fn place_node(
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '', ?9, ?10, 0, 0, ?11, 'new', ?11, ?11, 0, 1, 1, ?12)",
             params![
                 id,
-                if bbox.is_some() { Some(document_id) } else { None },
-                node.page,
+                source_page.map(|_| document_id),
+                source_page,
                 bbox.map(|value| value[0]),
                 bbox.map(|value| value[1]),
                 bbox.map(|value| value[2]),
@@ -746,6 +748,53 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM annotations", [], |row| row.get(0))
             .unwrap();
         assert_eq!(annotations, 0, "拆书节点不应在 PDF 上生成整页高亮");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn grouped_node_inherits_child_page_as_source() {
+        let (directory, state) = test_state();
+        {
+            let connection = state.db().unwrap();
+            seed(&connection);
+            let outline = BookOutline {
+                title: "词汇表".into(),
+                mode: "vocabulary".into(),
+                nodes: vec![OutlineNode {
+                    title: "B2".into(),
+                    excerpt: String::new(),
+                    page: None,
+                    aliases: String::new(),
+                    children: vec![OutlineNode {
+                        title: "entropy".into(),
+                        excerpt: "Entropy measures uncertainty.".into(),
+                        page: Some(7),
+                        aliases: "熵".into(),
+                        children: vec![],
+                    }],
+                }],
+            };
+            connection
+                .execute(
+                    "INSERT INTO book_outline (document_id, mode, outline_json, updated_at)
+                     VALUES ('doc1', 'vocabulary', ?1, '2026-11-04T00:00:00.000Z')",
+                    params![serde_json::to_string(&outline).unwrap()],
+                )
+                .unwrap();
+        }
+
+        let created = apply_outline(&state, "doc1".into(), "vocabulary".into()).unwrap();
+        assert_eq!(created, 2);
+        let connection = state.db().unwrap();
+        let (page, doc): (i64, Option<String>) = connection
+            .query_row(
+                "SELECT page, document_id FROM cards WHERE question = 'B2'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(page, 7, "分组节点应继承子节点页码");
+        assert_eq!(doc.as_deref(), Some("doc1"), "分组节点应带来源文档");
         let _ = std::fs::remove_dir_all(&directory);
     }
 

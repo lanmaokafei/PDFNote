@@ -13,6 +13,7 @@ import './App.css'
 import { ContextMenu } from './ui/ContextMenu'
 import { useContextMenu } from './ui/contextMenuCore'
 import type { BootstrapStatus, Document } from './domain/card'
+import { listDocuments } from './services/pdfnote'
 import { LibraryWorkspace } from './features/library/LibraryWorkspace'
 import { StudyWorkspace } from './features/study/StudyWorkspace'
 import { SettingsDialog } from './features/settings/SettingsDialog'
@@ -48,6 +49,7 @@ function App() {
   const [showMindmap, setShowMindmap] = useState(true)
   const [searchToken, setSearchToken] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [jumpTarget, setJumpTarget] = useState<{ documentId: string; page: number; token: number } | null>(null)
   const { menu, show, close } = useContextMenu()
   const loadCards = useCardStore((state) => state.loadCards)
   const cardsById = useCardStore((state) => state.cardsById)
@@ -65,6 +67,29 @@ function App() {
   useEffect(() => {
     void refreshStatus()
   }, [refreshStatus])
+
+  // 脑图卡片点击页码：切到对应文档并跳到该页。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ documentId: string; page: number }>).detail
+      if (!detail?.documentId || !detail.page) return
+      void (async () => {
+        if (activeDocument?.id !== detail.documentId) {
+          try {
+            const documents = await listDocuments()
+            const target = documents.find((item) => item.id === detail.documentId)
+            if (!target) return
+            setActiveDocument(target)
+          } catch {
+            return
+          }
+        }
+        setJumpTarget({ ...detail, token: Date.now() })
+      })()
+    }
+    window.addEventListener('pdfnote:open-source', handler)
+    return () => window.removeEventListener('pdfnote:open-source', handler)
+  }, [activeDocument?.id])
 
   useEffect(() => {
     if (!desktop) return
@@ -219,6 +244,8 @@ function App() {
           <StudyWorkspace
             document={activeDocument}
             showMindmap={showMindmap}
+            jumpTarget={jumpTarget}
+            onJumpHandled={() => setJumpTarget(null)}
             onPageCount={(count) => void handlePageCount(count)}
             onCardsChanged={() => void refreshStatus()}
           />

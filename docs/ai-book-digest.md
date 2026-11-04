@@ -55,6 +55,17 @@ book_outline(document_id, mode, outline_json, updated_at)
 - 汇总结果限 80 节点、4 层，防止模型输出失控。
 - 某一块失败不会丢掉已完成块：重新点「继续分析」只会补未完成的块。
 
+## 写入脑图之后（0.16.0）
+
+- 卡片头部会显示 `P3` 这样的来源页码标签（数据来自 `cards.document_id + page`，即 `source_ref`）。
+  点击标签会派发 `pdfnote:open-source`，App 切到对应文档并让左侧 PDF 滚到该页；
+  若文档还没打开，会先按 id 找到并打开。跳页带 60 / 400 / 1200ms 重试，等页面占位元素注册完成。
+- 按 CEFR 等级或主题分组的一级节点常常没有 `page`，写入卡片时会**继承子树第一个页码**，
+  保证每张拆书卡片都带来源、都能回跳。不建 `annotations`，PDF 页面不会被整页高亮盖住。
+- 带 Q（问题）的卡片底部有「AI 解析」按钮，右键菜单里也有同名入口。模型按
+  「是什么 / 为什么 / 怎么用 / 易错点」四段解释，结果以 `【AI 解析】` 追加到卡片笔记。
+  复用拆书的纯文本模型通道，未配置模型时会提示先去「设置」填写 Base URL 与模型名。
+
 ## 限制
 
 - 拆书质量取决于模型与文字层质量；扫描页依赖 OCR 缓存，倾斜 / 竖排页可能抽错。
@@ -67,10 +78,16 @@ book_outline(document_id, mode, outline_json, updated_at)
 ```bash
 npm run dev -- --host 127.0.0.1
 STEP=digest CARD_COUNT=12 node scripts/mindmap-regression.mjs
+STEP=card-actions CARD_COUNT=12 node scripts/mindmap-regression.mjs
+STANDALONE=0 STEP=outline-back CARD_COUNT=12 node scripts/mindmap-regression.mjs
+STEP=outline-back CARD_COUNT=12 node scripts/mindmap-regression.mjs
 ```
 
 冒烟覆盖：打开向导 → 分块分析（调用 `analyze_book_chunk`）→ 汇总（`synthesize_book`）→
 写入（`apply_book_outline`），并断言分块笔记确实落库。
 
-Rust 侧另有 4 项测试：JSON 容错解析、页码越界丢弃、骨架写入卡片与布局（含重复应用去重、
-不生成 annotation）、层级深度与节点数上限。
+`card-actions` 覆盖页码标签渲染 → 点击派发跳页事件 → AI 解析调用模型并写回笔记；
+`outline-back` 覆盖大纲切回画布后画布实例不被卸载、节点仍在可视区域（独立与嵌入两种模式）。
+
+Rust 侧另有 5 项测试：JSON 容错解析、页码越界丢弃、骨架写入卡片与布局（含重复应用去重、
+不生成 annotation）、分组节点继承子节点页码、层级深度与节点数上限。

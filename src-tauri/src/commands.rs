@@ -31,6 +31,12 @@ pub async fn recognize_selection(
     ai::recognize_selection(&state, image, mode).await
 }
 
+/// 用模型解析卡片问题，返回纯文本解释（由前端决定写回笔记）。
+#[tauri::command]
+pub async fn explain_card(state: State<'_, AppState>, card_id: String) -> Result<String, String> {
+    ai::explain_card(&state, card_id).await
+}
+
 /// AI 拆书阶段一：分析一块文本并保存笔记。
 #[tauri::command]
 pub async fn analyze_book_chunk(

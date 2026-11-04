@@ -441,6 +441,41 @@ pub async fn recognize_selection(
     Ok(cleaned)
 }
 
+/// 让模型解析一张卡片的问题，返回可直接写进笔记的纯文本。
+pub async fn explain_card(state: &AppState, card_id: String) -> Result<String, String> {
+    let (question, excerpt, note): (String, String, String) = {
+        let connection = state.db()?;
+        connection
+            .query_row(
+                "SELECT question, excerpt, user_note FROM cards WHERE id = ?1",
+                rusqlite::params![card_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|error| format!("读取卡片失败: {error}"))?
+    };
+    if question.trim().is_empty() {
+        return Err("这张卡片没有填写问题，无法解析".into());
+    }
+    let system = r#"你是学习教练，用简洁的中文解释一个知识点。只输出纯文本，不要 Markdown 标题符号，不要代码围栏。
+按四段组织，每段一到三句，段首用「是什么：」「为什么：」「怎么用：」「易错点：」：
+是什么：一句话给出定义或结论。
+为什么：背后的机制、推导或原因。
+怎么用：一个具体例子或应用场景。
+易错点：常见误解、边界条件或容易混淆的概念。
+不要重复问题原文，不要写客套话。"#;
+    let user = format!(
+        "问题：{}
+
+原文摘录：{}
+
+已有笔记：{}",
+        question.trim(),
+        excerpt.trim(),
+        note.trim()
+    );
+    complete_text(state, system, &user, 900).await
+}
+
 /// 纯文本补全（拆书用）：只发 system + user 文本，不携带图片。
 ///
 /// 与 `recognize_selection` 共用同一套配置、超时、504 任务轮询与围栏清理。

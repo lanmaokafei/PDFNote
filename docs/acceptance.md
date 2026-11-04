@@ -13,8 +13,8 @@
 | 右键菜单冒烟 | `node scripts/contextmenu-smoke.mjs` | 通过：原生 Reload 菜单被接管、菜单项执行动作、右下角翻转、键盘导航、输入框保留系统菜单、选区读取与跨层判定 |
 | TypeScript + 打包 | `npm run build` | 通过 |
 | Lint | `npm run lint` | 0 warning / 0 error |
-| 原生编译 | `npx tauri build --bundles app` | 通过，0.18.0 生成 release PDFNote.app |
-| DMG | 手动 `hdiutil` 打包 | 0.18.0 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
+| 原生编译 | `npx tauri build --bundles app` | 通过，0.19.0 生成 release PDFNote.app |
+| DMG | 手动 `hdiutil` 打包 | 0.19.0 已通过 `hdiutil verify`；卷内含 `Applications -> /Applications` 快捷方式，SHA-256 见 `release/*.sha256` |
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
@@ -65,6 +65,7 @@ Rust 测试覆盖：
 | OCR 建卡 | Rust 真机 + 浏览器实测 | 标注-only 建卡通过；0.8.0 起为 Apple Vision 单引擎，真机中文图识别出「信息化」；已移除 Tesseract 与 63MB 离线模型 |
 | 可选文字层（0.9.0） | Rust 真机 + 无头 Chrome | 4 行中文图返回归一化行坐标（2.81s）；缓存往返与旧备份兼容测试通过；透明 DOM 文字拖选精确到字符，可复制/建卡；0.10.1 起选区字形保持透明（`::selection` color/fill 均为 `rgba(0,0,0,0)`），与 PDF 原字无重影 |
 | 元素右键菜单（0.10.0） | Vitest + 无头 Chrome | 原生 Reload 菜单被接管；文字选区/标注/墨迹/脑图节点/文档卡片按元素给菜单；动作执行、边界翻转、ESC 与键盘导航、输入框系统菜单均通过 |
+| 卡片笔记展开与滚动（0.19.0） | Vitest + 无头 Chrome | `isClampable` 4 项（短文本、多段 AI 解析、超长单段、公式不折叠）；`STEP=note-expand` 实测 AI 解析写回后自动展开（1115 字完整渲染）、`line-clamp: none` + `overflow-y: auto` + 170px 限高（内容 711px）、滚轮滚动 200px 且 viewport transform 不变、收起恢复折叠、点击正文再展开、大纲行显示并可展开笔记；`STEP=math` 复验公式仍不被裁切 |
 | 可设拆分层级（0.18.0） | Vitest + Rust + 无头 Chrome | 默认 2 层、4 层偏好写入 localStorage 且刷新后仍生效；阶段一/阶段二命令均收到 `depth=4`；预览渲染到 L4、统计 4 节点 4 层；写入 4 张卡片；改回 2 层后旧骨架失效且命令参数同步；Rust 覆盖 depth 收敛、按层截断、提示词嵌套示例、旧 `outline_json` 兼容、4 层父子链与 x=0/320/640/960 布局 |
 | 脑图整理与清空（0.17.0） | Vitest + Rust + 无头 Chrome | 26 张独立卡片整理成紧凑网格（长宽比 / 不重叠 / 缩放 ≥ 0.2）、整理后命令调用与坐标落库；清空对话框两种模式往返、remove 保留卡片、delete 清空节点与卡片；Rust 覆盖级联清理与非法模式拒绝 |
 | 拆书卡片回跳与 AI 解析（0.16.0） | Rust + 无头 Chrome | 页码标签渲染、点击派发跳页事件、AI 解析调用模型并写回笔记、分组节点继承来源页、大纲切回画布实例不卸载 |

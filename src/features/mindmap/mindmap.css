@@ -125,11 +125,73 @@
 .mindmap-collapse { display: inline-flex; align-items: center; gap: 2px; padding: 3px 5px; border: 1px solid #e1e6db; border-radius: 4px; color: #7c8875; background: #f5f7f0; font-size: 8px; cursor: pointer; }
 .mindmap-collapse span { font-size: 10px; line-height: 1; }
 .mindmap-node-content { padding: 0 11px 8px; }
-.mindmap-node-content section { margin-top: 7px; }
-.mindmap-node-content section > span { color: #9aa392; font-size: 7px; letter-spacing: .8px; text-transform: uppercase; }
-.mindmap-node-content p { display: -webkit-box; margin: 3px 0 0; overflow: hidden; color: #5d6b5a; font-size: 9px; line-height: 1.55; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-.mindmap-node-content p.is-empty { color: #a7aea1; font-style: italic; }
+.mindmap-node-content > .mindmap-field { margin-top: 7px; }
 .mindmap-node-image { display: block; max-width: 100%; max-height: 110px; margin-top: 5px; border: 1px solid #dde2d6; border-radius: 5px; object-fit: contain; background: #fff; }
+
+/* ---------- 可展开正文：卡片节点与大纲行共用 ---------- */
+.mindmap-field { min-width: 0; }
+.mindmap-field-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  color: #9aa392;
+  background: transparent;
+  font-size: 7px;
+  letter-spacing: .8px;
+  text-align: left;
+  text-transform: uppercase;
+}
+button.mindmap-field-label { cursor: pointer; }
+button.mindmap-field-label:hover { color: #456c43; }
+.mindmap-field-label.is-static { display: block; }
+.mindmap-field-hint { color: #64855e; font-size: 7px; letter-spacing: 0; text-transform: none; white-space: nowrap; }
+
+.mindmap-field-text {
+  display: block;
+  margin: 3px 0 0;
+  color: #5d6b5a;
+  font-size: 9px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.mindmap-field-text.is-empty { color: #a7aea1; font-style: italic; }
+/* 默认 3 行折叠；点击标题或正文展开。 */
+.mindmap-field-text.is-clamped {
+  display: -webkit-box;
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.mindmap-field-text.is-clamped:hover { color: #3d5740; }
+/* 展开后限高滚动：内容再长也不会把节点撑到盖住整张画布。 */
+.mindmap-field-text.is-open {
+  display: block;
+  max-height: 220px;
+  padding-right: 5px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-line-clamp: unset;
+  scrollbar-width: thin;
+  scrollbar-color: #b3c2aa transparent;
+}
+.mindmap-field-text.is-open::-webkit-scrollbar { width: 6px; }
+.mindmap-field-text.is-open::-webkit-scrollbar-thumb { border-radius: 3px; background: #b3c2aa; }
+.mindmap-field-text.is-open::-webkit-scrollbar-track { background: transparent; }
+/* 展开的卡片浮到相邻节点上方，避免长笔记被邻居盖住。 */
+.react-flow__node:has(.mindmap-field.is-open) { z-index: 20 !important; }
+
+.mindmap-outline-body .mindmap-field { margin-top: 3px; }
+.mindmap-outline-body .mindmap-field-text { color: #7f897b; font-size: 9.5px; line-height: 1.6; }
+.mindmap-outline-body .mindmap-field-text.is-clamped { -webkit-line-clamp: 2; }
+.mindmap-outline-body .mindmap-field-text.is-open { max-height: 180px; }
+.mindmap-outline-body .mindmap-field-label { font-size: 7px; }
+.mindmap-workspace.is-embedded .mindmap-field-text.is-open { max-height: 170px; }
 
 .mindmap-editor-image { margin: 10px 0 2px; }
 .mindmap-editor-image span { color: #9aa392; font-size: 7px; letter-spacing: .8px; text-transform: uppercase; }
@@ -435,17 +497,6 @@
 
 .mindmap-outline-title:hover { color: #1f3a29; text-decoration: underline; text-underline-offset: 2px; }
 
-.mindmap-outline-body p {
-  display: -webkit-box;
-  margin: 3px 0 0;
-  overflow: hidden;
-  color: #7f897b;
-  font-size: 9.5px;
-  line-height: 1.6;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
 .mindmap-outline-level {
   flex: 0 0 auto;
   margin-left: auto;
@@ -514,9 +565,9 @@
 .mindmap-outline-body .math-text .katex {
   font-size: 11px;
 }
-/* 卡片正文默认按 3 行截断（line-clamp）；含公式时必须放开，否则块级公式会被裁掉下半部分。 */
-.mindmap-node-content p:has(.katex),
-.mindmap-outline-body p:has(.katex) {
+/* 折叠态含公式时不裁切，否则块级公式会被 line-clamp 切掉下半部分；
+   展开态仍需保留 .is-open 的纵向滚动条，所以这里只作用于 .is-clamped。 */
+.mindmap-field-text.is-clamped:has(.katex) {
   display: block;
   overflow: visible;
   -webkit-line-clamp: unset;

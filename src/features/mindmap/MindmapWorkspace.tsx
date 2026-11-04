@@ -60,8 +60,8 @@ import {
 import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
-import { MathText } from '../../ui/MathText'
 import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown } from './outline'
+import { ExpandableField } from './ExpandableField'
 import {
   TREE_Y_GAP,
   buildTreeLayout,
@@ -1091,7 +1091,20 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
                           {outlineTitle(card)}
                         </button>
                         {card.excerpt.trim() && (
-                          <p><MathText text={card.excerpt.trim()} /></p>
+                          <ExpandableField
+                            field="excerpt"
+                            label="摘录"
+                            text={card.excerpt.trim()}
+                            variant="outline"
+                          />
+                        )}
+                        {card.user_note.trim() && (
+                          <ExpandableField
+                            field="note"
+                            label="笔记"
+                            text={card.user_note.trim()}
+                            variant="outline"
+                          />
                         )}
                         {card.tags.length > 0 && (
                           <div className="mindmap-outline-tags">

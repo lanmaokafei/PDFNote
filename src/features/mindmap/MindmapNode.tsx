@@ -6,8 +6,8 @@ import { useCardStore } from '../../store/cardStore'
 export type MindmapFlowNode = Node<{ card_id: string }, 'mindmapCard'>
 
 import { MindmapNodeContext } from './MindmapContext'
-import { MathText } from '../../ui/MathText'
 import { hasMathContent } from '../../ui/latex'
+import { ExpandableField } from './ExpandableField'
 
 const ratings: Array<{ value: Rating; label: string }> = [
   { value: 1, label: '重来' },
@@ -86,8 +86,13 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
         </button>
       ) : (
         <div className="mindmap-node-content">
-          <section>
-            <span>摘录</span>
+          <ExpandableField
+            field="excerpt"
+            label="摘录"
+            text={card.excerpt}
+            variant="node"
+            emptyLabel="未填写摘录"
+          >
             {showExcerptImage && (
               <img
                 className="mindmap-node-image nodrag"
@@ -97,16 +102,14 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
                 loading="lazy"
               />
             )}
-            <p className={!card.excerpt ? 'is-empty' : ''}>
-              {card.excerpt ? <MathText text={card.excerpt} /> : '未填写摘录'}
-            </p>
-          </section>
-          <section>
-            <span>笔记</span>
-            <p className={!card.user_note ? 'is-empty' : ''}>
-              {card.user_note ? <MathText text={card.user_note} /> : '未填写笔记'}
-            </p>
-          </section>
+          </ExpandableField>
+          <ExpandableField
+            field="note"
+            label="笔记"
+            text={card.user_note}
+            variant="node"
+            emptyLabel="未填写笔记"
+          />
         </div>
       )}
 

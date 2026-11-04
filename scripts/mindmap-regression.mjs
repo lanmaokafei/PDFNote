@@ -97,6 +97,16 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
   const layoutState = []
   window.__layoutState = layoutState
   window.__clearModes = []
+  // 模拟真实的 AI 解析：多段长解释，写回笔记后必须能展开并靠滚动条查看。
+  const explainText = [
+    '是什么：信息熵度量随机变量的不确定性，是编码长度的理论下界。',
+    '为什么：概率分布越均匀，平均意外程度越高，熵也就越大。',
+    ...Array.from({ length: 14 }, (_, index) =>
+      `要点 ${index + 1}：在第 ${index + 1} 类情形下，交叉熵与相对熵的差决定了编码冗余；` +
+      '实际应用中要注意样本量不足带来的估计偏差，以及不同对数底对应的单位换算。'),
+    '怎么用：先估计分布，再计算每个符号的最优码长，最后与等长编码比较压缩率。',
+    '易错点：把熵和方差混为一谈；忽略对数底导致 bit 与 nat 混用。',
+  ].join('\n')
   const handlers = {
     get_bootstrap_status: () => ({ database_ready: true, schema_version: 6, document_count: 1, card_count: cardState.length }),
     list_cards: () => cardState,
@@ -227,16 +237,19 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
     list_card_links: () => [],
     list_tags: () => [],
     get_ai_settings: () => ({ baseUrl: '', model: '', apiKey: '' }),
-    explain_card: () => '是什么：信息熵度量不确定性。\n为什么：概率分布越均匀熵越大。\n怎么用：计算编码长度下界。\n易错点：单位取决于对数底。',
+    explain_card: () => explainText,
     update_card_content: (args) => {
       const input = args?.input ?? args ?? {}
-      const card = cardState.find((item) => item.id === input.id)
-      if (card) {
-        if (input.question !== undefined) card.question = input.question
-        if (input.excerpt !== undefined) card.excerpt = input.excerpt
-        if (input.user_note !== undefined) card.user_note = input.user_note
-      }
-      return card ?? null
+      const index = cardState.findIndex((item) => item.id === input.id)
+      if (index < 0) return null
+      // 真实 IPC 返回的是反序列化后的新对象；mock 也必须换引用，
+      // 否则 zustand 的 Object.is 比较会让卡片节点跳过重渲染。
+      const next = { ...cardState[index] }
+      if (input.question !== undefined) next.question = input.question
+      if (input.excerpt !== undefined) next.excerpt = input.excerpt
+      if (input.user_note !== undefined) next.user_note = input.user_note
+      cardState[index] = next
+      return { ...next }
     },
     auto_backup: () => null,
     get_page_ocr: () => null,
@@ -541,6 +554,109 @@ if (STEP === 'card-actions') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, events, calls: calls.slice(-8), note: note.slice(0, 80) }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+if (STEP === 'note-expand') {
+  await page.waitForTimeout(1500)
+  const node = page.locator('.mindmap-node').first()
+  const noteField = node.locator('.mindmap-field[data-field="note"]')
+  const noteText = noteField.locator('.mindmap-field-text')
+  if (!(await noteField.count())) problems.push('卡片缺少笔记字段')
+
+  const explain = node.locator('.mindmap-explain-action')
+  if (!(await explain.count())) {
+    problems.push('卡片缺少 AI 解析入口')
+  } else {
+    await explain.click()
+    await page.waitForTimeout(1200)
+  }
+
+  // AI 解析写回后必须自动展开，不能仍停在 3 行截断。
+  const fieldClass = (await noteField.getAttribute('class')) ?? ''
+  if (!fieldClass.includes('is-open')) problems.push('AI 解析写回后笔记没有自动展开')
+
+  const metrics = await noteText.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      lineClamp: style.webkitLineClamp,
+      overflowY: style.overflowY,
+      maxHeight: style.maxHeight,
+      client: element.clientHeight,
+      scroll: element.scrollHeight,
+      chars: element.innerText.length,
+    }
+  })
+  if (!['none', 'unset', ''].includes(metrics.lineClamp)) {
+    problems.push(`展开后仍被行数截断：${metrics.lineClamp}`)
+  }
+  if (metrics.overflowY !== 'auto') problems.push(`展开后没有纵向滚动条：${metrics.overflowY}`)
+  if (metrics.scroll <= metrics.client + 8) problems.push('AI 解析内容不够长，未复现滚动场景')
+  if (metrics.chars < 400) problems.push(`笔记正文没有完整渲染：${metrics.chars} 字`)
+  const zIndex = await node.evaluate((element) => {
+    const wrapper = element.closest('.react-flow__node')
+    return wrapper ? Number.parseInt(getComputedStyle(wrapper).zIndex, 10) || 0 : 0
+  })
+  if (zIndex < 20) problems.push(`展开的卡片没有浮到相邻节点上方：z-index=${zIndex}`)
+
+  if (process.env.SHOT) {
+    await node.screenshot({ path: '/tmp/pdfnote-note-expand.png' })
+  }
+
+  // 滚轮应该滚笔记，不能平移 / 缩放画布。
+  const viewport = page.locator('.react-flow__viewport')
+  const beforeWheel = await viewport.getAttribute('style')
+  const box = await noteText.boundingBox()
+  if (box) {
+    await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height / 2, 60))
+    await page.mouse.wheel(0, 200)
+    await page.waitForTimeout(320)
+  } else {
+    problems.push('展开的笔记没有可交互区域')
+  }
+  const scrollTop = await noteText.evaluate((element) => element.scrollTop)
+  const afterWheel = await viewport.getAttribute('style')
+  if (scrollTop <= 0) problems.push('滚轮没有滚动笔记正文')
+  if (beforeWheel !== afterWheel) problems.push('滚动笔记时画布被平移')
+
+  // 收起 → 点击正文再次展开。
+  await noteField.locator('button.mindmap-field-label').click()
+  await page.waitForTimeout(250)
+  if (!((await noteText.getAttribute('class')) ?? '').includes('is-clamped')) {
+    problems.push('点击收起后没有恢复折叠')
+  }
+  await noteText.click()
+  await page.waitForTimeout(250)
+  if (!((await noteText.getAttribute('class')) ?? '').includes('is-open')) {
+    problems.push('点击笔记正文没有展开全文')
+  }
+
+  // 大纲视图也要能看到并展开笔记（旧版只显示两行摘录）。
+  const outlineButton = page.getByRole('button', { name: /大纲/ }).first()
+  if (await outlineButton.count()) {
+    await outlineButton.click()
+    await page.waitForTimeout(450)
+    const outlineNote = page
+      .locator('.mindmap-outline-body .mindmap-field[data-field="note"] .mindmap-field-text')
+      .first()
+    if (!(await outlineNote.count())) {
+      problems.push('大纲视图没有显示卡片笔记')
+    } else {
+      if (!((await outlineNote.getAttribute('class')) ?? '').includes('is-clamped')) {
+        problems.push('大纲笔记没有折叠提示')
+      }
+      await outlineNote.click()
+      await page.waitForTimeout(250)
+      if (!((await outlineNote.getAttribute('class')) ?? '').includes('is-open')) {
+        problems.push('大纲笔记点击后没有展开')
+      }
+    }
+  }
+
+  if (await page.locator('.app-crash').count()) problems.push('展开笔记触发了 React 更新循环')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, metrics, scrollTop, viewportStable: beforeWheel === afterWheel }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

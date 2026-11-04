@@ -95,6 +95,7 @@ book_outline(document_id, mode, outline_json, updated_at)
   保证每张拆书卡片都带来源、都能回跳。不建 `annotations`，PDF 页面不会被整页高亮盖住。
 - 带 Q（问题）的卡片底部有「AI 解析」按钮，右键菜单里也有同名入口。模型按
   「是什么 / 为什么 / 怎么用 / 易错点」四段解释，结果以 `【AI 解析】` 追加到卡片笔记。
+  0.19.0 起写回后卡片笔记会自动展开，内容过长时可在卡片内滚动阅读。
   复用拆书的纯文本模型通道，未配置模型时会提示先去「设置」填写 Base URL 与模型名。
 
 ## 限制
@@ -114,6 +115,7 @@ npm run dev -- --host 127.0.0.1
 STEP=digest CARD_COUNT=12 node scripts/mindmap-regression.mjs
 STEP=depth CARD_COUNT=12 node scripts/mindmap-regression.mjs
 STEP=card-actions CARD_COUNT=12 node scripts/mindmap-regression.mjs
+STEP=note-expand CARD_COUNT=12 node scripts/mindmap-regression.mjs
 STANDALONE=0 STEP=outline-back CARD_COUNT=12 node scripts/mindmap-regression.mjs
 STEP=outline-back CARD_COUNT=12 node scripts/mindmap-regression.mjs
 ```
@@ -126,6 +128,7 @@ STEP=outline-back CARD_COUNT=12 node scripts/mindmap-regression.mjs
 旧骨架失效、命令参数同步变成 2、预览不再出现第 3 层。
 
 `card-actions` 覆盖页码标签渲染 → 点击派发跳页事件 → AI 解析调用模型并写回笔记；
+`note-expand` 覆盖长解析自动展开、卡片内滚动条、滚轮不平移画布、收起 / 点击正文再展开与大纲笔记；
 `outline-back` 覆盖大纲切回画布后画布实例不被卸载、节点仍在可视区域（独立与嵌入两种模式）。
 
 Rust 侧另有 10 项测试：JSON 容错解析、页码越界丢弃、骨架写入卡片与布局（含重复应用去重、

@@ -110,6 +110,19 @@ release/PDFNote_0.19.0_aarch64.dmg.sha256
 
 DMG 内已放置 **Applications 快捷方式**：打开镜像后把 PDFNote 拖进「应用程序」即可完成安装（打包时用 staging 目录 + `ln -s /Applications`，再 `hdiutil create -srcfolder`）。
 
+### 发布到 GitHub
+
+发布固定为四步闭环：**构建签名 → 打包并校验 DMG → 提交推送 git → 同步到 GitHub Release**。
+
+```bash
+npm run build && npx tauri build --bundles app
+# hdiutil 打包（staging + ln -s /Applications）→ hdiutil verify → shasum -a 256 > release/...dmg.sha256
+git add -A && git commit -m "..." && git push origin main
+npm run release:github        # 上传 DMG 与 .sha256 到 https://github.com/lanmaokafei/PDFNote/releases
+```
+
+`release/` 被 `.gitignore` 忽略，DMG 不进仓库。`scripts/publish-github-release.mjs` 上传前会校验 `.sha256` 与 `hdiutil verify`；同名同内容资产跳过，内容不同时必须显式加 `--replace` 才会删除旧资产重传；tag 与当前 HEAD 不一致会警告。需要 `GITHUB_TOKEN` / `GH_TOKEN`（或已登录的 gh CLI、`~/.config/pdfnote/github-token`），token 需 Contents: write 权限。发布后务必下载线上 DMG 比对 SHA-256，避免网页手动上传的未签名构建与本地签名版混淆。
+
 打包完成后记得取消注册构建目录里的副本，否则它会和 `/Applications` 抢 LaunchServices 的“主副本”，表现为启动台 / 应用程序面板里看不到图标：
 
 ```bash

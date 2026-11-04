@@ -218,6 +218,12 @@ pub fn delete_card(state: State<'_, AppState>, id: String) -> Result<(), String>
     cards::delete_card(&state, id)
 }
 
+/// 批量清空脑图卡片：remove 仅关闭投影，delete 彻底删除。
+#[tauri::command(async)]
+pub fn clear_mindmap_cards(state: State<'_, AppState>, mode: String) -> Result<u32, String> {
+    cards::clear_mindmap_cards(&state, mode)
+}
+
 #[tauri::command]
 pub fn list_annotations(
     state: State<'_, AppState>,

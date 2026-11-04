@@ -60,7 +60,10 @@ const cards = Array.from({ length: CARD_COUNT }, (_, index) => ({
   source_ref: index === 0
     ? { document_id: 'doc1', page: 1, bbox: { x: 0.1, y: 0.1, width: 0.3, height: 0.1 } }
     : null,
-  parent_id: index === 0 ? null : `c${Math.max(1, Math.floor(index / 3) + 1)}`,
+  // ARRANGE_FOREST=1 模拟「26 张互不相连的卡片」，复现自动整理变成长条的旧问题。
+  parent_id: process.env.ARRANGE_FOREST === '1'
+    ? null
+    : index === 0 ? null : `c${Math.max(1, Math.floor(index / 3) + 1)}`,
   sort_order: index,
 }))
 
@@ -88,6 +91,9 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
   window.__noteState = noteState
   const digestNotes = []
   window.__digestNotes = digestNotes
+  const layoutState = []
+  window.__layoutState = layoutState
+  window.__clearModes = []
   const handlers = {
     get_bootstrap_status: () => ({ database_ready: true, schema_version: 6, document_count: 1, card_count: cardState.length }),
     list_cards: () => cardState,
@@ -179,6 +185,25 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
     delete_card: (args) => {
       const index = cardState.findIndex((item) => item.id === args?.id)
       if (index >= 0) cardState.splice(index, 1)
+      return null
+    },
+    clear_mindmap_cards: (args) => {
+      const mode = args?.mode ?? 'remove'
+      window.__clearModes.push(mode)
+      if (mode === 'delete') {
+        const count = cardState.length
+        cardState.splice(0, cardState.length)
+        return count
+      }
+      let count = 0
+      for (const card of cardState) {
+        if (card.surface_mindmap) { card.surface_mindmap = false; count += 1 }
+      }
+      return count
+    },
+    save_mindmap_layout: (args) => {
+      const items = args?.items ?? args?.layouts ?? []
+      if (Array.isArray(items)) layoutState.push(...items)
       return null
     },
     list_page_inks: () => [],
@@ -365,6 +390,106 @@ if (STEP === 'pan') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, before, after, beforeWheel, afterWheel }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+if (STEP === 'arrange') {
+  await page.waitForTimeout(1400)
+  // 顶部完整工具栏只在独立脑图视图出现：先关文档再进脑图。
+  const nav = page.locator('.app-top button')
+  if (await nav.count() >= 4) {
+    await nav.nth(0).click()
+    await page.waitForTimeout(700)
+    await nav.nth(3).click()
+    await page.waitForTimeout(1500)
+  }
+  const arrange = page.locator('.mindmap-toolbar-actions button', { hasText: '自动整理' })
+  if (!(await arrange.count())) {
+    problems.push('缺少「自动整理」按钮')
+  } else {
+    await arrange.click()
+    await page.waitForTimeout(1100)
+  }
+  const layout = await page.evaluate(() => window.__layoutState ?? [])
+  const saved = layout.slice(-Number(process.env.CARD_COUNT ?? 3))
+  if (saved.length < Number(process.env.CARD_COUNT ?? 3)) {
+    problems.push(`自动整理未保存全部坐标：${saved.length}`)
+  }
+  if (saved.length) {
+    const xs = saved.map((item) => item.x)
+    const ys = saved.map((item) => item.y)
+    const width = Math.max(...xs) - Math.min(...xs) + 254
+    const height = Math.max(...ys) - Math.min(...ys) + 190
+    if (height > 2600 || height / width > 1.5) {
+      problems.push(`整理后仍是细长竖条：${Math.round(width)}×${Math.round(height)}`)
+    }
+    // 旧实现把根节点纵向堆成数千像素，fitView 后缩放会小到看不清卡片。
+    const transform = await page.locator('.react-flow__viewport').first().getAttribute('style').catch(() => '')
+    const zoom = Number(/scale\(([\d.]+)\)/.exec(transform ?? '')?.[1] ?? 0)
+    if (zoom < 0.2) problems.push(`整理后视图未对齐，缩放过小：${zoom}`)
+  }
+  const calls = await page.evaluate(() => window.__calls.slice(-12))
+  if (!calls.includes('save_mindmap_layout')) problems.push('整理未保存布局')
+  if (process.env.SCREENSHOT) await page.screenshot({ path: process.env.SCREENSHOT })
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, savedCount: saved.length, layout: saved.slice(0, 3) }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+if (STEP === 'clear') {
+  await page.waitForTimeout(1400)
+  const nav = page.locator('.app-top button')
+  if (await nav.count() >= 4) {
+    await nav.nth(0).click()
+    await page.waitForTimeout(700)
+    await nav.nth(3).click()
+    await page.waitForTimeout(1500)
+  }
+  const clearButton = page.locator('.mindmap-toolbar-actions button', { hasText: '清空卡片' })
+  if (!(await clearButton.count())) {
+    problems.push('缺少「清空卡片」按钮')
+  } else {
+    await clearButton.click()
+    await page.waitForSelector('.mindmap-confirm.clear-cards', { timeout: 3000 })
+    const text = await page.locator('.mindmap-confirm.clear-cards').innerText()
+    for (const label of ['仅清空脑图', '彻底删除', String(process.env.CARD_COUNT ?? 3)]) {
+      if (!text.includes(label)) problems.push(`清空对话框缺少内容：${label}`)
+    }
+    // 先验证较安全的 remove：卡片仍在，但画布与统计都清空。
+    await page.locator('.mindmap-confirm.clear-cards button', { hasText: '仅清空脑图' }).click()
+    await page.waitForTimeout(800)
+    const nodesAfterRemove = await page.locator('.mindmap-node').count()
+    const state = await page.evaluate(() => ({
+      total: window.__cardState.length,
+      visible: window.__cardState.filter((card) => card.surface_mindmap).length,
+    }))
+    if (nodesAfterRemove !== 0) problems.push(`仅清空脑图后仍有节点：${nodesAfterRemove}`)
+    if (state.total < 1 || state.visible !== 0) problems.push(`仅清空脑图语义错误：${JSON.stringify(state)}`)
+
+    // 恢复投影后刷新，再走「彻底删除」这条不可逆路径。
+    await page.evaluate(() => {
+      for (const card of window.__cardState) card.surface_mindmap = true
+    })
+    await page.locator('.mindmap-toolbar-actions button', { hasText: '刷新' }).click()
+    await page.waitForTimeout(800)
+    await clearButton.click()
+    await page.waitForSelector('.mindmap-confirm.clear-cards', { timeout: 3000 })
+    await page.locator('.mindmap-confirm.clear-cards button', { hasText: '彻底删除' }).click()
+    await page.waitForTimeout(800)
+    const finalNodes = await page.locator('.mindmap-node').count()
+    const remaining = await page.evaluate(() => window.__cardState.length)
+    if (finalNodes !== 0 || remaining !== 0) {
+      problems.push(`彻底删除后仍有残留：nodes=${finalNodes}, cards=${remaining}`)
+    }
+  }
+  const modes = await page.evaluate(() => window.__clearModes ?? [])
+  if (!modes.includes('remove') || !modes.includes('delete')) {
+    problems.push(`两种清空模式未都调用：${JSON.stringify(modes)}`)
+  }
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, modes }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

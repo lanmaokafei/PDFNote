@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Card } from '../../domain/card'
-import { getOrderedMindmapCards } from './layout'
+import { buildTreeLayout, getOrderedMindmapCards } from './layout'
 
 const base = {
   source_ref: null,
@@ -32,6 +32,53 @@ const base = {
 
 const card = (id: string, parent_id: string | null = null, sort_order = 0): Card => ({
   ...base, id, parent_id, sort_order,
+})
+
+describe('buildTreeLayout 紧凑森林布局', () => {
+  const boundingBox = (positions: Record<string, { x: number; y: number }>) => {
+    const values = Object.values(positions)
+    const minX = Math.min(...values.map((point) => point.x))
+    const minY = Math.min(...values.map((point) => point.y))
+    const maxX = Math.max(...values.map((point) => point.x))
+    const maxY = Math.max(...values.map((point) => point.y))
+    return { width: maxX - minX + 254, height: maxY - minY + 190 }
+  }
+
+  it('大量独立卡片排成紧凑网格，而不是一根细长竖条', () => {
+    const forest = Array.from({ length: 26 }, (_, index) => card(`c${index}`))
+    const positions = buildTreeLayout(forest)
+    expect(Object.keys(positions)).toHaveLength(26)
+    const box = boundingBox(positions)
+    expect(box.height / box.width).toBeLessThan(1.5)
+    // 旧实现会纵向堆 26 × 310 ≈ 8000px；新布局应显著更矮。
+    expect(box.height).toBeLessThan(2600)
+  })
+
+  it('网格中的卡片互不重叠', () => {
+    const forest = Array.from({ length: 26 }, (_, index) => card(`c${index}`))
+    const values = Object.values(buildTreeLayout(forest))
+    for (let i = 0; i < values.length; i += 1) {
+      for (let j = i + 1; j < values.length; j += 1) {
+        const overlaps = Math.abs(values[i].x - values[j].x) < 254
+          && Math.abs(values[i].y - values[j].y) < 190
+        expect(overlaps).toBe(false)
+      }
+    }
+  })
+
+  it('单棵树仍保持左父右子，父节点纵向居中', () => {
+    const tree = [card('root'), card('a', 'root', 0), card('b', 'root', 1)]
+    const positions = buildTreeLayout(tree)
+    expect(positions.root.x).toBeLessThan(positions.a.x)
+    expect(positions.root.x).toBeLessThan(positions.b.x)
+    expect(positions.a.x).toBe(positions.b.x)
+    expect(positions.root.y).toBeCloseTo((positions.a.y + positions.b.y) / 2)
+  })
+
+  it('环状父子关系不会丢卡片', () => {
+    const cycle = [card('a', 'b'), card('b', 'a')]
+    expect(Object.keys(buildTreeLayout(cycle))).toHaveLength(2)
+  })
 })
 
 describe('getOrderedMindmapCards 折叠可见性', () => {

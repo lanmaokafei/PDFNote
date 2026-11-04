@@ -117,6 +117,42 @@ interface ConfirmationDialogProps {
   onConfirm: () => void
 }
 
+export type ClearCardsMode = 'remove' | 'delete'
+
+interface ClearCardsDialogProps {
+  count: number
+  busy: boolean
+  onCancel: () => void
+  onConfirm: (mode: ClearCardsMode) => void
+}
+
+/** 批量清空脑图：先给两种不可逆程度不同的选项，避免误删 PDF 标注与复习记录。 */
+export function ClearCardsDialog({ count, busy, onCancel, onConfirm }: ClearCardsDialogProps) {
+  return (
+    <div className="mindmap-overlay confirmation">
+      <section className="mindmap-confirm clear-cards" role="alertdialog" aria-modal="true" aria-labelledby="mindmap-clear-title">
+        <span className="mindmap-confirm-mark delete" aria-hidden="true">!</span>
+        <span className="mindmap-eyebrow">CLEAR MINDMAP</span>
+        <h2 id="mindmap-clear-title">清空脑图卡片？</h2>
+        <p className="mindmap-confirm-lead">当前脑图共有 <strong>{count}</strong> 张卡片。清空前建议先做一次备份。</p>
+        <p>
+          <strong>仅清空脑图</strong>：卡片仍留在 PDF 标注与复习队列，只是不再显示在画布上。<br />
+          <strong>彻底删除</strong>：连同标注、复习记录、标签与布局一并删除，不可撤销。
+        </p>
+        <footer className="mindmap-clear-actions">
+          <button type="button" className="mindmap-button" onClick={onCancel} disabled={busy}>取消</button>
+          <button type="button" className="mindmap-button warning" onClick={() => onConfirm('remove')} disabled={busy || !count}>
+            仅清空脑图
+          </button>
+          <button type="button" className="mindmap-button danger" onClick={() => onConfirm('delete')} disabled={busy || !count}>
+            彻底删除
+          </button>
+        </footer>
+      </section>
+    </div>
+  )
+}
+
 export function ConfirmationDialog({ kind, cardTitle, busy, onCancel, onConfirm }: ConfirmationDialogProps) {
   const removing = kind === 'remove'
   return (
@@ -125,13 +161,13 @@ export function ConfirmationDialog({ kind, cardTitle, busy, onCancel, onConfirm 
         <span className={`mindmap-confirm-mark ${kind}`} aria-hidden="true">{removing ? '−' : '!'}</span>
         <span className="mindmap-eyebrow">{removing ? 'REMOVE PROJECTION' : 'PERMANENT DELETE'}</span>
         <h2 id="mindmap-confirm-title">{removing ? '仅从脑图移除？' : '彻底删除这张卡片？'}</h2>
-        <p className="mindmap-confirm-card">“{cardTitle}”</p>
+        <p className="mindmap-confirm-quote">“{cardTitle}”</p>
         {removing ? (
           <p>只关闭此卡片的脑图投影，<strong>PDF 标注与复习记录都会保留</strong>。子节点将按现有数据规则重新连接。</p>
         ) : (
           <p>将永久删除卡片及其内容，<strong>PDF 与复习视图也无法再使用它</strong>。此操作不可撤销。</p>
         )}
-        <footer>
+        <footer className="mindmap-confirm-actions">
           <button type="button" className="mindmap-button" onClick={onCancel} disabled={busy}>取消</button>
           <button type="button" className={`mindmap-button ${removing ? 'warning' : 'danger'}`} onClick={onConfirm} disabled={busy}>
             {busy ? '处理中…' : removing ? '确认移除脑图' : '确认彻底删除'}

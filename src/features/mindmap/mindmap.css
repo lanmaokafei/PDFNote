@@ -536,3 +536,69 @@
 .math-text-plain {
   white-space: pre-wrap;
 }
+
+/* ---------- 确认对话框：单卡删除 / 批量清空共用 ---------- */
+.mindmap-confirm {
+  width: min(400px, 100%);
+  padding: 22px;
+  border: 1px solid #e1e6dc;
+  border-radius: 12px;
+  background: #fcfdf9;
+  box-shadow: 0 24px 60px #1e2b2033;
+}
+.mindmap-confirm-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 10px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+  place-items: center;
+}
+.mindmap-confirm-mark.delete { color: #965646; background: #f8eae5; }
+.mindmap-confirm-mark.remove { color: #7d7343; background: #f5f1df; }
+.mindmap-confirm .mindmap-eyebrow { display: block; color: #98a294; font-size: 8px; letter-spacing: .12em; }
+.mindmap-confirm h2 {
+  margin: 6px 0 10px;
+  color: #38473b;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 19px;
+  font-weight: 400;
+}
+.mindmap-confirm p { margin: 0 0 8px; color: #838d7d; font-size: 10px; line-height: 1.7; }
+.mindmap-confirm p strong { color: #4b5a4e; }
+.mindmap-confirm-quote {
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: #5d6a5c !important;
+  background: #f3f6ef;
+  overflow-wrap: anywhere;
+}
+.mindmap-confirm-actions, .mindmap-clear-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 18px;
+}
+.mindmap-confirm .mindmap-button {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #dfe5d9;
+  border-radius: 5px;
+  color: #6c7867;
+  background: #fff;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.mindmap-confirm .mindmap-button:disabled { opacity: .5; cursor: default; }
+.mindmap-confirm .mindmap-button:hover:not(:disabled) { background: #f1f4ed; }
+.mindmap-confirm .mindmap-button.warning { border-color: #d9cf9e; color: #756a3a; background: #fbf8e9; }
+.mindmap-confirm .mindmap-button.danger { border-color: #965646; color: #fff8f4; background: #965646; }
+.mindmap-confirm .mindmap-button.danger:hover:not(:disabled) { background: #854a3c; }
+.mindmap-toolbar-actions button.is-danger,
+.mindmap-float-actions button.is-danger { color: #965646; border-color: #ead2cb; background: #fffaf8; }
+.mindmap-toolbar-actions button.is-danger:hover:not(:disabled),
+.mindmap-float-actions button.is-danger:hover:not(:disabled) { background: #f9ece8; }

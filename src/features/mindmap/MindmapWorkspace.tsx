@@ -37,6 +37,7 @@ import type { Card, CardLink, MindmapLayoutInput, Rating } from '../../domain/ca
 import { ContextMenu } from '../../ui/ContextMenu'
 import { useContextMenu, type ContextMenuSection } from '../../ui/contextMenuCore'
 import {
+  clearMindmapCards,
   exportMarkdownFile,
   isTauriRuntime,
   listCardLinks,
@@ -48,7 +49,14 @@ import {
 } from '../../services/pdfnote'
 import { useCardStore } from '../../store/cardStore'
 import { reviewCard } from '../review/scheduler'
-import { CardEditor, ConfirmationDialog, type CardDraft, type ConfirmationKind } from './CardEditor'
+import {
+  CardEditor,
+  ClearCardsDialog,
+  ConfirmationDialog,
+  type CardDraft,
+  type ClearCardsMode,
+  type ConfirmationKind,
+} from './CardEditor'
 import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
@@ -123,6 +131,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   const [tagTarget, setTagTarget] = useState<string | null>(null)
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
+  const [clearOpen, setClearOpen] = useState(false)
   const { menu, show, close } = useContextMenu()
 
   const [recallActive, setRecallActive] = useState(false)
@@ -517,6 +526,13 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     })
   }, [getIntersectingNodes, nodes, persistPositions, runTask, syncCards])
 
+  // 整理后要等 React Flow 应用新坐标，再对齐视口；否则用户仍停在旧的缩放/平移上，
+  // 看起来像「卡片没有聚拢」。卸载时清掉定时器，避免对已销毁实例调用 fitView。
+  const arrangeTimerRef = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (arrangeTimerRef.current !== null) window.clearTimeout(arrangeTimerRef.current)
+  }, [])
+
   const autoArrange = useCallback(() => {
     if (!cards.length) return
     const arranged = buildTreeLayout(cards)
@@ -527,9 +543,14 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
         ...arranged[card.id],
       })))
       setPositions((current) => ({ ...current, ...arranged }))
-      setNotice(`已整理并保存 ${cards.length} 个节点。`)
+      if (arrangeTimerRef.current !== null) window.clearTimeout(arrangeTimerRef.current)
+      arrangeTimerRef.current = window.setTimeout(() => {
+        arrangeTimerRef.current = null
+        fitViewInstance({ ...FIT_VIEW_OPTIONS, duration: 320 })
+      }, 120)
+      setNotice(`已整理并保存 ${cards.length} 个节点，视图已对齐。`)
     })
-  }, [cards, runTask])
+  }, [cards, fitViewInstance, runTask])
 
   const saveSelected = useCallback(() => {
     const selected = nodes.filter((node) => selectedIds.has(node.id))
@@ -745,6 +766,25 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     })
   }, [confirmation, deleteCard, editor, removeFromMindmap, runTask, syncCards])
 
+  /** 批量清空：后端单事务完成后，本地把投影、坐标、选中与弹窗一次性复位。 */
+  const clearAllCards = useCallback((mode: ClearCardsMode) => {
+    void runTask(async () => {
+      const count = await clearMindmapCards(mode)
+      setPositions({})
+      setMeasuredSizes({})
+      setSelectedIds(new Set())
+      setLinks([])
+      setConfirmation(null)
+      setEditor(null)
+      setClearOpen(false)
+      setViewMode('canvas')
+      await syncCards()
+      setNotice(mode === 'remove'
+        ? `已清空 ${count} 张脑图卡片，PDF 标注与复习记录仍保留。`
+        : `已彻底删除 ${count} 张卡片及其标注、复习记录。`)
+    })
+  }, [runTask, syncCards])
+
   const copyToClipboard = (text: string) => {
     if (navigator.clipboard) void navigator.clipboard.writeText(text).catch(() => undefined)
   }
@@ -824,6 +864,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
           { id: 'refresh', label: '刷新脑图', icon: RefreshCw, onSelect: () => void refresh() },
           { id: 'arrange', label: '自动整理节点', icon: Focus, disabled: busy || !cards.length, onSelect: autoArrange },
           { id: 'save', label: '保存所选布局', icon: LayoutGrid, disabled: busy || selectedIds.size === 0, onSelect: saveSelected },
+          { id: 'clear', label: '清空脑图卡片…', icon: Trash2, danger: true, disabled: busy || !cards.length, onSelect: () => setClearOpen(true) },
         ] },
         { id: 'view', title: '视图', items: [
           { id: 'outline', label: '切换到大纲', icon: ListTree, onSelect: () => setViewMode('outline') },
@@ -899,6 +940,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
           <button type="button" onClick={saveSelected} disabled={busy || !cards.length || viewMode === 'outline'}>保存所选布局</button>
           <button type="button" onClick={() => setMergeOpen(true)} disabled={busy || selectedIds.size < 2} title="先多选两张以上卡片">合并所选</button>
           <button type="button" onClick={() => void handleExportMarkdown()} disabled={exporting || !cards.length}>{exporting ? '导出中…' : '导出 MD'}</button>
+          <button type="button" className="is-danger" onClick={() => setClearOpen(true)} disabled={busy || !cards.length} title="批量清空脑图卡片">清空卡片</button>
           <button type="button" className="primary" onClick={() => setEditor('new')} disabled={busy}>＋ 新建卡片</button>
         </div>
       </div>
@@ -908,6 +950,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
         <div className="mindmap-float-actions">
           <button type="button" onClick={() => void refresh()} disabled={loading || busy}>刷新</button>
           <button type="button" onClick={() => setViewMode('outline')}>大纲</button>
+          <button type="button" onClick={autoArrange} disabled={busy || !cards.length}>整理</button>
           <button type="button" onClick={() => setEditor('new')} disabled={busy}>新建</button>
           <button
             type="button"
@@ -919,6 +962,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
           </button>
           <button type="button" onClick={() => setMergeOpen(true)} disabled={busy || selectedIds.size < 2}>合并</button>
           <button type="button" onClick={() => void handleExportMarkdown()} disabled={exporting || !cards.length}>{exporting ? '导出中…' : '导出'}</button>
+          <button type="button" className="is-danger" onClick={() => setClearOpen(true)} disabled={busy || !cards.length}>清空</button>
         </div>
       )}
 
@@ -1081,6 +1125,14 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
             busy={busy}
             onCancel={() => setConfirmation(null)}
             onConfirm={confirmOperation}
+          />
+        )}
+        {clearOpen && (
+          <ClearCardsDialog
+            count={cards.length}
+            busy={busy}
+            onCancel={() => setClearOpen(false)}
+            onConfirm={clearAllCards}
           />
         )}
       </div>

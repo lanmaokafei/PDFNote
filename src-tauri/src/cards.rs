@@ -425,6 +425,66 @@ pub fn delete_card(state: &AppState, id: String) -> Result<(), String> {
     transaction.commit().map_err(|error| error.to_string())
 }
 
+/// 批量清空当前脑图里的卡片，返回受影响数量。
+///
+/// `remove`：只关闭脑图投影，卡片仍留在 PDF 标注与复习队列；布局是脑图投影的
+/// 附属数据，必须一并清掉，否则下次重新加入脑图会回到旧坐标。
+/// `delete`：彻底删除卡片，annotations / review_logs / card_tags / card_links /
+/// mindmap_layout 都由外键级联清理。两种模式都必须在单个事务里完成。
+pub fn clear_mindmap_cards(state: &AppState, mode: String) -> Result<u32, String> {
+    if mode != "remove" && mode != "delete" {
+        return Err("清空模式只能是 remove 或 delete".into());
+    }
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let count: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM cards WHERE surface_mindmap = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+
+    if mode == "remove" {
+        // 所有脑图卡片都会被隐藏，先断开父子引用，避免残留指向隐藏卡片的孤儿父节点。
+        transaction
+            .execute(
+                "UPDATE cards SET parent_id = NULL WHERE parent_id IS NOT NULL",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "UPDATE cards SET surface_mindmap = 0, collapsed = 0, updated_at = ?1
+                 WHERE surface_mindmap = 1",
+                params![now()],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "DELETE FROM mindmap_layout
+                 WHERE card_id IN (SELECT id FROM cards WHERE surface_mindmap = 0)",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+    } else {
+        // cards.parent_id 是自引用外键（ON DELETE SET NULL）。逐行级联会在批量删除时
+        // 反复触发隐式 FK 更新，先把所有父子引用断开再删，避免递归卡死。
+        transaction
+            .execute(
+                "UPDATE cards SET parent_id = NULL WHERE parent_id IS NOT NULL",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute("DELETE FROM cards WHERE surface_mindmap = 1", [])
+            .map_err(|error| error.to_string())?;
+    }
+
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(count as u32)
+}
+
 /// 规范化标签：去空白与前置 #，去重，限制数量与长度。
 pub fn set_card_tags(state: &AppState, card_id: String, tags: Vec<String>) -> Result<Card, String> {
     let mut normalized: Vec<String> = Vec::new();
@@ -1166,5 +1226,64 @@ mod tests {
             .unwrap()
             .iter()
             .all(|layout| layout.card_id != middle.id));
+    }
+
+    #[test]
+    fn clear_mindmap_cards_remove_keeps_cards_but_drops_projection_and_layout() {
+        let (_directory, state) = test_state();
+        let root = create_card(&state, input("root", None)).unwrap();
+        create_card(&state, input("child", Some(root.id))).unwrap();
+        let count = clear_mindmap_cards(&state, "remove".into()).unwrap();
+        assert_eq!(count, 2);
+
+        let database = state.db().unwrap();
+        let total: i64 = database
+            .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
+            .unwrap();
+        let visible: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM cards WHERE surface_mindmap = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let parents: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM cards WHERE parent_id IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let layouts: i64 = database
+            .query_row("SELECT COUNT(*) FROM mindmap_layout", [], |row| row.get(0))
+            .unwrap();
+        drop(database);
+        assert_eq!(total, 2);
+        assert_eq!(visible, 0);
+        assert_eq!(parents, 0);
+        assert_eq!(layouts, 0);
+        assert_eq!(list_cards(&state, None).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn clear_mindmap_cards_delete_cascades_and_rejects_bad_mode() {
+        let (_directory, state) = test_state();
+        let first = create_card(&state, input("first", None)).unwrap();
+        let second = create_card(&state, input("second", Some(first.id))).unwrap();
+        set_card_tags(&state, second.id.clone(), vec!["标签".into()]).unwrap();
+        assert!(clear_mindmap_cards(&state, "bogus".into()).is_err());
+
+        let count = clear_mindmap_cards(&state, "delete".into()).unwrap();
+        assert_eq!(count, 2);
+        let database = state.db().unwrap();
+        for table in ["cards", "card_tags", "card_links", "review_logs", "annotations", "mindmap_layout"] {
+            let remaining: i64 = database
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(remaining, 0, "{table} 应被级联清空");
+        }
+        drop(database);
+        // 重复清空是幂等的。
+        assert_eq!(clear_mindmap_cards(&state, "delete".into()).unwrap(), 0);
     }
 }

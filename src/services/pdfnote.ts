@@ -183,6 +183,12 @@ export async function deleteCard(id: string): Promise<void> {
   return invoke('delete_card', { id })
 }
 
+/** 批量清空脑图卡片；返回受影响数量。remove 只关投影，delete 级联删除。 */
+export async function clearMindmapCards(mode: 'remove' | 'delete'): Promise<number> {
+  desktopOnly()
+  return invoke('clear_mindmap_cards', { mode })
+}
+
 export async function listAnnotations(documentId: string, pages: number[]): Promise<Annotation[]> {
   if (!isTauriRuntime()) return []
   return invoke('list_annotations', { documentId, pages })

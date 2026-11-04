@@ -47,6 +47,7 @@ pub fn run() {
             commands::update_card_content,
             commands::remove_card_from_mindmap,
             commands::delete_card,
+            commands::clear_mindmap_cards,
             commands::list_annotations,
             commands::update_annotation_geometry,
             commands::remove_annotation,

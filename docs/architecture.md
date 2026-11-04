@@ -1,7 +1,7 @@
 # PDFNote 架构基线（阶段 01 + 02）
 
-版本：0.17.0  
-状态：已落地工程骨架与 schema v6，OCR 为 macOS Apple Vision 单引擎，扫描页提供整页识别后的可选文字层，schema 升至 v8（`page_notes` 留白、`book_analysis`/`book_outline` 拆书）；标题链接由本地关键词字典驱动；公式可选交给用户配置的视觉模型转 LaTeX（默认不联网），全视图提供应用内元素右键菜单
+版本：0.18.0  
+状态：已落地工程骨架与 schema v6，OCR 为 macOS Apple Vision 单引擎，扫描页提供整页识别后的可选文字层，schema 升至 v8（`page_notes` 留白、`book_analysis`/`book_outline` 拆书）；AI 拆书的两阶段提示词、节点预算与解析截断均由读者设置的 `depth`（1–5 层，默认 2）驱动，`outline_json` 记录本次深度；标题链接由本地关键词字典驱动；公式可选交给用户配置的视觉模型转 LaTeX（默认不联网），全视图提供应用内元素右键菜单
 
 ## 1. 不可破坏的架构约束
 

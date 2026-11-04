@@ -41,6 +41,8 @@ export interface OutlineNode {
 export interface BookOutline {
   title: string
   mode: string
+  /** 生成骨架时读者选择的层级深度（旧数据没有时按 2 层处理）。 */
+  depth: number
   nodes: OutlineNode[]
 }
 
@@ -55,6 +57,8 @@ export async function analyzeBookChunk(input: {
   mode: DigestMode
   chunk_index: number
   pages: DigestPage[]
+  /** 深层拆解时阶段一会多抽名词与定义；旧调用缺省按 2 层。 */
+  depth?: number
 }): Promise<ChunkNote> {
   desktopOnly()
   return invoke('analyze_book_chunk', { input })
@@ -65,9 +69,14 @@ export async function listBookNotes(documentId: string, mode: DigestMode): Promi
   return invoke('list_book_notes', { documentId, mode })
 }
 
-export async function synthesizeBook(documentId: string, mode: DigestMode): Promise<BookOutline> {
+/** depth 由读者设置（1–5，默认 2），会同时影响提示词、节点预算与解析上限。 */
+export async function synthesizeBook(
+  documentId: string,
+  mode: DigestMode,
+  depth = 2,
+): Promise<BookOutline> {
   desktopOnly()
-  return invoke('synthesize_book', { documentId, mode })
+  return invoke('synthesize_book', { documentId, mode, depth })
 }
 
 export async function applyBookOutline(documentId: string, mode: DigestMode): Promise<number> {

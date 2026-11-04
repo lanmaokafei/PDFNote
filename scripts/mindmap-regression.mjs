@@ -91,6 +91,9 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
   window.__noteState = noteState
   const digestNotes = []
   window.__digestNotes = digestNotes
+  window.__synthesizeDepth = null
+  window.__chunkDepth = null
+  window.__lastOutline = null
   const layoutState = []
   window.__layoutState = layoutState
   window.__clearModes = []
@@ -107,6 +110,7 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
     list_book_notes: () => digestNotes,
     analyze_book_chunk: (args) => {
       const input = args?.input ?? {}
+      window.__chunkDepth = input.depth ?? null
       const pages = input.pages ?? []
       const note = {
         chunk_index: input.chunk_index,
@@ -125,18 +129,24 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
       digestNotes.push(note)
       return note
     },
-    synthesize_book: () => ({
-      title: '测试教材',
-      mode: 'structure',
-      nodes: [{
-        title: '背景',
-        excerpt: '熵用来度量不确定性',
+    synthesize_book: (args) => {
+      const depth = Math.min(5, Math.max(1, Number(args?.depth ?? 2)))
+      window.__synthesizeDepth = depth
+      const make = (level) => ({
+        title: level === 1 ? '背景' : `第 ${level} 层节点`,
+        excerpt: level === 1 ? '熵用来度量不确定性' : '原文摘录',
         page: 1,
         aliases: '',
-        children: [{ title: '为什么需要熵', excerpt: '编码长度的下界', page: 1, aliases: '', children: [] }],
-      }],
-    }),
-    apply_book_outline: () => 2,
+        children: level < depth ? [make(level + 1)] : [],
+      })
+      const outline = { title: '测试教材', mode: 'structure', depth, nodes: [make(1)] }
+      window.__lastOutline = outline
+      return outline
+    },
+    apply_book_outline: () => {
+      const count = (nodes) => nodes.reduce((sum, item) => sum + 1 + count(item.children ?? []), 0)
+      return count(window.__lastOutline?.nodes ?? [])
+    },
     clear_book_analysis: () => null,
     list_page_notes: (args) => noteState.filter((note) => note.document_id === args?.documentId),
     create_page_note: (args) => {
@@ -592,6 +602,84 @@ if (STEP === 'outline-back') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, standalone, nodesBefore, nodesAfter, viewport, viewportAfterZoom, nodeBox, paneBox, visible, nodeBoxAfterZoom }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+if (STEP === 'depth') {
+  const openDigest = async () => {
+    await page.waitForTimeout(1200)
+    const topButton = page.locator('.pdf-digest-toggle')
+    const dockButton = page.locator('.pdf-dock button[title="更多：缩放与跳页"]')
+    if (await topButton.count()) {
+      await topButton.click()
+    } else if (await dockButton.count()) {
+      await dockButton.click()
+      await page.locator('.pdf-dock-menu-wide', { hasText: 'AI 拆书' }).click()
+    } else {
+      problems.push('缺少 AI 拆书入口')
+    }
+    await page.waitForSelector('.digest-dialog', { timeout: 5000 })
+  }
+
+  await openDigest()
+  const select = page.locator('[data-testid="digest-depth"]')
+  if (!(await select.count())) {
+    problems.push('缺少拆分层级选择器')
+  } else {
+    const initial = await select.inputValue()
+    if (initial !== '2') problems.push(`默认拆分层级应为 2，实际 ${initial}`)
+    await select.selectOption('4')
+    await page.waitForTimeout(200)
+    const meta = await page.locator('.digest-meta').innerText()
+    if (!meta.includes('目标 4 层')) problems.push('切换层级后元信息未更新')
+    const stored = await page.evaluate(() => localStorage.getItem('pdfnote.digest.depth'))
+    if (stored !== '4') problems.push('拆分层级没有持久化')
+
+    // 刷新页面，验证读者设置被记住，且不带旧骨架。
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('.app-shell', { timeout: 10000 })
+    await page.waitForTimeout(600)
+    const docCard = page.locator('.document-card').first()
+    if (await docCard.count()) await docCard.click()
+    await page.waitForTimeout(3000)
+    await openDigest()
+    const remembered = await page.locator('[data-testid="digest-depth"]').inputValue()
+    if (remembered !== '4') problems.push(`刷新后拆分层级丢失：${remembered}`)
+    if (await page.locator('.digest-outline').count()) problems.push('刷新后仍显示旧骨架')
+
+    await page.locator('.digest-dialog footer button', { hasText: '开始分析' }).click()
+    await page.waitForTimeout(1200)
+    await page.locator('.digest-dialog footer button', { hasText: '汇总骨架' }).click()
+    await page.waitForSelector('.digest-outline', { timeout: 5000 })
+    const depthSent = await page.evaluate(() => window.__synthesizeDepth)
+    if (depthSent !== 4) problems.push(`汇总命令未收到 4 层：${depthSent}`)
+    const chunkDepth = await page.evaluate(() => window.__chunkDepth ?? null)
+    if (chunkDepth !== 4) problems.push(`阶段一未收到 4 层：${chunkDepth}`)
+    if (!(await page.locator('.digest-outline li[data-depth="3"]').count())) problems.push('4 层骨架没有渲染到第 4 层')
+    if (await page.locator('.digest-outline li[data-depth="4"]').count()) problems.push('4 层骨架出现了第 5 层')
+    const head = await page.locator('.digest-outline-head').innerText()
+    if (!head.includes('4 节点') || !head.includes('4 层 / 目标 4 层')) problems.push(`骨架统计不对：${head}`)
+
+    await page.locator('.digest-dialog footer button', { hasText: '写入脑图' }).click()
+    await page.waitForTimeout(800)
+    const applied = await page.locator('.digest-dialog').innerText()
+    if (!applied.includes('4 张卡片')) problems.push('4 层骨架写入数量不对')
+
+    // 改成 2 层：旧骨架必须失效，命令参数也要跟着变。
+    await page.locator('[data-testid="digest-depth"]').selectOption('2')
+    await page.waitForTimeout(150)
+    if (await page.locator('.digest-outline').count()) problems.push('切换层级后没有清掉旧骨架')
+    const applyButton = page.locator('.digest-dialog footer button', { hasText: '写入脑图' })
+    if (!(await applyButton.isDisabled())) problems.push('没有骨架时「写入脑图」应禁用')
+    await page.locator('.digest-dialog footer button', { hasText: '汇总骨架' }).click()
+    await page.waitForSelector('.digest-outline', { timeout: 5000 })
+    const shallowSent = await page.evaluate(() => window.__synthesizeDepth)
+    if (shallowSent !== 2) problems.push(`改回 2 层后命令仍收到 ${shallowSent}`)
+    if (await page.locator('.digest-outline li[data-depth="2"]').count()) problems.push('2 层骨架出现了第 3 层')
+  }
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

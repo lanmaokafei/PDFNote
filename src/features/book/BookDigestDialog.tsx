@@ -11,6 +11,13 @@ import {
   type DigestPage,
   type OutlineNode,
 } from '../../services/book'
+import {
+  countOutlineNodes,
+  DEPTH_OPTIONS,
+  outlineDepth,
+  readDepth,
+  saveDepth,
+} from './depth'
 import './BookDigestDialog.css'
 
 interface BookDigestDialogProps {
@@ -38,8 +45,14 @@ function OutlineTree({ nodes, depth = 0 }: { nodes: OutlineNode[]; depth?: numbe
   return (
     <ul className="digest-tree">
       {nodes.map((node, index) => (
-        <li key={`${depth}-${index}-${node.title}`} style={{ paddingLeft: depth === 0 ? 0 : 16 }}>
+        <li
+          key={`${depth}-${index}-${node.title}`}
+          data-depth={depth}
+          className={depth >= 2 ? 'is-deep' : ''}
+          style={{ paddingLeft: depth === 0 ? 0 : Math.min(depth, 5) * 14 }}
+        >
           <div className="digest-tree-row">
+            <span className="digest-tree-level">L{depth + 1}</span>
             <span className="digest-tree-title">{node.title}</span>
             {node.page !== null && <span className="digest-tree-page">P{node.page}</span>}
             {node.aliases && <span className="digest-tree-alias">{node.aliases}</span>}
@@ -62,6 +75,8 @@ export function BookDigestDialog({
   onApplied,
 }: BookDigestDialogProps) {
   const [mode, setMode] = useState<DigestMode>('structure')
+  /** 读者自己决定拆多深：默认 2 层，最细 5 层，选择会记住。 */
+  const [depth, setDepth] = useState<number>(() => readDepth())
   const [startPage, setStartPage] = useState(1)
   const [endPage, setEndPage] = useState(pageCount)
   const [chunkSize, setChunkSize] = useState(8)
@@ -84,6 +99,17 @@ export function BookDigestDialog({
     setError('')
     setNotice('')
   }, [])
+
+  const changeDepth = (raw: string) => {
+    const next = saveDepth(Number(raw))
+    setDepth(next)
+    // 旧骨架是按旧深度生成的，必须重新汇总；分块笔记仍保留，可直接再汇总一次。
+    setOutline(null)
+    setError('')
+    setNotice(
+      `已设为 ${next} 层（会记住）。请重新「汇总骨架」；若想让阶段一按新深度重抽名词与定义，可点「清空重来」再分析。`,
+    )
+  }
 
   const runAnalysis = useCallback(async () => {
     if (running) return
@@ -113,6 +139,7 @@ export function BookDigestDialog({
           mode,
           chunk_index: index,
           pages,
+          depth,
         })
         analyzed += 1
         setProgress((current) => ({ ...current, done: current.done + 1 }))
@@ -123,7 +150,7 @@ export function BookDigestDialog({
     } finally {
       setRunning(false)
     }
-  }, [chunkSize, documentId, getPageText, mode, range.end, range.start, range.total, running])
+  }, [chunkSize, depth, documentId, getPageText, mode, range.end, range.start, range.total, running])
 
   const runSynthesis = useCallback(async () => {
     if (running) return
@@ -131,15 +158,24 @@ export function BookDigestDialog({
     setError('')
     setNotice('')
     try {
-      const result = await synthesizeBook(documentId, mode)
+      const result = await synthesizeBook(documentId, mode, depth)
       setOutline(result)
-      setNotice(`骨架已生成：${result.nodes.length} 个一级主题。确认后写入脑图。`)
+      const actual = outlineDepth(result.nodes)
+      if (actual < depth) {
+        setNotice(
+          `目标 ${depth} 层，模型只给出 ${actual} 层（${countOutlineNodes(result.nodes)} 个节点）。可再汇总一次，或缩小每块页数让信息更集中。`,
+        )
+      } else {
+        setNotice(
+          `骨架已生成：${result.nodes.length} 个一级主题 · ${countOutlineNodes(result.nodes)} 个节点 · ${actual} 层。确认后写入脑图。`,
+        )
+      }
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
       setRunning(false)
     }
-  }, [documentId, mode, running])
+  }, [depth, documentId, mode, running])
 
   const apply = useCallback(async () => {
     if (running) return
@@ -207,6 +243,24 @@ export function BookDigestDialog({
           ))}
         </div>
 
+        <div className="digest-depth">
+          <label htmlFor="digest-depth-select">拆分层级</label>
+          <select
+            id="digest-depth-select"
+            data-testid="digest-depth"
+            value={depth}
+            disabled={running}
+            onChange={(event) => changeDepth(event.target.value)}
+          >
+            {DEPTH_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.value} 层 · {option.label}{option.value === 2 ? '（默认）' : ''}
+              </option>
+            ))}
+          </select>
+          <span className="digest-depth-hint">{DEPTH_OPTIONS[depth - 1]?.hint}</span>
+        </div>
+
         <div className="digest-range">
           <label>
             <span>起始页</span>
@@ -263,7 +317,7 @@ export function BookDigestDialog({
         </div>
 
         <p className="digest-meta">
-          共 {range.end - range.start + 1} 页 · {range.total} 块 · 模型未配置时无法运行
+          共 {range.end - range.start + 1} 页 · {range.total} 块 · 目标 {depth} 层（1–5 层可选，会自动记住）· 模型未配置时无法运行
         </p>
 
         {progress.total > 0 && (
@@ -289,7 +343,10 @@ export function BookDigestDialog({
             <div className="digest-outline-head">
               <BookOpen size={14} />
               <strong>{outline.title || '骨架预览'}</strong>
-              <span>{outline.nodes.length} 个主题</span>
+              <span>
+                {outline.nodes.length} 个主题 · {countOutlineNodes(outline.nodes)} 节点 ·{' '}
+                {outlineDepth(outline.nodes)} 层 / 目标 {outline.depth || depth} 层
+              </span>
             </div>
             <div className="digest-outline-body">
               <OutlineTree nodes={outline.nodes} />

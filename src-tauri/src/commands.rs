@@ -56,14 +56,15 @@ pub fn list_book_notes(
     book::list_notes(&state, document_id, mode)
 }
 
-/// AI 拆书阶段二：把分块笔记汇总成层级骨架。
+/// AI 拆书阶段二：把分块笔记汇总成层级骨架，depth 由读者设置（缺省 2 层）。
 #[tauri::command]
 pub async fn synthesize_book(
     state: State<'_, AppState>,
     document_id: String,
     mode: String,
+    depth: Option<u32>,
 ) -> Result<book::BookOutline, String> {
-    book::synthesize(&state, document_id, mode).await
+    book::synthesize(&state, document_id, mode, depth).await
 }
 
 /// 把骨架写入卡片与脑图（重复应用不会翻倍）。

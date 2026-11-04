@@ -95,8 +95,11 @@ PDFNote-backup-YYYYMMDD-HHMMSS.zip
 ## AI 拆书（schema v8）
 
 - `book_analysis(document_id, mode, chunk_index, page_start, page_end, summary, items_json, pages_json)`：阶段一的块级笔记，`(document_id, mode, chunk_index)` 唯一。
-- `book_outline(document_id, mode, outline_json)`：阶段二的层级骨架。
+- `book_outline(document_id, mode, outline_json)`：阶段二的层级骨架。0.18.0 起 `outline_json` 里的
+  `BookOutline.depth` 记录本次读者所选层数（1–5，默认 2）；这是 JSON 字段，不是新列，**schema 仍为 v8**。
+  旧备份的 `outline_json` 没有该字段，反序列化时按 `#[serde(default)]` 回落成 2，读取与写入脑图都不受影响。
 - 两表都随整库备份往返；合并导入时连同文档重映射，旧备份没有这些表时自动跳过。
+- 读者的层数偏好存前端 `localStorage`（`pdfnote.digest.depth`），不进数据库、不随备份迁移到另一台设备。
 
 ## 留白（schema v7）
 

@@ -27,6 +27,7 @@ import {
   LayoutGrid,
   Link2,
   ListTree,
+  Maximize,
   Merge,
   Pencil,
   Plus,
@@ -74,6 +75,7 @@ import {
   saveCanvasId,
 } from './canvas'
 import {
+  TREE_X_GAP,
   TREE_Y_GAP,
   buildTreeLayout,
   getOrderedMindmapCards,
@@ -86,6 +88,19 @@ import './mindmap.css'
 const nodeTypes = { mindmapCard: MindmapNode }
 // 缺失布局时复用同一对象，避免每次渲染生成新 position 引用。
 const DEFAULT_NODE_POSITION = { x: 80, y: 80 }
+// 视口外的节点不会挂载，也就永远测不到尺寸。给一个估算尺寸，让边线端点、命中测试与
+// 「适应视图」在第一次测量之前也有合理值；节点挂载后 measured 会覆盖它。
+const NODE_WIDTH = 254
+const COMPACT_NODE_WIDTH = 228
+const NODE_ESTIMATED_HEIGHT = 172
+// 超过这个规模就关掉 MiniMap：它每次节点变化都要为全部节点算一遍缩略矩形。
+const MINIMAP_NODE_LIMIT = 400
+// 超过这个规模不再自动 fitView：1483 个节点铺满屏幕时缩放会被压到下限，什么也看不清。
+const AUTO_FIT_NODE_LIMIT = 400
+// 大图的「适应视图」只框住前若干个节点，保证缩放后文字仍然可读。
+const READABLE_FIT_NODES = 40
+// 大纲首屏只渲染这么多行，其余按需追加（上千行全量挂载会卡住切换）。
+const OUTLINE_PAGE = 200
 // 传给 React Flow 的对象/数组必须保持引用稳定：StoreUpdater 会逐字段比较，
 // 每次渲染新建会让它在 effect 里重复写入 store，放大成 #185。
 const FIT_VIEW_OPTIONS = { padding: 0.18, maxZoom: 1 }
@@ -93,6 +108,14 @@ const FIT_VIEW_OPTIONS = { padding: 0.18, maxZoom: 1 }
 const PAN_ON_DRAG: number[] = [0, 1, 2]
 const MULTI_SELECTION_KEYS = ['Meta', 'Control', 'Shift']
 const COMPACT_VIEWPORT = { x: 30, y: 96, zoom: 0.9 }
+// 边线样式对象提到模块级：1483 条边每次重算都新建 style/marker 对象的话，
+// React Flow 的 memo 比较会全部失效，整层边线都会重渲染。
+const HIERARCHY_MARKER = { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#a8b2aa' }
+const HIERARCHY_EDGE_STYLE = { stroke: '#a8b2aa', strokeWidth: 1.4 }
+const LINK_MARKER = { type: MarkerType.ArrowClosed, width: 14, height: 14, color: '#7d9dab' }
+const LINK_EDGE_STYLE = { stroke: '#7d9dab', strokeWidth: 1.2, strokeDasharray: '5 4' }
+const LINK_LABEL_STYLE = { fill: '#6d8794', fontSize: 8 }
+const LINK_LABEL_BG_STYLE = { fill: '#f4f7f4', fillOpacity: 0.9 }
 
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
@@ -139,6 +162,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
   // 超过阈值后本秒内停止回写，直接断开 StoreUpdater ↔ onNodesChange 的回路。
   const measuredBurstRef = useRef({ windowStart: 0, count: 0 })
   const arrangeTimerRef = useRef<number | null>(null)
+  /** 首次加载只自动适配一次视图；切换画布时不要反复抢用户的视口。 */
+  const initialFitRef = useRef(false)
   const [loading, setLoading] = useState(true)
   const [hasLoaded, setHasLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -147,6 +172,11 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
   const [editor, setEditor] = useState<'new' | string | null>(null)
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null)
   const [viewMode, setViewMode] = useState<'canvas' | 'outline'>('canvas')
+  /**
+   * 大纲一次只挂载前 OUTLINE_PAGE 行。1483 行 × 两个可展开字段 + KaTeX 会直接把
+   * 切换动作卡住几秒；其余行按需追加，成本随用户实际翻到的位置增长。
+   */
+  const [outlineLimit, setOutlineLimit] = useState(OUTLINE_PAGE)
   const [exporting, setExporting] = useState(false)
   const [links, setLinks] = useState<CardLink[]>([])
   const [tagTarget, setTagTarget] = useState<string | null>(null)
@@ -195,6 +225,29 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
     [cards, collapsedIds, recallActive, recallSort],
   )
   const visibleIds = useMemo(() => new Set(orderedVisibleCards.map((card) => card.id)), [orderedVisibleCards])
+
+  /**
+   * 大图上「适应视图」只框住前几十个节点：1483 个节点全部塞进 700px 宽的分栏时，
+   * 缩放会被压到 0.15 的下限，卡片变成一片看不清的色块，等于没适配。
+   *
+   * 这里用 ref 读最新的可见卡片，保证函数身份稳定 —— 否则 refresh 的依赖每次
+   * 都会变化，effect → refresh → setState → effect 会形成无限加载回环。
+   */
+  const visibleCardsRef = useRef(orderedVisibleCards)
+  useEffect(() => {
+    visibleCardsRef.current = orderedVisibleCards
+  }, [orderedVisibleCards])
+  const fitReadable = useCallback((duration = 0) => {
+    const current = visibleCardsRef.current
+    const options = current.length > AUTO_FIT_NODE_LIMIT
+      ? {
+        ...FIT_VIEW_OPTIONS,
+        duration,
+        nodes: current.slice(0, READABLE_FIT_NODES).map((card) => ({ id: card.id })),
+      }
+      : { ...FIT_VIEW_OPTIONS, duration }
+    void fitViewInstance(options)
+  }, [fitViewInstance])
   /** 点击页码标签：切到该文档并跳到对应页。 */
   const openSource = useCallback((cardId: string) => {
     const card = cardsById[cardId]
@@ -246,21 +299,39 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
     previousViewModeRef.current = viewMode
     if (viewMode !== 'canvas' || previous !== 'outline' || compact) return
     const timer = window.setTimeout(() => {
-      fitViewInstance({ ...FIT_VIEW_OPTIONS, duration: 0 })
+      fitReadable(0)
     }, 180)
     return () => window.clearTimeout(timer)
-  }, [compact, fitViewInstance, viewMode])
+  }, [compact, fitReadable, viewMode])
 
-  const outlineForest = useMemo(() => buildOutlineForest(cards), [cards])
+  // 大纲数据只在切到大纲时构建：画布视图下对着 1483 张卡建森林 + 展开行是纯浪费。
+  const outlineForest = useMemo(
+    () => buildOutlineForest(viewMode === 'outline' ? cards : []),
+    [cards, viewMode],
+  )
   const outlineCollapsedIds = useMemo(
-    () => new Set(cards.filter((card) => card.collapsed).map((card) => card.id)),
-    [cards],
+    () => new Set(
+      viewMode === 'outline' ? cards.filter((card) => card.collapsed).map((card) => card.id) : [],
+    ),
+    [cards, viewMode],
   )
   const outlineRows = useMemo(
     () => flattenOutline(outlineForest, (id) => outlineCollapsedIds.has(id)),
     [outlineCollapsedIds, outlineForest],
   )
+  useEffect(() => {
+    if (viewMode === 'outline') setOutlineLimit(OUTLINE_PAGE)
+  }, [viewMode])
   const parentCardIds = useMemo(() => new Set(parentIds), [parentIds])
+  /** 父 → 直接子节点数。节点组件据此 O(1) 决定是否显示折叠按钮，不再各自扫全表。 */
+  const childCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const card of cards) {
+      if (!card.parent_id || !parentIds.has(card.parent_id)) continue
+      counts.set(card.parent_id, (counts.get(card.parent_id) ?? 0) + 1)
+    }
+    return counts
+  }, [cards, parentIds])
 
   // 节点 data 与卡片列表同生命周期：位置/选中变化重建 nodes 时复用同一对象，
   // React Flow 才不会把“位置更新”误判成“节点内容更新”。
@@ -280,11 +351,14 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
         // data 必须保持稳定引用，否则 StoreUpdater 与 onNodesChange 会形成更新回环（React #185）。
         data: nodeData.get(card.id) ?? { card_id: card.id },
         selected: selectedIds.has(card.id),
+        // 未挂载（视口外）的节点没有 measured，用估算值兜住 fitView / 边线计算。
+        width: size?.width ?? (compact ? COMPACT_NODE_WIDTH : NODE_WIDTH),
+        height: size?.height ?? NODE_ESTIMATED_HEIGHT,
         // 保留 React Flow 的实测尺寸，否则拖拽时会提示节点未初始化。
         ...(size ? { measured: size } : {}),
       }
     }),
-    [measuredSizes, nodeData, orderedVisibleCards, positions, selectedIds],
+    [compact, measuredSizes, nodeData, orderedVisibleCards, positions, selectedIds],
   )
   const edges = useMemo<Edge[]>(() => {
     const hierarchy = orderedVisibleCards.flatMap((card) => {
@@ -294,8 +368,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
         source: card.parent_id,
         target: card.id,
         type: 'smoothstep' as const,
-        markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#a8b2aa' },
-        style: { stroke: '#a8b2aa', strokeWidth: 1.4 },
+        markerEnd: HIERARCHY_MARKER,
+        style: HIERARCHY_EDGE_STYLE,
       }]
     })
     const references = links
@@ -306,40 +380,57 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
         target: link.target_card_id,
         type: 'straight' as const,
         label: '链接',
-        labelStyle: { fill: '#6d8794', fontSize: 8 },
-        labelBgStyle: { fill: '#f4f7f4', fillOpacity: 0.9 },
-        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: '#7d9dab' },
-        style: { stroke: '#7d9dab', strokeWidth: 1.2, strokeDasharray: '5 4' },
+        labelStyle: LINK_LABEL_STYLE,
+        labelBgStyle: LINK_LABEL_BG_STYLE,
+        markerEnd: LINK_MARKER,
+        style: LINK_EDGE_STYLE,
       }))
     return [...hierarchy, ...references]
   }, [links, orderedVisibleCards, visibleIds])
 
   const refresh = useCallback(async (): Promise<string[]> => {
+    const perfStart = performance.now()
+    const timings: Record<string, number> = {}
     setLoading(true)
     setError('')
     try {
-      const [savedLayouts, , allLinks] = await Promise.all([
+      // 画布列表与布局 / 卡片 / 链接并行取，少一次串行 IPC 往返。
+      const [savedLayouts, , allLinks, list] = await Promise.all([
         listMindmapLayout(canvasId),
         loadCards(),
         listCardLinks(),
+        listMindmapCanvases(documentId ?? null),
       ])
+      timings.ipc = Math.round(performance.now() - perfStart)
       setLinks(allLinks)
+      setCanvases(list)
       // 卡片归属 = 这张画布里是否有 mindmap_layout 行；绝不把别的画布卡片顺手补进来。
       const scopedIds = new Set(savedLayouts.map((layout) => layout.card_id))
       const latestCards = Object.values(useCardStore.getState().cardsById).filter(
         (card) => card.surface_mindmap && scopedIds.has(card.id),
       )
-      const generated = buildTreeLayout(latestCards)
       const savedById = new Map(savedLayouts.map((layout) => [layout.card_id, layout]))
       const nextPositions: Record<string, Point> = {}
-      const missing: MindmapLayoutInput[] = []
+      const stranded: Card[] = []
 
       for (const card of latestCards) {
         const saved = savedById.get(card.id)
-        const hasSavedPosition = saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)
-        const point = hasSavedPosition ? { x: saved.x, y: saved.y } : generated[card.id]
-        nextPositions[card.id] = point
-        if (!hasSavedPosition) missing.push({ card_id: card.id, canvas_id: canvasId, ...point })
+        if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+          nextPositions[card.id] = { x: saved.x, y: saved.y }
+        } else {
+          stranded.push(card)
+        }
+      }
+
+      // 只有真的缺坐标才跑布局：已经排好版的画布（哪怕 1483 张）打开时不再做一次 O(n) 重排。
+      const missing: MindmapLayoutInput[] = []
+      if (stranded.length) {
+        const generated = buildTreeLayout(latestCards)
+        for (const card of stranded) {
+          const point = generated[card.id] ?? DEFAULT_NODE_POSITION
+          nextPositions[card.id] = point
+          missing.push({ card_id: card.id, canvas_id: canvasId, ...point })
+        }
       }
 
       setPositions(nextPositions)
@@ -347,10 +438,30 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
       setLayoutScope(canvasId)
       setSelectedIds(new Set())
       setHasLoaded(true)
+      timings.compute = Math.round(performance.now() - perfStart)
+      // 只在内存里留一份加载耗时，供性能回归读取；不打印，避免生产环境刷控制台。
+      window.requestAnimationFrame(() => {
+        ;(window as unknown as { __mindmapPerf?: unknown }).__mindmapPerf = {
+          ...timings,
+          paint: Math.round(performance.now() - perfStart),
+          cards: latestCards.length,
+        }
+      })
+
+      // 首屏只在小图上自动适配；几千张卡铺满屏幕会把缩放压到下限，什么都看不清，
+      // 因此大图停在左上角（分组根节点所在处），由用户自己决定看哪里。
+      if (!compact && !initialFitRef.current) {
+        initialFitRef.current = true
+        if (latestCards.length > AUTO_FIT_NODE_LIMIT) {
+          setNotice(`这个画布有 ${latestCards.length} 个节点，已停在左上角；拖动画布或点「适应视图」查看全图。`)
+        } else {
+          window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+            fitReadable(0)
+          }))
+        }
+      }
+
       if (missing.length) await saveMindmapLayout(missing)
-      // 让下拉里的「N 张」与实际布局同步。
-      const list = await listMindmapCanvases(documentId ?? null)
-      setCanvases(list)
       return [...scopedIds]
     } catch (reason) {
       setError(`脑图加载失败：${errorMessage(reason)}`)
@@ -358,7 +469,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
     } finally {
       setLoading(false)
     }
-  }, [canvasId, documentId, loadCards])
+  }, [canvasId, compact, documentId, fitReadable, loadCards])
 
   useEffect(() => {
     void refresh()
@@ -404,19 +515,35 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
     if (!hasLoaded || layoutScope !== canvasId) return
     const missing = cards.filter((card) => !positions[card.id])
     if (!missing.length) return
-    const generated = buildTreeLayout(cards)
+
+    // 大画布上补一两张新卡时不再为全部节点重排：贴着父节点放，找不到父节点就排到已有内容下方。
+    let points: Record<string, Point>
+    if (cards.length > AUTO_FIT_NODE_LIMIT) {
+      let maxY = 0
+      for (const point of Object.values(positions)) maxY = Math.max(maxY, point.y)
+      points = {}
+      missing.forEach((card, index) => {
+        const parent = card.parent_id ? positions[card.parent_id] : undefined
+        points[card.id] = parent
+          ? { x: parent.x + TREE_X_GAP, y: parent.y + (index + 1) * 80 }
+          : { x: 80, y: maxY + TREE_Y_GAP * (index + 1) }
+      })
+    } else {
+      points = buildTreeLayout(cards)
+    }
+
     const fallback = { x: 80, y: 80 }
     setPositions((current) => {
       const next = { ...current }
       missing.forEach((card) => {
-        next[card.id] = generated[card.id] ?? fallback
+        next[card.id] = points[card.id] ?? fallback
       })
       return next
     })
     void saveMindmapLayout(missing.map((card) => ({
       card_id: card.id,
       canvas_id: canvasId,
-      ...(generated[card.id] ?? fallback),
+      ...(points[card.id] ?? fallback),
     }))).catch(() => undefined)
   }, [canvasId, cards, hasLoaded, layoutScope, positions])
 
@@ -437,14 +564,21 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
     setCanvasId(resolved)
   }, [canvasId, documentId])
 
-  /** Anki 导入在后端单事务建树；这里刷新成员、自动整理并重新对齐视口。 */
+  /** Anki 导入在后端单事务建树；小图刷新后整理并对齐视口，上千张时不再全量重排。 */
   const handleAnkiImported = useCallback((result: AnkiImportResult) => {
     setAnkiOpen(false)
-    setNotice(`已导入 ${result.imported} 张卡片、${result.groups} 个分组，跳过 ${result.skipped} 张重复题目。`)
     void refresh().then((scopedIds) => {
       const scoped = new Set(scopedIds)
       const latest = Object.values(useCardStore.getState().cardsById)
         .filter((card) => card.surface_mindmap && scoped.has(card.id))
+      const summary = `已导入 ${result.imported} 张卡片、${result.groups} 个分组，跳过 ${result.skipped} 张重复题目。`
+      // 上千张卡时后端已经按牌组层级给了坐标；再全量重排 + 写回 1400 多行布局既慢，
+      // fitView 之后缩放也会被压到下限，不如停在左上角让用户自己逛。
+      if (latest.length > AUTO_FIT_NODE_LIMIT) {
+        setNotice(`${summary} 画布节点较多，已停在左上角，拖动画布或用「适应视图」查看。`)
+        return
+      }
+      setNotice(summary)
       const arranged = buildTreeLayout(latest)
       void saveMindmapLayout(Object.entries(arranged).map(([cardId, point]) => ({
         card_id: cardId,
@@ -455,12 +589,12 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
         if (arrangeTimerRef.current !== null) window.clearTimeout(arrangeTimerRef.current)
         arrangeTimerRef.current = window.setTimeout(() => {
           arrangeTimerRef.current = null
-          fitViewInstance({ ...FIT_VIEW_OPTIONS, duration: 320 })
+          fitReadable(320)
         }, 160)
       }).catch((reason) => setError(`导入成功但布局整理失败：${errorMessage(reason)}`))
     })
     onCardsChanged()
-  }, [canvasId, fitViewInstance, onCardsChanged, refresh])
+  }, [canvasId, fitReadable, onCardsChanged, refresh])
 
   const syncCards = useCallback(async () => {
     await loadCards()
@@ -654,11 +788,11 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
       if (arrangeTimerRef.current !== null) window.clearTimeout(arrangeTimerRef.current)
       arrangeTimerRef.current = window.setTimeout(() => {
         arrangeTimerRef.current = null
-        fitViewInstance({ ...FIT_VIEW_OPTIONS, duration: 320 })
+        fitReadable(320)
       }, 120)
       setNotice(`已整理并保存 ${cards.length} 个节点，视图已对齐。`)
     })
-  }, [canvasId, cards, fitViewInstance, layoutScope, runTask])
+  }, [canvasId, cards, fitReadable, layoutScope, runTask])
 
   const saveSelected = useCallback(() => {
     const selected = nodes.filter((node) => selectedIds.has(node.id))
@@ -985,6 +1119,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
           { id: 'anki', label: '导入 Anki 牌组…', icon: FileText, disabled: busy, onSelect: () => setAnkiOpen(true) },
           { id: 'refresh', label: '刷新脑图', icon: RefreshCw, onSelect: () => void refresh() },
           { id: 'arrange', label: '自动整理节点', icon: Focus, disabled: busy || !cards.length, onSelect: autoArrange },
+          { id: 'fit', label: '适应视图', icon: Maximize, disabled: !cards.length, onSelect: () => fitReadable(320) },
           { id: 'save', label: '保存所选布局', icon: LayoutGrid, disabled: busy || selectedIds.size === 0, onSelect: saveSelected },
           { id: 'clear', label: '清空脑图卡片…', icon: Trash2, danger: true, disabled: busy || !cards.length, onSelect: () => setClearOpen(true) },
         ] },
@@ -1015,6 +1150,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
     <MindmapNodeContext.Provider value={{
       busy,
       collapsedIds,
+      childCounts,
       recallActive,
       revealedIds,
       ratedIds,
@@ -1094,6 +1230,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
         <div className="mindmap-toolbar-actions">
           <button type="button" onClick={() => void refresh()} disabled={loading || busy}>刷新</button>
           <button type="button" onClick={autoArrange} disabled={busy || !cards.length || viewMode === 'outline'}>自动整理</button>
+          <button type="button" onClick={() => fitReadable(320)} disabled={!cards.length || viewMode === 'outline'} title="把视图对准内容；节点很多时只对准前几十个，保证文字可读">适应视图</button>
           <button type="button" onClick={saveSelected} disabled={busy || !cards.length || viewMode === 'outline'}>保存所选布局</button>
           <button type="button" onClick={() => setMergeOpen(true)} disabled={busy || selectedIds.size < 2} title="先多选两张以上卡片">合并所选</button>
           <button type="button" onClick={() => void handleExportMarkdown()} disabled={exporting || !cards.length}>{exporting ? '导出中…' : '导出 MD'}</button>
@@ -1172,8 +1309,10 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
             onConnect={handleConnect}
             onNodeContextMenu={handleNodeContextMenu}
             onPaneContextMenu={handlePaneContextMenu}
-            fitView={!compact}
             fitViewOptions={FIT_VIEW_OPTIONS}
+            // 视口外节点不挂载：1483 张卡时 DOM 从 3.3 万降到几百，
+            // 首次可见与拖动画布的帧率都靠它。小图仍全量渲染，行为与以前一致。
+            onlyRenderVisibleElements={nodes.length > 60}
             defaultViewport={compact ? COMPACT_VIEWPORT : undefined}
             minZoom={0.15}
             maxZoom={1.8}
@@ -1195,7 +1334,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
               </Panel>
             )}
             <Controls position="bottom-left" showInteractive={false} />
-            {!compact && (
+            {!compact && nodes.length <= MINIMAP_NODE_LIMIT && (
               <MiniMap
                 position="bottom-right"
                 pannable
@@ -1224,7 +1363,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
                 </div>
               </div>
               <div className="mindmap-outline-list">
-                {outlineRows.map(({ card, depth }) => {
+                {outlineRows.slice(0, outlineLimit).map(({ card, depth }) => {
                   const hasChildren = parentCardIds.has(card.id)
                   const collapsed = outlineCollapsedIds.has(card.id)
                   return (
@@ -1274,6 +1413,13 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
                     </div>
                   )
                 })}
+                {outlineRows.length > outlineLimit && (
+                  <div className="mindmap-outline-more">
+                    <button type="button" onClick={() => setOutlineLimit((value) => value + OUTLINE_PAGE)}>
+                      继续显示（还有 {outlineRows.length - outlineLimit} 行）
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
             )}

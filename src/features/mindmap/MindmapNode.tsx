@@ -22,14 +22,11 @@ function cardTitle(card: Card): string {
 
 export const MindmapNode = memo(function MindmapNode({ data, selected }: NodeProps<MindmapFlowNode>) {
   const card = useCardStore((state) => state.cardsById[data.card_id])
-  const childCount = useCardStore(
-    (state) => Object.values(state.cardsById).filter(
-      (candidate) => candidate.surface_mindmap && candidate.parent_id === data.card_id,
-    ).length,
-  )
   const context = useContext(MindmapNodeContext)
   if (!context) throw new Error('MindmapNode must be rendered inside MindmapWorkspace')
   if (!card) return <div className="mindmap-node mindmap-node-missing">卡片已不可用</div>
+  // 子节点数由工作区预算好：节点内部不再扫全表（否则 1000+ 卡时是 O(n²)）。
+  const childCount = context.childCounts.get(card.id) ?? 0
 
   // 摘录能排版成公式时不再显示选区截图：两者内容重复，图片还会把公式挤出卡片。
   const excerptHasMath = hasMathContent(card.excerpt)

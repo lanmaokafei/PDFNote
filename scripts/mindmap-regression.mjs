@@ -416,6 +416,58 @@ await page.goto('http://127.0.0.1:1420/', { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.app-shell')
 await page.waitForTimeout(600)
 
+// STEP=perf：只测量「点开文档 → 脑图可用」这段，不跑拖拽 / resize，避免污染数据。
+// 用于几千张卡片时的加载性能回归（画布默认嵌入在右栏，视口里只放得下几个节点）。
+if (process.env.STEP === 'perf') {
+  await page.evaluate(() => {
+    window.__perf = { longTasks: [], start: performance.now() }
+    try {
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          window.__perf.longTasks.push(Math.round(entry.duration))
+        }
+      }).observe({ entryTypes: ['longtask'] })
+    } catch { /* 老浏览器不支持 longtask */ }
+  })
+  const started = Date.now()
+  await page.locator('.document-card').first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, { timeout: 120000 })
+  const firstNodeMs = Date.now() - started
+  await page.waitForTimeout(2500)
+  const settleMs = Date.now() - started
+  const metrics = await page.evaluate(() => {
+    const perf = window.__perf
+    const longTasks = perf.longTasks
+    return {
+      nodes: document.querySelectorAll('.mindmap-node').length,
+      flowNodes: document.querySelectorAll('.react-flow__node').length,
+      edges: document.querySelectorAll('.react-flow__edge').length,
+      katex: document.querySelectorAll('.mindmap-node .katex').length,
+      images: document.querySelectorAll('.mindmap-node img').length,
+      domTotal: document.querySelectorAll('*').length,
+      longTaskCount: longTasks.length,
+      longTaskTotal: longTasks.reduce((sum, value) => sum + value, 0),
+      longTaskMax: longTasks.length ? Math.max(...longTasks) : 0,
+      heapMb: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
+      timings: window.__mindmapPerf ?? null,
+    }
+  })
+  // 大图必须依赖视口裁剪：1483 张卡时 DOM 里只该挂视口内的十几个节点。
+  if (CARD_COUNT > 200 && metrics.nodes > 80) {
+    problems.push(`视口裁剪失效：${CARD_COUNT} 张卡挂载了 ${metrics.nodes} 个节点`)
+  }
+  await browser.close()
+  console.log(JSON.stringify({
+    problems,
+    step: 'perf',
+    cardCount: CARD_COUNT,
+    firstNodeMs,
+    settleMs,
+    ...metrics,
+  }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // 打开资料库里的文档 → 左 PDF 右脑图
 const card = page.locator('.document-card').first()
 if (await card.count()) {

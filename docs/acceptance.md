@@ -18,6 +18,7 @@
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
+| 大画布性能（0.22.0） | `STEP=perf CARD_COUNT=1483 node scripts/mindmap-regression.mjs` | 首节点 898ms（原 8437ms）、DOM 474（原 33745）、堆 60MB（原 215MB）；>200 卡时断言挂载节点 ≤80 |
 
 Rust 测试覆盖：
 

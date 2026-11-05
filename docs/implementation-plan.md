@@ -74,6 +74,7 @@
 - 阶段 1–5 的源码闭环已落地：数据层、PDF 导入/渲染/标注、三视图联动、脑图、FSRS、文档/脑图回忆、备份恢复。
 - Rust 37 项测试通过（含 v6 迁移、标题链接别名、页面文字缓存、旧备份兼容与 2 项 Vision 真机）、前端 35 项测试、TypeScript 构建、Oxlint 0 warning 全部通过；视觉模型通道含本地 mock 端到端测试。
 - Tauri release `.app` / DMG 已生成并通过 `hdiutil verify`；首次启动建库且 `quick_check=ok`。
-- 阶段 6：macOS 交付闭环已完成（0.21.0，含扫描页可选文字层、全视图元素右键菜单、标题链接、可选 AI 公式识别、可设层级的 AI 拆书、卡片正文展开阅读、多画布脑图与 AnkiDroid txt 导入，以及复习工作区的主动回忆输入与本地答案对比反馈；schema v9，0.21.0 不改数据库结构）。剩余为签名/公证、系统强退恢复演练与性能采样；Windows/Linux 不在交付范围内。
+- 阶段 6：macOS 交付闭环已完成（0.22.0，含扫描页可选文字层、全视图元素右键菜单、标题链接、可选 AI 公式识别、可设层级的 AI 拆书、卡片正文展开阅读、多画布脑图与 AnkiDroid txt 导入、复习工作区的主动回忆输入与本地答案对比反馈，以及大画布视口裁剪；schema v9，0.21.0 / 0.22.0 不改数据库结构）。剩余为签名/公证、系统强退恢复演练与性能采样；Windows/Linux 不在交付范围内。
+- 0.22.0 的性能优化只改前端渲染策略：`onlyRenderVisibleElements`（>60 节点）、工作区预算 `childCounts`、缺坐标才重排、大图不做全量 fitView、大纲 200 行追加、>400 节点关闭 MiniMap。数据格式、schema、备份均未变化。详见 `docs/mindmap-performance.md`。
 - 0.20.0 新增的画布归属不引入第三份内容副本：`mindmap_layout(canvas_id, card_id)` 即成员关系，`surface_mindmap` 为派生开关；备份 overwrite / merge 已纳入 `mindmap_canvases`，旧备份自动补 `main`。详见 `docs/mindmap-canvases.md`。
 - 详细逐项证据见 `docs/acceptance.md`。

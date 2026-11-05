@@ -444,6 +444,19 @@ button.mindmap-field-label:hover { color: #456c43; }
 
 .mindmap-outline-row:hover { background: #f4f7f0; }
 
+/* 上千行时首屏只挂 200 行，剩下的按需追加，避免切换大纲卡住几秒。 */
+.mindmap-outline-more { padding: 16px 18px 24px; text-align: center; }
+.mindmap-outline-more button {
+  padding: 7px 14px;
+  border: 1px dashed #c9d5c1;
+  border-radius: 6px;
+  color: #5c7057;
+  background: #f6f9f1;
+  font-size: 10px;
+  cursor: pointer;
+}
+.mindmap-outline-more button:hover { border-color: #a9bd9c; background: #eef4e6; }
+
 .mindmap-outline-toggle {
   flex: 0 0 18px;
   width: 18px;

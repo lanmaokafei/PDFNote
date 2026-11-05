@@ -4,6 +4,14 @@ import type { Rating } from '../../domain/card'
 export interface MindmapNodeContextValue {
   busy: boolean
   collapsedIds: ReadonlySet<string>
+  /**
+   * 当前画布的「父 → 直接子节点数」。
+   *
+   * 之前每个节点用 store selector 扫全表统计子节点，复杂度 O(节点数²)：
+   * 1483 张卡时会做 220 万次过滤，而且任何一次 store 更新都会重跑一遍。
+   * 现在由工作区一次性算好传下来，节点只做 O(1) 查表。
+   */
+  childCounts: ReadonlyMap<string, number>
   recallActive: boolean
   revealedIds: ReadonlySet<string>
   ratedIds: ReadonlySet<string>

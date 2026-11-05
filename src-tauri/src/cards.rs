@@ -1,4 +1,5 @@
 use crate::{
+    canvases,
     models::{
         annotation_from_row, attach_tags, card_from_row, ink_from_row, link_from_row, now,
         Annotation, AnnotationGeometry, AnnotationInput, Card, CardLink, CreateCardInput,
@@ -67,10 +68,18 @@ pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, Str
         None => (None, None, None),
     };
 
+    let canvas_id = input
+        .canvas_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| canvases::DEFAULT_CANVAS_ID.into());
     let id = Uuid::new_v4().to_string();
     let timestamp = now();
     let mut database = state.db()?;
     let transaction = database.transaction().map_err(|error| error.to_string())?;
+    if !canvases::canvas_exists(&transaction, &canvas_id)? {
+        return Err(format!("画布 {canvas_id} 不存在，请先新建画布"));
+    }
     if let Some(parent_id) = &input.parent_id {
         let exists: bool = transaction
             .query_row(
@@ -133,8 +142,8 @@ pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, Str
 
     transaction
         .execute(
-            "INSERT INTO mindmap_layout (card_id, updated_at) VALUES (?1, ?2)",
-            params![id, timestamp],
+            "INSERT INTO mindmap_layout (card_id, canvas_id, updated_at) VALUES (?1, ?2, ?3)",
+            params![id, canvas_id, timestamp],
         )
         .map_err(|error| error.to_string())?;
     let card = get_card(&transaction, &id)?;
@@ -149,7 +158,8 @@ pub fn list_cards(state: &AppState, limit: Option<u32>) -> Result<Vec<Card>, Str
         .prepare(&query)
         .map_err(|error| error.to_string())?;
     let mut cards = statement
-        .query_map(params![limit.unwrap_or(500).clamp(1, 500)], card_from_row)
+        // 导入 Anki 牌组后单库可能有数千张卡片，上限放宽到 10000 并由前端按需过滤画布。
+        .query_map(params![limit.unwrap_or(2000).clamp(1, 10_000)], card_from_row)
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
@@ -382,7 +392,16 @@ pub fn set_card_collapsed(state: &AppState, id: String, collapsed: bool) -> Resu
     get_card(&database, &id)
 }
 
-pub fn remove_card_from_mindmap(state: &AppState, id: String) -> Result<(), String> {
+/// 从指定画布移除卡片。卡片若仍属于其他画布，只删除该画布的布局行，
+/// 不动全局的父子结构；完全离开脑图时才重挂子节点并收回投影。
+pub fn remove_card_from_mindmap(
+    state: &AppState,
+    id: String,
+    canvas_id: Option<String>,
+) -> Result<(), String> {
+    let canvas_id = canvas_id
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| canvases::DEFAULT_CANVAS_ID.into());
     let timestamp = now();
     let mut database = state.db()?;
     let transaction = database.transaction().map_err(|error| error.to_string())?;
@@ -397,19 +416,32 @@ pub fn remove_card_from_mindmap(state: &AppState, id: String) -> Result<(), Stri
     let old_parent = old_parent.ok_or_else(|| "card not found".to_string())?;
     transaction
         .execute(
-            "UPDATE cards SET parent_id = ?1, updated_at = ?2 WHERE parent_id = ?3",
-            params![old_parent, timestamp, id],
+            "DELETE FROM mindmap_layout WHERE card_id = ?1 AND canvas_id = ?2",
+            params![id, canvas_id],
         )
         .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "UPDATE cards SET surface_mindmap = 0, parent_id = NULL, updated_at = ?1 WHERE id = ?2",
-            params![timestamp, id],
+    let still_visible: bool = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM mindmap_layout WHERE card_id = ?1)",
+            params![id],
+            |row| row.get(0),
         )
         .map_err(|error| error.to_string())?;
-    transaction
-        .execute("DELETE FROM mindmap_layout WHERE card_id = ?1", params![id])
-        .map_err(|error| error.to_string())?;
+    if !still_visible {
+        transaction
+            .execute(
+                "UPDATE cards SET parent_id = ?1, updated_at = ?2 WHERE parent_id = ?3",
+                params![old_parent, timestamp, id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "UPDATE cards SET surface_mindmap = 0, parent_id = NULL, updated_at = ?1 WHERE id = ?2",
+                params![timestamp, id],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    canvases::sync_mindmap_surface(&transaction)?;
     transaction.commit().map_err(|error| error.to_string())
 }
 
@@ -425,48 +457,58 @@ pub fn delete_card(state: &AppState, id: String) -> Result<(), String> {
     transaction.commit().map_err(|error| error.to_string())
 }
 
-/// 批量清空当前脑图里的卡片，返回受影响数量。
+/// 批量清空指定画布里的卡片，返回受影响数量。
 ///
-/// `remove`：只关闭脑图投影，卡片仍留在 PDF 标注与复习队列；布局是脑图投影的
-/// 附属数据，必须一并清掉，否则下次重新加入脑图会回到旧坐标。
-/// `delete`：彻底删除卡片，annotations / review_logs / card_tags / card_links /
-/// mindmap_layout 都由外键级联清理。两种模式都必须在单个事务里完成。
-pub fn clear_mindmap_cards(state: &AppState, mode: String) -> Result<u32, String> {
+/// `remove`：只删该画布的布局行；仍属于其他画布的卡片保持可见，
+/// 完全离开脑图的卡片才收回 surface_mindmap 并断开父子引用。
+/// `delete`：彻底删除该画布的卡片本体（会级联清掉它在所有画布的布局，
+/// 因此 UI 必须提示这一档会影响其他画布）。
+pub fn clear_mindmap_cards(
+    state: &AppState,
+    mode: String,
+    canvas_id: Option<String>,
+) -> Result<u32, String> {
     if mode != "remove" && mode != "delete" {
         return Err("清空模式只能是 remove 或 delete".into());
     }
+    let canvas_id = canvas_id
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| canvases::DEFAULT_CANVAS_ID.into());
     let mut database = state.db()?;
     let transaction = database.transaction().map_err(|error| error.to_string())?;
     let count: i64 = transaction
         .query_row(
-            "SELECT COUNT(*) FROM cards WHERE surface_mindmap = 1",
-            [],
+            "SELECT COUNT(*) FROM mindmap_layout WHERE canvas_id = ?1",
+            params![canvas_id],
             |row| row.get(0),
         )
         .map_err(|error| error.to_string())?;
 
     if mode == "remove" {
-        // 所有脑图卡片都会被隐藏，先断开父子引用，避免残留指向隐藏卡片的孤儿父节点。
         transaction
-            .execute(
-                "UPDATE cards SET parent_id = NULL WHERE parent_id IS NOT NULL",
-                [],
-            )
+            .execute("DELETE FROM mindmap_layout WHERE canvas_id = ?1", params![canvas_id])
             .map_err(|error| error.to_string())?;
+        // 只对「已不在任何画布」的卡片断父子关系，避免破坏其他画布的树。
         transaction
             .execute(
-                "UPDATE cards SET surface_mindmap = 0, collapsed = 0, updated_at = ?1
-                 WHERE surface_mindmap = 1",
+                "UPDATE cards SET parent_id = NULL, updated_at = ?1
+                 WHERE parent_id IS NOT NULL AND parent_id IN (
+                    SELECT id FROM cards c
+                    WHERE NOT EXISTS (SELECT 1 FROM mindmap_layout l WHERE l.card_id = c.id)
+                 )",
                 params![now()],
             )
             .map_err(|error| error.to_string())?;
         transaction
             .execute(
-                "DELETE FROM mindmap_layout
-                 WHERE card_id IN (SELECT id FROM cards WHERE surface_mindmap = 0)",
-                [],
+                "UPDATE cards SET parent_id = NULL, collapsed = 0, updated_at = ?1
+                 WHERE parent_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM mindmap_layout l WHERE l.card_id = cards.id
+                 )",
+                params![now()],
             )
             .map_err(|error| error.to_string())?;
+        canvases::sync_mindmap_surface(&transaction)?;
     } else {
         // cards.parent_id 是自引用外键（ON DELETE SET NULL）。逐行级联会在批量删除时
         // 反复触发隐式 FK 更新，先把所有父子引用断开再删，避免递归卡死。
@@ -477,8 +519,14 @@ pub fn clear_mindmap_cards(state: &AppState, mode: String) -> Result<u32, String
             )
             .map_err(|error| error.to_string())?;
         transaction
-            .execute("DELETE FROM cards WHERE surface_mindmap = 1", [])
+            .execute(
+                "DELETE FROM cards WHERE id IN (
+                    SELECT card_id FROM mindmap_layout WHERE canvas_id = ?1
+                 )",
+                params![canvas_id],
+            )
             .map_err(|error| error.to_string())?;
+        canvases::sync_mindmap_surface(&transaction)?;
     }
 
     transaction.commit().map_err(|error| error.to_string())?;
@@ -945,6 +993,7 @@ mod tests {
             annotation: None,
             excerpt_image: None,
             link_aliases: None,
+            canvas_id: None,
         }
     }
 
@@ -997,6 +1046,7 @@ mod tests {
                     geometry: AnnotationGeometry { rects: vec![bbox] },
                     style: serde_json::json!({}),
                 }),
+                canvas_id: None,
             },
         )
         .unwrap();
@@ -1020,6 +1070,7 @@ mod tests {
                 excerpt_image: None,
                 link_aliases: None,
                 annotation: None,
+                canvas_id: None,
             },
         )
         .unwrap();
@@ -1214,7 +1265,7 @@ mod tests {
         let root = create_card(&state, input("root", None)).unwrap();
         let middle = create_card(&state, input("middle", Some(root.id.clone()))).unwrap();
         let child = create_card(&state, input("child", Some(middle.id.clone()))).unwrap();
-        remove_card_from_mindmap(&state, middle.id.clone()).unwrap();
+        remove_card_from_mindmap(&state, middle.id.clone(), None).unwrap();
         let database = state.db().unwrap();
         assert_eq!(
             get_card(&database, &child.id).unwrap().parent_id,
@@ -1233,7 +1284,7 @@ mod tests {
         let (_directory, state) = test_state();
         let root = create_card(&state, input("root", None)).unwrap();
         create_card(&state, input("child", Some(root.id))).unwrap();
-        let count = clear_mindmap_cards(&state, "remove".into()).unwrap();
+        let count = clear_mindmap_cards(&state, "remove".into(), None).unwrap();
         assert_eq!(count, 2);
 
         let database = state.db().unwrap();
@@ -1271,9 +1322,9 @@ mod tests {
         let first = create_card(&state, input("first", None)).unwrap();
         let second = create_card(&state, input("second", Some(first.id))).unwrap();
         set_card_tags(&state, second.id.clone(), vec!["标签".into()]).unwrap();
-        assert!(clear_mindmap_cards(&state, "bogus".into()).is_err());
+        assert!(clear_mindmap_cards(&state, "bogus".into(), None).is_err());
 
-        let count = clear_mindmap_cards(&state, "delete".into()).unwrap();
+        let count = clear_mindmap_cards(&state, "delete".into(), None).unwrap();
         assert_eq!(count, 2);
         let database = state.db().unwrap();
         for table in ["cards", "card_tags", "card_links", "review_logs", "annotations", "mindmap_layout"] {
@@ -1284,6 +1335,6 @@ mod tests {
         }
         drop(database);
         // 重复清空是幂等的。
-        assert_eq!(clear_mindmap_cards(&state, "delete".into()).unwrap(), 0);
+        assert_eq!(clear_mindmap_cards(&state, "delete".into(), None).unwrap(), 0);
     }
 }

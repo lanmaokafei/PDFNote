@@ -76,6 +76,8 @@ export interface CreateCardInput {
   excerpt_image?: string
   /** 标题链接别名（分号分隔），创建时可选。 */
   link_aliases?: string
+  /** 新卡片写入哪张画布；不传时后端落到默认画布 main。 */
+  canvas_id?: string
 }
 
 export interface UpdateCardContentInput {
@@ -124,6 +126,22 @@ export interface Document {
   last_page: number
   created_at: string
   updated_at: string
+}
+
+/** 画布可绑定文档（document_id 非空），也可以是全局画布。 */
+export interface MindmapCanvas {
+  id: string
+  document_id: string | null
+  name: string
+  card_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateMindmapCanvasInput {
+  id?: string
+  name: string
+  document_id?: string | null
 }
 
 export interface MindmapLayout {

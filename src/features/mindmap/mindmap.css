@@ -280,7 +280,8 @@ button.mindmap-field-label:hover { color: #456c43; }
 .mindmap-workspace.is-embedded .mindmap-error,
 .mindmap-workspace.is-embedded .mindmap-notice {
   position: absolute;
-  top: 56px;
+  /* 0.20.0：画布坞(12px) → 操作按钮(54px) → 提示(100px)，避免提示条盖住「大纲」等按钮。 */
+  top: 100px;
   left: 50%;
   z-index: 24;
   max-width: min(420px, calc(100% - 32px));
@@ -653,3 +654,156 @@ button.mindmap-field-label:hover { color: #456c43; }
 .mindmap-float-actions button.is-danger { color: #965646; border-color: #ead2cb; background: #fffaf8; }
 .mindmap-toolbar-actions button.is-danger:hover:not(:disabled),
 .mindmap-float-actions button.is-danger:hover:not(:disabled) { background: #f9ece8; }
+
+
+/* ---------- 0.20.0 多画布与 Anki 导入 ---------- */
+
+.mindmap-canvas-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 22px 12px;
+}
+.mindmap-canvas-switcher { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mindmap-canvas-picker { display: flex; align-items: center; gap: 7px; color: #7d8a72; font-size: 10px; white-space: nowrap; }
+.mindmap-canvas-picker select {
+  height: 30px;
+  max-width: 300px;
+  padding: 0 8px;
+  border: 1px solid #dfe6da;
+  border-radius: 7px;
+  color: #354636;
+  background: #fff;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.mindmap-canvas-switcher > button {
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid #dfe6da;
+  border-radius: 7px;
+  color: #5f685d;
+  background: #fff;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mindmap-canvas-switcher > button:hover:not(:disabled) { color: #26332a; background: #f0f2ec; }
+.mindmap-canvas-switcher > button:disabled { opacity: .45; cursor: not-allowed; }
+.mindmap-canvas-switcher > button.is-danger { color: #965646; border-color: #ead2cb; background: #fffaf8; }
+.mindmap-canvas-switcher > button.is-danger:hover:not(:disabled) { background: #f9ece8; }
+.mindmap-canvas-scope { color: #98a294; font-size: 9px; white-space: nowrap; }
+
+.mindmap-import-button {
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid #cbdcc3;
+  border-radius: 7px;
+  color: #3f5b45;
+  background: #f4f8f0;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mindmap-import-button:hover:not(:disabled) { background: #eaf3e4; }
+.mindmap-import-button:disabled { opacity: .45; cursor: not-allowed; }
+
+.mindmap-canvas-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 86;
+  display: grid;
+  padding: 24px;
+  background: rgba(28, 36, 30, .34);
+  place-items: center;
+}
+.mindmap-canvas-dialog-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(380px, 100%);
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: #fbfcf9;
+  box-shadow: 0 20px 52px rgba(20, 28, 22, .2);
+}
+.mindmap-canvas-dialog-card > strong { color: #26332b; font-size: 14px; }
+.mindmap-canvas-dialog-card p { margin: 0; color: #6d7967; font-size: 11px; line-height: 1.65; }
+.mindmap-canvas-dialog-card input[type="text"],
+.mindmap-canvas-dialog-card input:not([type]) {
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid #dfe6da;
+  border-radius: 7px;
+  color: #354636;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+.mindmap-canvas-bind { display: flex; align-items: center; gap: 7px; color: #4d5f4a; font-size: 11px; }
+.mindmap-canvas-hint { color: #98a294 !important; font-size: 10px !important; }
+.mindmap-canvas-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.mindmap-canvas-dialog-actions button {
+  height: 29px;
+  padding: 0 13px;
+  border: 1px solid #dfe6da;
+  border-radius: 6px;
+  color: #5f685d;
+  background: #fff;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.mindmap-canvas-dialog-actions button.primary { border-color: #354b3c; color: #f4f6ef; background: #354b3c; }
+.mindmap-canvas-dialog-actions button.is-danger.primary { border-color: #965646; background: #965646; }
+.mindmap-canvas-dialog-actions button:disabled { opacity: .5; cursor: not-allowed; }
+
+.mindmap-float-canvas {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  z-index: 23;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px;
+  border: 1px solid rgba(26, 32, 26, .06);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .93);
+  box-shadow: 0 8px 20px rgba(24, 30, 24, .08);
+  backdrop-filter: blur(10px);
+}
+.mindmap-canvas-switcher.is-compact .mindmap-canvas-scope,
+.mindmap-canvas-switcher.is-compact .mindmap-canvas-picker > span { display: none; }
+.mindmap-canvas-switcher.is-compact .mindmap-canvas-picker select {
+  height: 26px;
+  max-width: 128px;
+  font-size: 9px;
+}
+.mindmap-canvas-switcher.is-compact > button { height: 26px; padding: 0 7px; font-size: 9px; }
+.mindmap-float-canvas .mindmap-import-button { height: 26px; padding: 0 8px; font-size: 9px; }
+/* 嵌入分栏较窄：画布工具坞占第一行，原有操作按钮与回忆状态依次下移，避免互相遮挡点击。 */
+.mindmap-float-actions { top: 54px; }
+.mindmap-float-recall { top: 146px; }
+
+.mindmap-switching {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 25;
+  padding: 8px 14px;
+  border: 1px solid #dbe6d2;
+  border-radius: 9px;
+  color: #4f6647;
+  background: rgba(244, 249, 240, .96);
+  box-shadow: 0 8px 22px rgba(24, 30, 24, .12);
+  font-size: 11px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.mindmap-state-actions { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }

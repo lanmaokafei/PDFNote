@@ -22,6 +22,7 @@ import {
   Copy,
   Sparkles,
   Download,
+  FileText,
   Focus,
   LayoutGrid,
   Link2,
@@ -33,7 +34,7 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react'
-import type { Card, CardLink, MindmapLayoutInput, Rating } from '../../domain/card'
+import type { Card, CardLink, MindmapCanvas, MindmapLayoutInput, Rating } from '../../domain/card'
 import { ContextMenu } from '../../ui/ContextMenu'
 import { useContextMenu, type ContextMenuSection } from '../../ui/contextMenuCore'
 import {
@@ -41,6 +42,7 @@ import {
   exportMarkdownFile,
   isTauriRuntime,
   listCardLinks,
+  listMindmapCanvases,
   listMindmapLayout,
   moveCard,
   saveMindmapLayout,
@@ -62,6 +64,15 @@ import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
 import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown } from './outline'
 import { ExpandableField } from './ExpandableField'
+import { CanvasSwitcher } from './CanvasSwitcher'
+import { AnkiImportDialog } from '../book/AnkiImportDialog'
+import type { AnkiImportResult } from '../../services/anki'
+import {
+  DEFAULT_CANVAS_ID,
+  MINDMAP_CHANGED_EVENT,
+  readCanvasId,
+  saveCanvasId,
+} from './canvas'
 import {
   TREE_Y_GAP,
   buildTreeLayout,
@@ -72,7 +83,6 @@ import {
 } from './layout'
 import './mindmap.css'
 
-const CANVAS_ID = 'main'
 const nodeTypes = { mindmapCard: MindmapNode }
 // 缺失布局时复用同一对象，避免每次渲染生成新 position 引用。
 const DEFAULT_NODE_POSITION = { x: 80, y: 80 }
@@ -96,6 +106,8 @@ interface MindmapWorkspaceProps {
   onCardsChanged: () => void
   /** 嵌入分栏工作区：隐藏页头与完整工具栏，改用画布内悬浮操作。 */
   compact?: boolean
+  /** 文档工作台传入：加载全局画布 + 这本书的专属画布，并把选择偏好按文档记住。 */
+  documentId?: string | null
 }
 
 interface ConfirmationState {
@@ -103,7 +115,7 @@ interface ConfirmationState {
   id: string
 }
 
-function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProps) {
+function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: MindmapWorkspaceProps) {
   const cardsById = useCardStore((state) => state.cardsById)
   const loadCards = useCardStore((state) => state.loadCards)
   const createCardInStore = useCardStore((state) => state.createCard)
@@ -111,6 +123,14 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   const deleteCard = useCardStore((state) => state.deleteCard)
   const { getIntersectingNodes, fitView: fitViewInstance } = useReactFlow<MindmapFlowNode, Edge>()
 
+  // 当前画布：全局独立视图只用 main，文档工作台会按 documentId 单独记住上次选的画布。
+  const [canvasId, setCanvasId] = useState(() => readCanvasId(documentId))
+  const [canvases, setCanvases] = useState<MindmapCanvas[]>([])
+  /** 当前画布的 mindmap_layout 成员；surface_mindmap 只是「在任意画布出现」的派生开关。 */
+  const [layoutCardIds, setLayoutCardIds] = useState<ReadonlySet<string>>(new Set())
+  /** 这批成员属于哪张画布；切换过程中旧成员仍渲染，避免 React Flow 被卸载。 */
+  const [layoutScope, setLayoutScope] = useState('')
+  const [ankiOpen, setAnkiOpen] = useState(false)
   const [positions, setPositions] = useState<Record<string, Point>>({})
   const [measuredSizes, setMeasuredSizes] = useState<Record<string, { width: number; height: number }>>({})
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
@@ -118,6 +138,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   // 尺寸回写熔断：极端情况下（容器 0 宽、图片抖动）测量会连续变化，
   // 超过阈值后本秒内停止回写，直接断开 StoreUpdater ↔ onNodesChange 的回路。
   const measuredBurstRef = useRef({ windowStart: 0, count: 0 })
+  const arrangeTimerRef = useRef<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [hasLoaded, setHasLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -143,9 +164,17 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   const [recallErrors, setRecallErrors] = useState<Readonly<Record<string, string>>>({})
   const sessionId = useRef('')
 
+  const switching = loading && hasLoaded && layoutScope !== canvasId
+  const currentCanvas = useMemo(
+    () => canvases.find((canvas) => canvas.id === canvasId),
+    [canvases, canvasId],
+  )
+  const canvasName = currentCanvas?.name ?? canvasId
   const cards = useMemo(
-    () => Object.values(cardsById).filter((card) => card.surface_mindmap),
-    [cardsById],
+    () => Object.values(cardsById).filter(
+      (card) => card.surface_mindmap && layoutCardIds.has(card.id),
+    ),
+    [cardsById, layoutCardIds],
   )
   const parentIds = useMemo(() => {
     const ids = new Set(cards.map((card) => card.id))
@@ -285,17 +314,21 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     return [...hierarchy, ...references]
   }, [links, orderedVisibleCards, visibleIds])
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<string[]> => {
     setLoading(true)
     setError('')
     try {
       const [savedLayouts, , allLinks] = await Promise.all([
-        listMindmapLayout(CANVAS_ID),
+        listMindmapLayout(canvasId),
         loadCards(),
         listCardLinks(),
       ])
       setLinks(allLinks)
-      const latestCards = Object.values(useCardStore.getState().cardsById).filter((card) => card.surface_mindmap)
+      // 卡片归属 = 这张画布里是否有 mindmap_layout 行；绝不把别的画布卡片顺手补进来。
+      const scopedIds = new Set(savedLayouts.map((layout) => layout.card_id))
+      const latestCards = Object.values(useCardStore.getState().cardsById).filter(
+        (card) => card.surface_mindmap && scopedIds.has(card.id),
+      )
       const generated = buildTreeLayout(latestCards)
       const savedById = new Map(savedLayouts.map((layout) => [layout.card_id, layout]))
       const nextPositions: Record<string, Point> = {}
@@ -306,22 +339,55 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
         const hasSavedPosition = saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)
         const point = hasSavedPosition ? { x: saved.x, y: saved.y } : generated[card.id]
         nextPositions[card.id] = point
-        if (!hasSavedPosition) missing.push({ card_id: card.id, canvas_id: CANVAS_ID, ...point })
+        if (!hasSavedPosition) missing.push({ card_id: card.id, canvas_id: canvasId, ...point })
       }
 
       setPositions(nextPositions)
+      setLayoutCardIds(scopedIds)
+      setLayoutScope(canvasId)
       setSelectedIds(new Set())
       setHasLoaded(true)
       if (missing.length) await saveMindmapLayout(missing)
+      // 让下拉里的「N 张」与实际布局同步。
+      const list = await listMindmapCanvases(documentId ?? null)
+      setCanvases(list)
+      return [...scopedIds]
     } catch (reason) {
       setError(`脑图加载失败：${errorMessage(reason)}`)
+      return []
     } finally {
       setLoading(false)
     }
-  }, [loadCards])
+  }, [canvasId, documentId, loadCards])
 
   useEffect(() => {
     void refresh()
+  }, [refresh])
+
+  /** 首次进入 / 切换文档时校验画布偏好：文档被删或画布被删后回落到 main。 */
+  useEffect(() => {
+    let cancelled = false
+    void listMindmapCanvases(documentId ?? null).then((list) => {
+      if (cancelled) return
+      setCanvases(list)
+      const preferred = readCanvasId(documentId)
+      const fallback = list.find((canvas) => canvas.id === DEFAULT_CANVAS_ID)?.id
+        ?? list[0]?.id
+        ?? DEFAULT_CANVAS_ID
+      const next = list.some((canvas) => canvas.id === preferred) ? preferred : fallback
+      if (next !== canvasId) {
+        setCanvasId(next)
+        saveCanvasId(documentId, next)
+      }
+    }).catch((reason) => setError(`画布列表加载失败：${errorMessage(reason)}`))
+    return () => { cancelled = true }
+  }, [canvasId, documentId])
+
+  /** PDF 建卡、AI 拆书、Anki 导入等外部写入后重新读取当前画布成员。 */
+  useEffect(() => {
+    const reload = () => { void refresh() }
+    window.addEventListener(MINDMAP_CHANGED_EVENT, reload)
+    return () => window.removeEventListener(MINDMAP_CHANGED_EVENT, reload)
   }, [refresh])
 
   useEffect(() => {
@@ -333,8 +399,9 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   }, [])
 
   // 分栏模式下新建的卡片不会重新挂载脑图，这里为缺少坐标的卡片补一次树形布局。
+  // 切换画布期间 layoutScope 还没跟上，必须跳过，否则会把旧画布的卡片写进新画布。
   useEffect(() => {
-    if (!hasLoaded) return
+    if (!hasLoaded || layoutScope !== canvasId) return
     const missing = cards.filter((card) => !positions[card.id])
     if (!missing.length) return
     const generated = buildTreeLayout(cards)
@@ -348,10 +415,52 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     })
     void saveMindmapLayout(missing.map((card) => ({
       card_id: card.id,
-      canvas_id: CANVAS_ID,
+      canvas_id: canvasId,
       ...(generated[card.id] ?? fallback),
     }))).catch(() => undefined)
-  }, [cards, hasLoaded, positions])
+  }, [canvasId, cards, hasLoaded, layoutScope, positions])
+
+  const selectCanvas = useCallback((id: string) => {
+    if (id === canvasId) return
+    saveCanvasId(documentId, id)
+    setCanvasId(id)
+    setNotice(`已切换到「${canvases.find((canvas) => canvas.id === id)?.name ?? id}」。`)
+  }, [canvasId, canvases, documentId])
+
+  const handleCanvasesChanged = useCallback((list: MindmapCanvas[], activeId?: string) => {
+    setCanvases(list)
+    const target = activeId ?? canvasId
+    const resolved = list.some((canvas) => canvas.id === target)
+      ? target
+      : list.find((canvas) => canvas.id === DEFAULT_CANVAS_ID)?.id ?? DEFAULT_CANVAS_ID
+    saveCanvasId(documentId, resolved)
+    setCanvasId(resolved)
+  }, [canvasId, documentId])
+
+  /** Anki 导入在后端单事务建树；这里刷新成员、自动整理并重新对齐视口。 */
+  const handleAnkiImported = useCallback((result: AnkiImportResult) => {
+    setAnkiOpen(false)
+    setNotice(`已导入 ${result.imported} 张卡片、${result.groups} 个分组，跳过 ${result.skipped} 张重复题目。`)
+    void refresh().then((scopedIds) => {
+      const scoped = new Set(scopedIds)
+      const latest = Object.values(useCardStore.getState().cardsById)
+        .filter((card) => card.surface_mindmap && scoped.has(card.id))
+      const arranged = buildTreeLayout(latest)
+      void saveMindmapLayout(Object.entries(arranged).map(([cardId, point]) => ({
+        card_id: cardId,
+        canvas_id: canvasId,
+        ...point,
+      }))).then(() => {
+        setPositions((current) => ({ ...current, ...arranged }))
+        if (arrangeTimerRef.current !== null) window.clearTimeout(arrangeTimerRef.current)
+        arrangeTimerRef.current = window.setTimeout(() => {
+          arrangeTimerRef.current = null
+          fitViewInstance({ ...FIT_VIEW_OPTIONS, duration: 320 })
+        }, 160)
+      }).catch((reason) => setError(`导入成功但布局整理失败：${errorMessage(reason)}`))
+    })
+    onCardsChanged()
+  }, [canvasId, fitViewInstance, onCardsChanged, refresh])
 
   const syncCards = useCallback(async () => {
     await loadCards()
@@ -375,10 +484,10 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
   }, [busy])
 
   const persistPositions = useCallback(async (items: Array<{ id: string; position: Point }>) => {
-    if (!items.length) return
+    if (!items.length || layoutScope !== canvasId) return
     await saveMindmapLayout(items.map((item) => ({
       card_id: item.id,
-      canvas_id: CANVAS_ID,
+      canvas_id: canvasId,
       x: item.position.x,
       y: item.position.y,
     })))
@@ -387,7 +496,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       for (const item of items) next[item.id] = item.position
       return next
     })
-  }, [])
+  }, [canvasId, layoutScope])
 
   const selectionFrameRef = useRef<number | null>(null)
   const pendingSelectRef = useRef<Array<{ id: string; selected: boolean }>>([])
@@ -528,18 +637,17 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
 
   // 整理后要等 React Flow 应用新坐标，再对齐视口；否则用户仍停在旧的缩放/平移上，
   // 看起来像「卡片没有聚拢」。卸载时清掉定时器，避免对已销毁实例调用 fitView。
-  const arrangeTimerRef = useRef<number | null>(null)
   useEffect(() => () => {
     if (arrangeTimerRef.current !== null) window.clearTimeout(arrangeTimerRef.current)
   }, [])
 
   const autoArrange = useCallback(() => {
-    if (!cards.length) return
+    if (!cards.length || layoutScope !== canvasId) return
     const arranged = buildTreeLayout(cards)
     void runTask(async () => {
       await saveMindmapLayout(cards.map((card) => ({
         card_id: card.id,
-        canvas_id: CANVAS_ID,
+        canvas_id: canvasId,
         ...arranged[card.id],
       })))
       setPositions((current) => ({ ...current, ...arranged }))
@@ -550,7 +658,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       }, 120)
       setNotice(`已整理并保存 ${cards.length} 个节点，视图已对齐。`)
     })
-  }, [cards, fitViewInstance, runTask])
+  }, [canvasId, cards, fitViewInstance, layoutScope, runTask])
 
   const saveSelected = useCallback(() => {
     const selected = nodes.filter((node) => selectedIds.has(node.id))
@@ -566,9 +674,10 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
 
   const saveEditor = useCallback(async (draft: CardDraft) => runTask(async () => {
     if (editor === 'new') {
-      const latestCards = Object.values(useCardStore.getState().cardsById).filter((card) => card.surface_mindmap)
+      const latestCards = cards
       const card = await createCardInStore({
         ...draft,
+        canvas_id: canvasId,
         sort_order: nextSortOrder(latestCards, null),
       })
       const nextY = Math.max(80, ...Object.values(positions).map((point) => point.y + TREE_Y_GAP))
@@ -576,11 +685,12 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       setPositions((current) => ({ ...current, [card.id]: point }))
       setEditor(null)
       try {
-        await saveMindmapLayout([{ card_id: card.id, canvas_id: CANVAS_ID, ...point }])
+        await saveMindmapLayout([{ card_id: card.id, canvas_id: canvasId, ...point }])
       } catch (reason) {
         await syncCards()
         throw new Error(`卡片已创建，但坐标保存失败：${errorMessage(reason)}`)
       }
+      setLayoutCardIds((current) => new Set(current).add(card.id))
       await syncCards()
       setNotice('独立卡片已创建。')
       return
@@ -591,7 +701,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     await syncCards()
     setEditor(null)
     setNotice('卡片内容已同步到三个视图。')
-  }), [createCardInStore, editor, positions, runTask, syncCards])
+  }), [canvasId, cards, createCardInStore, editor, positions, runTask, syncCards])
 
   const toggleCard = useCallback(async (id: string) => {
     const card = useCardStore.getState().cardsById[id]
@@ -713,7 +823,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     setError('')
     setNotice('')
     try {
-      const forest = buildOutlineForest(Object.values(useCardStore.getState().cardsById))
+      const forest = buildOutlineForest(cards)
       if (!forest.length) throw new Error('当前脑图没有可导出的卡片')
       const markdown = outlineToMarkdown(forest)
       const filename = `知识脑图-${new Date().toISOString().slice(0, 10)}.md`
@@ -740,18 +850,24 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
     } finally {
       setExporting(false)
     }
-  }, [exporting])
+  }, [cards, exporting])
 
   const confirmOperation = useCallback(() => {
     if (!confirmation) return
     const { id, kind } = confirmation
     void runTask(async () => {
-      if (kind === 'remove') await removeFromMindmap(id)
+      if (kind === 'remove') await removeFromMindmap(id, canvasId)
       else await deleteCard(id)
 
       setPositions((current) => {
         const next = { ...current }
         delete next[id]
+        return next
+      })
+      setLayoutCardIds((current) => {
+        if (!current.has(id)) return current
+        const next = new Set(current)
+        next.delete(id)
         return next
       })
       setSelectedIds((current) => {
@@ -762,16 +878,20 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       setConfirmation(null)
       if (editor === id) setEditor(null)
       await syncCards()
-      setNotice(kind === 'remove' ? '已移出脑图，PDF 与复习投影保持不变。' : '卡片已彻底删除。')
+      void listMindmapCanvases(documentId ?? null).then(setCanvases).catch(() => undefined)
+      setNotice(kind === 'remove'
+        ? `已从「${canvasName}」移除，其他画布与 PDF / 复习投影保持不变。`
+        : '卡片已彻底删除（所有画布上的布局一并移除）。')
     })
-  }, [confirmation, deleteCard, editor, removeFromMindmap, runTask, syncCards])
+  }, [canvasId, canvasName, confirmation, deleteCard, documentId, editor, removeFromMindmap, runTask, syncCards])
 
-  /** 批量清空：后端单事务完成后，本地把投影、坐标、选中与弹窗一次性复位。 */
+  /** 批量清空：后端单事务完成后，本地把当前画布的投影、坐标、选中与弹窗一次性复位。 */
   const clearAllCards = useCallback((mode: ClearCardsMode) => {
     void runTask(async () => {
-      const count = await clearMindmapCards(mode)
+      const count = await clearMindmapCards(mode, canvasId)
       setPositions({})
       setMeasuredSizes({})
+      setLayoutCardIds(new Set())
       setSelectedIds(new Set())
       setLinks([])
       setConfirmation(null)
@@ -779,11 +899,12 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       setClearOpen(false)
       setViewMode('canvas')
       await syncCards()
+      void listMindmapCanvases(documentId ?? null).then(setCanvases).catch(() => undefined)
       setNotice(mode === 'remove'
-        ? `已清空 ${count} 张脑图卡片，PDF 标注与复习记录仍保留。`
-        : `已彻底删除 ${count} 张卡片及其标注、复习记录。`)
+        ? `已清空当前画布的 ${count} 张卡片，其他画布与 PDF / 复习投影仍保留。`
+        : `已彻底删除当前画布的 ${count} 张卡片及其标注、复习记录。`)
     })
-  }, [runTask, syncCards])
+  }, [canvasId, documentId, runTask, syncCards])
 
   const copyToClipboard = (text: string) => {
     if (navigator.clipboard) void navigator.clipboard.writeText(text).catch(() => undefined)
@@ -861,6 +982,7 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       sections: [
         { id: 'canvas', items: [
           { id: 'new', label: '新建独立卡片', icon: Plus, disabled: busy, onSelect: () => setEditor('new') },
+          { id: 'anki', label: '导入 Anki 牌组…', icon: FileText, disabled: busy, onSelect: () => setAnkiOpen(true) },
           { id: 'refresh', label: '刷新脑图', icon: RefreshCw, onSelect: () => void refresh() },
           { id: 'arrange', label: '自动整理节点', icon: Focus, disabled: busy || !cards.length, onSelect: autoArrange },
           { id: 'save', label: '保存所选布局', icon: LayoutGrid, disabled: busy || selectedIds.size === 0, onSelect: saveSelected },
@@ -922,6 +1044,41 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
           <span>脑图卡片</span>
         </div>
       </header>
+      )}
+
+      {!compact && (
+      <div className="mindmap-canvas-bar">
+        <CanvasSwitcher
+          documentId={documentId}
+          canvasId={canvasId}
+          canvases={canvases}
+          busy={busy || switching}
+          onSelect={selectCanvas}
+          onCanvasesChanged={handleCanvasesChanged}
+          onError={setError}
+        />
+        <button type="button" className="mindmap-import-button" data-testid="anki-open" onClick={() => setAnkiOpen(true)} disabled={busy || switching}>
+          导入 Anki 牌组…
+        </button>
+      </div>
+      )}
+
+      {compact && (
+        <div className="mindmap-float-canvas">
+          <CanvasSwitcher
+            compact
+            documentId={documentId}
+            canvasId={canvasId}
+            canvases={canvases}
+            busy={busy || switching}
+            onSelect={selectCanvas}
+            onCanvasesChanged={handleCanvasesChanged}
+            onError={setError}
+          />
+          <button type="button" className="mindmap-import-button" data-testid="anki-open" onClick={() => setAnkiOpen(true)} disabled={busy || switching}>
+            导入 Anki
+          </button>
+        </div>
       )}
 
       {!compact && (
@@ -996,12 +1153,13 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
       {notice && <div className="mindmap-notice" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice('')}>关闭</button></div>}
 
       <div className="mindmap-canvas">
+        {switching && <div className="mindmap-switching" role="status">正在切换画布…</div>}
         {loading && !hasLoaded ? (
           <div className="mindmap-state"><span className="mindmap-spinner" /><h2>正在读取脑图</h2><p>加载最新卡片与已保存的布局…</p></div>
         ) : !hasLoaded ? (
           <div className="mindmap-state"><span className="mindmap-state-mark">!</span><h2>暂时无法打开脑图</h2><p>{error}</p><button type="button" className="mindmap-button primary" onClick={() => void refresh()}>重试</button></div>
         ) : cards.length === 0 ? (
-          <div className="mindmap-state"><span className="mindmap-state-mark">◇</span><h2>从第一张知识卡片开始</h2><p>创建一张不依赖 PDF 的独立卡片，之后可连线或拖拽建立层级。</p><button type="button" className="mindmap-button primary" onClick={() => setEditor('new')}>新建独立卡片</button></div>
+          <div className="mindmap-state"><span className="mindmap-state-mark">◇</span><h2>「{canvasName}」还是空的</h2><p>新建独立卡片、从 PDF 划重点，或导入 AnkiDroid 导出的 txt；每张画布的卡片与坐标互相独立。</p><div className="mindmap-state-actions"><button type="button" className="mindmap-button primary" onClick={() => setEditor('new')}>新建独立卡片</button><button type="button" className="mindmap-button" onClick={() => setAnkiOpen(true)}>导入 Anki 牌组</button></div></div>
         ) : (
           <>
             <div className={`mindmap-flow-host${viewMode === 'outline' ? ' is-hidden' : ''}`}>
@@ -1149,6 +1307,16 @@ function MindmapCanvas({ onCardsChanged, compact = false }: MindmapWorkspaceProp
           />
         )}
       </div>
+
+      {ankiOpen && (
+        <AnkiImportDialog
+          canvasId={canvasId}
+          canvasName={canvasName}
+          busy={busy || switching}
+          onClose={() => setAnkiOpen(false)}
+          onImported={handleAnkiImported}
+        />
+      )}
 
       {tagTarget && cardsById[tagTarget] && (
         <TagDialog

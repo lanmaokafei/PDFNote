@@ -21,7 +21,7 @@
    嵌入分栏视图也会执行；定时器在组件卸载时清理。
 3. **入口**：独立脑图工具栏「自动整理」、画布右键「自动整理节点」、分栏脑图悬浮坞「整理」。
 
-布局函数不改数据库结构；坐标仍写 `mindmap_layout(canvas_id='main')`。
+布局函数不改数据库结构；坐标写入 `mindmap_layout(canvas_id, card_id)`。0.20.0 起 `canvas_id` 是当前选中的画布，不再是写死的 `main`，因此整理只影响当前画布，其它画布坐标保持不变；详见 [多画布脑图](mindmap-canvases.md)。
 
 ## 清空卡片
 
@@ -30,12 +30,13 @@
 
 | 模式 | 后端命令 | 语义 |
 |---|---|---|
-| 仅清空脑图 | `clear_mindmap_cards({ mode: 'remove' })` | `surface_mindmap=0`、断开所有 `parent_id`、删除这些卡片的 `mindmap_layout`；卡片、PDF 标注、复习记录仍在 |
-| 彻底删除 | `clear_mindmap_cards({ mode: 'delete' })` | `DELETE FROM cards WHERE surface_mindmap=1`；annotations / review_logs / card_tags / card_links / mindmap_layout 靠外键级联清除 |
+| 仅清空脑图 | `clear_mindmap_cards({ mode: 'remove', canvasId })` | 只删**当前画布**的 `mindmap_layout`；卡片若仍在其他画布则不动父子结构与 `surface_mindmap`，完全离开脑图才关投影；卡片、PDF 标注、复习记录仍在 |
+| 彻底删除 | `clear_mindmap_cards({ mode: 'delete', canvasId })` | 删除当前画布上的卡片本体；annotations / review_logs / card_tags / card_links / **所有画布的** mindmap_layout 靠外键级联清除 |
 
-两种模式都在 Rust 单事务里完成，返回受影响数量；前端随后清空坐标、测量缓存、选中、链接与弹窗，
-再刷新卡片状态。`clear` 的作用域是**当前脑图中的卡片**（`surface_mindmap=1`），
-此前「仅从脑图移除」的卡片不受影响。删除前请先在设置里做一次备份。
+两种模式都在 Rust 单事务里完成，返回受影响数量；前端随后清空当前画布的坐标、测量缓存、选中、链接与弹窗，
+再刷新卡片状态。`clear` 的作用域是**当前画布的成员**（`mindmap_layout.canvas_id = 当前画布`），
+其它画布不受影响（「彻底删除」因删除的是卡片本体，会连带清掉它在其它画布的布局）。
+删除前请先在设置里做一次备份。
 
 实现细节：`cards.parent_id` 是自引用外键（`ON DELETE SET NULL`），批量删除前会先把所有
 父子引用置空，避免逐行级联触发隐式 FK 更新。

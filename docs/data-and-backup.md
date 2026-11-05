@@ -87,10 +87,20 @@ PDFNote-backup-YYYYMMDD-HHMMSS.zip
 - 翻页停止 700ms 后写入，关闭文档时再补一次；不更新 `updated_at`，避免资料库排序与备份新鲜度被翻页触发。
 - 备份导入时按清单 `schema_version` 选择列：schema v1 旧包没有 `last_page`，导入后为 1；schema v2 包会一并恢复。
 
+## 多画布与 AnkiDroid 导入（schema v9）
+
+- `mindmap_canvases(id, document_id, name, created_at, updated_at)` 随整库备份往返，已加入 overwrite 的 DELETE 列表、`copy_table_if_present` 与 merge 的复制表清单。
+- `document_id` 指向 `documents(id)` 且 `ON DELETE SET NULL`：删书后画布变全局画布，卡片与坐标不丢。
+- merge 导入按 `content_hash` 把 `document_id` 重映射到本地文档；找不到对应文档时退化为全局画布。
+- **旧备份（schema < 9）兼容**：`ensure_layout_canvases` 在导入后补回 `main`，并为 `mindmap_layout` 里所有未登记的 `canvas_id` 补画布行；迁移 009 还会给「有 `surface_mindmap` 投影但完全没有布局行」的历史卡片补一行 `main` 布局。
+- 归属完全由 `mindmap_layout(canvas_id, card_id)` 决定，`surface_mindmap` 是派生开关，导入后统一 `sync_mindmap_surface` 对齐，不需要单独同步一列。
+- 画布选择偏好存前端 `localStorage`（`pdfnote.mindmap.canvas[.<documentId>]`），不进数据库、不随备份迁移。
+- AnkiDroid txt 不写文件路径到数据库：只在导入时读取一次，产物是普通 `cards` / `card_tags` / `mindmap_layout` 行，因此备份格式没有变化。详见 [多画布脑图与 AnkiDroid 导入](mindmap-canvases.md)。
+
 ## 批量清空脑图卡片（0.17.0，不改 schema）
 
-- `clear_mindmap_cards` 单事务执行，`remove` 关闭 `surface_mindmap`、断开 `parent_id`、删 `mindmap_layout`；`delete` 删除卡片并靠外键级联清理关联表。
-- 备份/恢复不需要新增表；清空操作本身不包含在备份里，恢复整库可还原被删除的卡片。
+- `clear_mindmap_cards` 单事务执行；0.20.0 起带 `canvasId`：`remove` 只删该画布的 `mindmap_layout` 行（卡片仍在其他画布时不改 `surface_mindmap` 与父子结构），`delete` 删除该画布上的卡片本体并靠外键级联清理关联表（包括其他画布的布局）。
+- 清空操作本身不包含在备份里，恢复整库可还原被删除的卡片。
 
 ## AI 拆书（schema v8）
 

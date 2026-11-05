@@ -32,3 +32,6 @@ src-tauri/gen/schemas/
 *.zip
 
 release/
+
+# 牌組
+所有牌組*.txt

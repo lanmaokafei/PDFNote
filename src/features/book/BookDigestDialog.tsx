@@ -18,6 +18,7 @@ import {
   readDepth,
   saveDepth,
 } from './depth'
+import { notifyMindmapChanged, readCanvasId } from '../mindmap/canvas'
 import './BookDigestDialog.css'
 
 interface BookDigestDialogProps {
@@ -182,8 +183,11 @@ export function BookDigestDialog({
     setRunning(true)
     setError('')
     try {
-      const created = await applyBookOutline(documentId, mode)
+      // 与右侧脑图当前选中的画布保持一致，避免骨架写进另一张脑图。
+      const canvasId = readCanvasId(documentId)
+      const created = await applyBookOutline(documentId, mode, canvasId)
       setNotice(created > 0 ? `已写入 ${created} 张卡片，可在脑图查看。` : '这些节点已经在脑图里了，没有重复创建。')
+      notifyMindmapChanged(canvasId)
       onApplied()
     } catch (reason) {
       setError(errorMessage(reason))

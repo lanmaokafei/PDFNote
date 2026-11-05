@@ -273,6 +273,7 @@ mod tests {
                 annotation: None,
                 excerpt_image: None,
                 link_aliases: None,
+                canvas_id: None,
             },
         )
         .unwrap();

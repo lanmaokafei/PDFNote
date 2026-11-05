@@ -79,9 +79,14 @@ export async function synthesizeBook(
   return invoke('synthesize_book', { documentId, mode, depth })
 }
 
-export async function applyBookOutline(documentId: string, mode: DigestMode): Promise<number> {
+/** 骨架写到读者当前选中的画布；不传时用默认画布 main。 */
+export async function applyBookOutline(
+  documentId: string,
+  mode: DigestMode,
+  canvasId?: string,
+): Promise<number> {
   desktopOnly()
-  return invoke('apply_book_outline', { documentId, mode })
+  return invoke('apply_book_outline', { documentId, mode, canvasId: canvasId ?? null })
 }
 
 export async function clearBookAnalysis(documentId: string, mode: DigestMode): Promise<void> {

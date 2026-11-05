@@ -11,6 +11,7 @@
 - **PDF 工作区**：PDF.js 连续滚动与页级虚拟化、256KB Range 分块读取、缩放、页码跳转、自动回到上次阅读页、高亮/矩形框选建卡、文字层提取、Apple Vision OCR、标注拖拽、标注删除语义选择、文档遮挡主动回忆。
 - **可选文字层（0.9.0）**：切到「文字」工具后可像 Word 一样在页面上随手拖选文字，选中即复制或直接建卡。页面打开时后台整页识别一次（有 PDF 文字层则用精确字形坐标，扫描页用 Apple Vision 行级 OCR），结果带每行坐标并缓存到 SQLite，之后所有点选/框选零延迟。详见 [Apple Vision OCR](docs/ocr.md)。
 - **元素右键菜单（0.10.0）**：接管 WKWebView 只有 Reload 的原生右键菜单。选中文字可复制/引用/建卡，标注可加标签、链接、合并、删除，墨迹可单条删除，页面空白处可切工具、缩放、翻页、复制本页文字；脑图节点、资料库文档、复习卡片与全局空白区也都有对应操作。详见 [应用内右键菜单](docs/context-menu.md)。
+- **多画布脑图与 AnkiDroid 导入（0.20.0）**：同一本书可以建多张脑图，也可以建不绑定书的全局画布；每张画布的卡片与坐标互相隔离，选择偏好按书记住。支持导入 AnkiDroid 导出的 txt（标准 6 列 / 仅正面两种格式），牌组 `::` 层级变成脑图分组，正面 / 背面变成问题卡与摘录，可按牌组勾选、按画布去重并自动整理。详见 [多画布脑图与 AnkiDroid 导入](docs/mindmap-canvases.md)。
 - **卡片笔记完整阅读（0.19.0）**：脑图卡片与大纲行的摘录 / 笔记不再被写死截断。长文本默认折叠成几行并标「展开 ⌄」，点标题或正文即展开；内容太长时卡片内出现滚动条，滚轮只滚文字、不平移画布。AI 解析写回笔记后会自动展开，大纲行也能看到笔记。
 - **可设拆分层级（0.18.0）**：AI 拆书向导新增「拆分层级」，默认 2 层、可选 1–5 层；选 4 层就能把「章 → 小节 → 名词 → 解释」一次拆出来，阶段一多抽名词定义、阶段二按层生成骨架，设置会记住。详见 [AI 拆书](docs/ai-book-digest.md)。
 - **脑图自动整理与清空卡片（0.17.0）**：多张独立卡片不再堆成细长竖条，而是打包成紧凑网格并在整理后自动对齐视口；工具栏新增「清空卡片」，可选择「仅清空脑图」或「彻底删除」。详见 [脑图自动整理与清空卡片](docs/mindmap-layout.md)。
@@ -54,12 +55,13 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri build
 ```
 
-2026-11-02 本地验证结果：
+2026-11-05（0.20.0）本地验证结果：
 
-- Rust：61 项测试通过（含 2 项 Vision 真机集成：`OCR_TEST_IMAGE` 中文识别、`OCR_PAGE_TEST_IMAGE` 行级坐标）；覆盖迁移至 v8、外键、建卡、防环、脑图移除、文档保留卡片、评分幂等、备份往返、旧备份列兼容、页面文字缓存、坏包保护、视觉模型设置/连通性测试、任务号解析与异步结果取回、本地 mock 端到端识别、留白增删改查与级联删除、拆书 JSON 容错与骨架写入、分组节点继承来源页、批量清空的两种模式与级联清理等。
-- 前端：67 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、脑图折叠可见性、标注缓存联动清理、公式特征检测与决策、LaTeX 检测与切分（含公式内容判定）、识别失败摘要与任务号提取、文字层行提取与选区文本、右键菜单定位边界、标题链接字典与匹配）。
+- Rust：77 项测试通过、2 项 Vision 真机集成按需运行（需 `OCR_TEST_IMAGE` / `OCR_PAGE_TEST_IMAGE`）；覆盖迁移至 v9、画布 CRUD 与按画布移除/清空、拆书写第二画布、AnkiDroid 两种导出格式解析、HTML 清洗、建树、幂等导入、牌组筛选、跨格式答案补齐，以及此前的防环、评分幂等、备份往返、旧备份列兼容、页面文字缓存、坏包保护、视觉模型通道、留白与拆书链路。
+- 前端：78 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、脑图折叠可见性、紧凑网格布局、标注缓存联动清理、公式特征检测与决策、LaTeX 检测与切分、识别失败摘要、文字层行提取、右键菜单定位、标题链接字典、拆书深度偏好、长文本折叠判定）。
+- 真实 Anki 文件：`ANKI_FIXTURE_PATH=<txt> cargo test --lib parses_real_export_when_fixture_is_provided -- --nocapture`，两份参考导出各解析出 1455 张卡（26 个牌组 / 仅正面 1 个「未分组」）。
 - 设置面板冒烟：`node scripts/settings-smoke.mjs`（需 dev server），验证模型配置对话框字段、非桌面环境提示与关闭。
-- 脑图稳定性回归：`CARD_COUNT=120 STEP=all node scripts/mindmap-regression.mjs`（需 dev server），覆盖大纲往返、折叠展开、拖拽落盘、连续 resize 与单选/多选，专治 React #185。
+- 脑图端到端回归（`scripts/mindmap-regression.mjs`，需 dev server）：18 个场景全绿，含 `STEP=canvas`（画布隔离、切换不卸载 React Flow、新建 / 重命名 / 删除与回落）、`STEP=anki`（预览、牌组勾选、导入不串画布）、`STEP=note-expand`、`STEP=arrange`、`STEP=clear`、`STEP=depth`、`STEP=digest`、`STEP=notes` 等；`CARD_COUNT=120 STEP=all` 专治 React #185。
 - 文字层冒烟：`node scripts/textlayer-smoke.mjs`，用无头 Chrome 验证透明 DOM 文字可原生拖选并换算出归一化选区。
 - 右键菜单冒烟：`node scripts/contextmenu-smoke.mjs`（需 dev server），验证原生菜单接管、菜单项动作、边界翻转、键盘导航、输入框保留系统菜单与选区读取。
 - 标题链接冒烟：`node scripts/titlelink-smoke.mjs`（需 dev server），在真实浏览器加载模块，验证中文/别名命中、拉丁词边界、多卡聚合与高亮条归一化坐标。
@@ -92,7 +94,7 @@ scripts/mindmap-regression.mjs 脑图 React #185 回归（需 dev server）
 ## 关键设计
 
 - Card 是唯一知识原子。PDF 高亮、脑图节点、复习闪卡只是同一 Card 的 projection。
-- 内容与语义树在 `cards`，标注几何在 `annotations`，自由布局在 `mindmap_layout`，评分审计在 `review_logs`。
+- 内容与语义树在 `cards`，标注几何在 `annotations`，自由布局在 `mindmap_layout`，画布归属在 `mindmap_canvases`，评分审计在 `review_logs`。`(canvas_id, card_id)` 决定卡片出现在哪张画布，`surface_mindmap` 只是派生开关。
 - 所有 SQL 在 Rust 侧执行；建卡、脑图移动、评分、文档删除和备份导入均使用显式事务。
 - 评分采用 `expected_updated_at` 乐观锁 + `client_event_id` 唯一约束，避免重复计分与并发覆盖。
 - PDF 副本按内容哈希命名，备份恢复前后校验每个 PDF 的 SHA-256。
@@ -102,8 +104,8 @@ scripts/mindmap-regression.mjs 脑图 React #185 回归（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.19.0_aarch64.dmg
-release/PDFNote_0.19.0_aarch64.dmg.sha256
+release/PDFNote_0.20.0_aarch64.dmg
+release/PDFNote_0.20.0_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
@@ -157,6 +159,8 @@ killall Dock
 ```
 
 ## 重要修复
+
+- 0.20.0 新增**多画布与 AnkiDroid txt 导入**：schema 升到 v9（`mindmap_canvases`），归属复用 `mindmap_layout` 复合主键，`surface_mindmap` 变成派生开关；建卡、整理、清空、拆书、导入全部按 `canvasId` 作用域。备份 overwrite / merge 纳入画布表，旧备份自动补回 `main`。`STEP=canvas` / `STEP=anki` 回归覆盖画布隔离、切换不卸载 React Flow、画布 CRUD、牌组勾选与导入不串画布。
 
 - 0.19.0 修复**AI 解析后笔记看不全**：卡片正文原先被 `-webkit-line-clamp: 3` 写死截断且无滚动条。现在长文本可点击展开、展开区限高滚动，AI 解析写回后自动展开；大纲行补上笔记并支持同样的展开交互。`STEP=note-expand` 回归覆盖自动展开、滚动条、滚轮不平移画布、收起 / 再次展开与大纲笔记。
 
@@ -220,6 +224,7 @@ killall Dock
 
 ## 文档
 
+- [多画布脑图与 AnkiDroid 导入](docs/mindmap-canvases.md)
 - [应用内右键菜单](docs/context-menu.md)
 - [脑图自动整理与清空卡片](docs/mindmap-layout.md)
 - [AI 拆书](docs/ai-book-digest.md)

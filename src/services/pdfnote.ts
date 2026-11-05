@@ -9,6 +9,8 @@ import type {
   CardLink,
   Document,
   InkStyle,
+  CreateMindmapCanvasInput,
+  MindmapCanvas,
   MindmapLayout,
   MindmapLayoutInput,
   NormalizedBBox,
@@ -158,7 +160,8 @@ export async function deleteDocument(id: string, keepCards: boolean): Promise<vo
   return invoke('delete_document', { id, keepCards })
 }
 
-export async function listCards(limit = 500): Promise<Card[]> {
+/** 默认取满 10000 张：Anki 牌组导入后单库可能有数千张卡片，不能漏掉后面的画布。 */
+export async function listCards(limit = 10000): Promise<Card[]> {
   if (!isTauriRuntime()) return []
   return invoke('list_cards', { limit })
 }
@@ -174,19 +177,41 @@ export async function updateCardContent(input: UpdateCardContentInput): Promise<
   desktopOnly()
   return invoke('update_card_content', { input })
 }
-export async function removeCardFromMindmap(id: string): Promise<void> {
+export async function removeCardFromMindmap(id: string, canvasId?: string): Promise<void> {
   desktopOnly()
-  return invoke('remove_card_from_mindmap', { id })
+  return invoke('remove_card_from_mindmap', { id, canvasId: canvasId ?? null })
 }
 export async function deleteCard(id: string): Promise<void> {
   desktopOnly()
   return invoke('delete_card', { id })
 }
 
-/** 批量清空脑图卡片；返回受影响数量。remove 只关投影，delete 级联删除。 */
-export async function clearMindmapCards(mode: 'remove' | 'delete'): Promise<number> {
+/** 批量清空指定画布；返回受影响数量。remove 只移除该画布布局，delete 级联删除卡片。 */
+export async function clearMindmapCards(mode: 'remove' | 'delete', canvasId?: string): Promise<number> {
   desktopOnly()
-  return invoke('clear_mindmap_cards', { mode })
+  return invoke('clear_mindmap_cards', { mode, canvasId: canvasId ?? null })
+}
+
+export async function listMindmapCanvases(documentId?: string | null): Promise<MindmapCanvas[]> {
+  if (!isTauriRuntime()) {
+    return [{
+      id: 'main', document_id: null, name: '默认画布', card_count: 0,
+      created_at: '', updated_at: '',
+    }]
+  }
+  return invoke('list_mindmap_canvases', { documentId: documentId ?? null })
+}
+export async function createMindmapCanvas(input: CreateMindmapCanvasInput): Promise<MindmapCanvas> {
+  desktopOnly()
+  return invoke('create_mindmap_canvas', { input })
+}
+export async function renameMindmapCanvas(id: string, name: string): Promise<MindmapCanvas> {
+  desktopOnly()
+  return invoke('rename_mindmap_canvas', { id, name })
+}
+export async function deleteMindmapCanvas(id: string): Promise<number> {
+  desktopOnly()
+  return invoke('delete_mindmap_canvas', { id })
 }
 
 export async function listAnnotations(documentId: string, pages: number[]): Promise<Annotation[]> {

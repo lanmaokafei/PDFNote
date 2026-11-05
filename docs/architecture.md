@@ -1,12 +1,12 @@
 # PDFNote 架构基线（阶段 01 + 02）
 
-版本：0.19.0  
-状态：已落地工程骨架与 schema v6，OCR 为 macOS Apple Vision 单引擎，扫描页提供整页识别后的可选文字层，schema 升至 v8（`page_notes` 留白、`book_analysis`/`book_outline` 拆书）；AI 拆书的两阶段提示词、节点预算与解析截断均由读者设置的 `depth`（1–5 层，默认 2）驱动，`outline_json` 记录本次深度；脑图卡片与大纲行的正文由 `ExpandableField` 统一渲染（长文本折叠 → 点击展开 → 限高滚动，AI 解析写回后自动展开，不改数据库）；标题链接由本地关键词字典驱动；公式可选交给用户配置的视觉模型转 LaTeX（默认不联网），全视图提供应用内元素右键菜单
+版本：0.20.0  
+状态：已落地工程骨架，OCR 为 macOS Apple Vision 单引擎，扫描页提供整页识别后的可选文字层；schema 升至 v9（`page_notes` 留白、`book_analysis`/`book_outline` 拆书、`mindmap_canvases` 多画布）。AI 拆书的两阶段提示词、节点预算与解析截断均由读者设置的 `depth`（1–5 层，默认 2）驱动，`outline_json` 记录本次深度；脑图卡片与大纲行的正文由 `ExpandableField` 统一渲染（长文本折叠 → 点击展开 → 限高滚动，AI 解析写回后自动展开，不改数据库）；0.20.0 起 `(canvas_id, card_id)` 决定卡片出现在哪张画布，`surface_mindmap` 是派生开关，并支持 AnkiDroid txt 按牌组建树导入；标题链接由本地关键词字典驱动；公式可选交给用户配置的视觉模型转 LaTeX（默认不联网），全视图提供应用内元素右键菜单
 
 ## 1. 不可破坏的架构约束
 
 1. **Card 是唯一知识原子。** PDF 高亮、脑图节点和闪卡是同一 Card 的 projection，不存在三张内容表及同步任务。
-2. **内容、结构、几何分离。** 内容在 Card；语义树在 Card；多条标注几何在 annotations；自由布局坐标在 mindmap_layout。
+2. **内容、结构、几何分离。** 内容在 Card；语义树在 Card；多条标注几何在 annotations；自由布局坐标与画布归属在 `mindmap_layout (canvas_id, card_id)`，画布元数据在 `mindmap_canvases`。禁止把卡片内容复制到画布表。
 3. **前端不执行 SQL。** 所有 SQLite 访问经过 Rust repository/command；跨表写入必须显式事务。
 4. **应用数据自包含。** PDF 复制到 app data/pdfs；数据库只保存相对路径，原路径仅用于重新定位提示。
 5. **时间统一为 UTC RFC3339 毫秒文本。** 固定格式可按字典序比较；FSRS 使用同一时钟来源。
@@ -18,7 +18,9 @@
 erDiagram
     DOCUMENTS ||--o{ CARDS : sources
     CARDS ||--o{ ANNOTATIONS : renders
-    CARDS ||--o| MINDMAP_LAYOUT : positions
+    CARDS ||--o{ MINDMAP_LAYOUT : positions
+    MINDMAP_CANVASES ||--o{ MINDMAP_LAYOUT : scopes
+    DOCUMENTS ||--o{ MINDMAP_CANVASES : owns
     CARDS ||--o{ REVIEW_LOGS : audits
     CARDS ||--o{ CARDS : parents
 ```
@@ -49,11 +51,14 @@ erDiagram
 - `style_json` 只保存颜色、透明度等展示属性；JSON 有效性由 SQLite 检查。
 - 删除 Card 级联删除标注；按文档查询使用 cards(document_id, page) JOIN annotations。
 
-### mindmap_layout
+### mindmap_layout / mindmap_canvases（schema v9）
 
-- `card_id + canvas_id + x/y + updated_at`，不存标题、摘录、笔记或 FSRS 副本。
-- 首版只有 main 画布，但 canvas_id 已为多画布预留。
-- 节点内容始终通过 card_id 从内存 Card store 读取；持久化重载时批量取 Card。
+- `mindmap_layout` 的复合主键是 `(canvas_id, card_id)`，另存 `x/y + updated_at`，不存标题、摘录、笔记或 FSRS 副本。
+- `mindmap_canvases(id, document_id, name, created_at, updated_at)`：`document_id` 可空（全局画布），删除文档时 `ON DELETE SET NULL`；`main` 是系统保留的全局默认画布，禁止删除。
+- **归属 = 布局行**：某卡在画布 X 有一行布局就表示它出现在 X；同一张卡可出现在多张画布且坐标独立。`cards.surface_mindmap` 只是「是否在任意画布出现」的派生开关，由 `canvases::sync_mindmap_surface` 在每个事务末尾对齐。
+- 节点内容始终通过 card_id 从内存 Card store 读取；持久化重载时按当前画布的 `list_mindmap_layout(canvasId)` 取成员交集，再批量取 Card。
+- 迁移 009 补回 `main`、登记旧备份里出现过的 `canvas_id`，并给「有投影但完全没有布局行」的历史卡片补一行 `main` 布局。
+- AnkiDroid txt 导入复用同一套结构：牌组层级产生分组节点（`surface_review = 0`），问题卡 `surface_review = 1`，单事务写入卡片、标签与当前画布布局。详见 [多画布脑图与 AnkiDroid 导入](mindmap-canvases.md)。
 
 ### review_logs
 
@@ -151,8 +156,8 @@ app-data/               运行时生成，不随安装包写入
 - 打开文档后进入 `StudyWorkspace`：左 PDF（embedded）、右脑图（compact），中间可拖动分隔条。
 - PDF 工具坞固定在窗口底部，脑图操作在其右上角浮动。
 - 两个视图都只读取 `cardsById`，任何写操作经 Rust command 后刷新同一 store。
-- 脑图可选「画布 / 大纲」投影；大纲按同一 `parent_id + sort_order` 生成，导出 Markdown 由 Rust 命令落盘。
-- schema v3 新增 `card_tags`、`card_links`、`page_inks`：标签与链接是卡片级关系，墨迹是页面级标记（不建卡片、不进复习）。
+- 脑图可选「画布 / 大纲」投影；大纲按同一 `parent_id + sort_order` 生成，导出 Markdown 由 Rust 命令落盘。0.20.0 起脑图工具坞多一行「画布选择器 + 导入 Anki」，嵌入视图的画布坞、操作按钮、回忆状态依次下移避免遮挡。
+- schema v3 新增 `card_tags`、`card_links`、`page_inks`：标签与链接是卡片级关系，墨迹是页面级标记（不建卡片、不进复习）。schema v9 新增 `mindmap_canvases`，并让 `surface_mindmap` 退化为派生开关。
 
 ## 9. 当前落地范围
 

@@ -96,6 +96,22 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
   window.__lastOutline = null
   const layoutState = []
   window.__layoutState = layoutState
+  // 0.20.0 多画布：每张画布有自己的 mindmap_layout 成员；main 装全部种子卡片。
+  const canvasState = [
+    { id: 'main', document_id: null, name: '默认画布', created_at: '2026-11-03T00:00:00.000Z', updated_at: '2026-11-03T00:00:00.000Z' },
+    { id: 'doc-canvas', document_id: 'doc1', name: '本书脑图 A', created_at: '2026-11-04T00:00:00.000Z', updated_at: '2026-11-04T00:00:00.000Z' },
+    { id: 'book-canvas-b', document_id: 'doc1', name: '本书脑图 B', created_at: '2026-11-05T00:00:00.000Z', updated_at: '2026-11-05T00:00:00.000Z' },
+  ]
+  const layoutMembership = {
+    main: cards.map((card) => card.id),
+    'doc-canvas': cards.slice(0, 2).map((card) => card.id),
+    'book-canvas-b': cards.slice(0, 1).map((card) => card.id),
+  }
+  window.__canvasState = canvasState
+  window.__layoutMembership = layoutMembership
+  window.__canvasOps = []
+  window.__ankiImportInputs = []
+  window.__clearCanvasIds = []
   window.__clearModes = []
   // 模拟真实的 AI 解析：多段长解释，写回笔记后必须能展开并靠滚动条查看。
   const explainText = [
@@ -207,9 +223,33 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
       if (index >= 0) cardState.splice(index, 1)
       return null
     },
+    create_card: (args) => {
+      const input = args?.input ?? {}
+      const created = {
+        ...cards[0],
+        id: `new-card-${cardState.length + 1}`,
+        question: input.question ?? '',
+        excerpt: input.excerpt ?? '',
+        user_note: input.user_note ?? '',
+        parent_id: null,
+        sort_order: input.sort_order ?? 0,
+        source_ref: input.source_ref ?? null,
+        excerpt_image: null,
+        tags: [],
+        surface_pdf: false,
+        surface_mindmap: true,
+        surface_review: true,
+      }
+      cardState.push(created)
+      const canvasId = input.canvas_id ?? 'main'
+      const ids = layoutMembership[canvasId] ?? (layoutMembership[canvasId] = [])
+      ids.push(created.id)
+      return { ...created }
+    },
     clear_mindmap_cards: (args) => {
       const mode = args?.mode ?? 'remove'
       window.__clearModes.push(mode)
+      window.__clearCanvasIds.push(args?.canvasId ?? null)
       if (mode === 'delete') {
         const count = cardState.length
         cardState.splice(0, cardState.length)
@@ -227,13 +267,106 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
       return null
     },
     list_page_inks: () => [],
-    list_mindmap_layout: () => cards.map((card, index) => ({
-      card_id: card.id,
-      canvas_id: 'main',
-      x: 80 + index * 260,
-      y: 80 + (card.parent_id ? 160 : 0),
-      updated_at: '2026-11-03T00:00:00.000Z',
-    })),
+    list_mindmap_layout: (args) => {
+      const canvasId = args?.canvasId ?? 'main'
+      const ids = layoutMembership[canvasId] ?? []
+      return ids.map((id, index) => {
+        const seeded = cards.findIndex((card) => card.id === id)
+        // main 上的种子卡片沿用旧坐标，保证既有场景的位置断言不变。
+        const isSeededOnMain = seeded >= 0 && canvasId === 'main'
+        return {
+          card_id: id,
+          canvas_id: canvasId,
+          x: isSeededOnMain ? 80 + seeded * 260 : 80 + (index % 6) * 280,
+          y: isSeededOnMain ? 80 + (cards[seeded].parent_id ? 160 : 0) : 80 + Math.floor(index / 6) * 200,
+          updated_at: '2026-11-03T00:00:00.000Z',
+        }
+      })
+    },
+    list_mindmap_canvases: (args) => {
+      const documentId = args?.documentId ?? null
+      return canvasState
+        .filter((entry) => documentId === null || entry.document_id === null || entry.document_id === documentId)
+        .map((entry) => ({ ...entry, card_count: (layoutMembership[entry.id] ?? []).length }))
+    },
+    create_mindmap_canvas: (args) => {
+      const input = args?.input ?? {}
+      const entry = {
+        id: input.id || `canvas-${canvasState.length + 1}`,
+        document_id: input.document_id ?? null,
+        name: input.name || '新画布',
+        card_count: 0,
+        created_at: '2026-11-05T00:00:00.000Z',
+        updated_at: '2026-11-05T00:00:00.000Z',
+      }
+      canvasState.push(entry)
+      layoutMembership[entry.id] = []
+      window.__canvasOps.push({ kind: 'create', id: entry.id, name: entry.name, document_id: entry.document_id })
+      return { ...entry }
+    },
+    rename_mindmap_canvas: (args) => {
+      const entry = canvasState.find((item) => item.id === args?.id)
+      if (entry) entry.name = args?.name ?? entry.name
+      window.__canvasOps.push({ kind: 'rename', id: args?.id, name: args?.name })
+      return { ...(entry ?? {}), card_count: (layoutMembership[args?.id] ?? []).length }
+    },
+    delete_mindmap_canvas: (args) => {
+      const index = canvasState.findIndex((item) => item.id === args?.id)
+      const removed = (layoutMembership[args?.id] ?? []).length
+      if (index >= 0) canvasState.splice(index, 1)
+      delete layoutMembership[args?.id]
+      window.__canvasOps.push({ kind: 'delete', id: args?.id })
+      return removed
+    },
+    preview_anki_txt: () => ({
+      format: 'anki-standard',
+      total: 3,
+      has_answers: true,
+      decks: [
+        { name: '教材::第一章', count: 2 },
+        { name: '教材::第二章', count: 1 },
+      ],
+      samples: [
+        { deck: '教材::第一章', front: '什么是信息熵？', back: '度量不确定性' },
+        { deck: '教材::第一章', front: '什么是条件熵？', back: '已知 X 时 Y 的不确定性' },
+      ],
+    }),
+    import_anki_txt: (args) => {
+      const input = args?.input ?? {}
+      const canvasId = input.canvas_id || 'main'
+      window.__ankiImportInputs.push({ ...input })
+      const selected = Array.isArray(input.deck_names)
+        ? input.deck_names
+        : ['教材::第一章', '教材::第二章']
+      const ids = layoutMembership[canvasId] ?? (layoutMembership[canvasId] = [])
+      const base = {
+        ...cards[0], id: '', question: '', excerpt: '', user_note: '', tags: [],
+        source_ref: null, excerpt_image: null, parent_id: null, sort_order: 0,
+        surface_pdf: false, surface_mindmap: true, surface_review: true,
+      }
+      const additions = []
+      if (!ids.includes('anki-group')) {
+        additions.push({ ...base, id: 'anki-group', question: '教材', surface_review: false })
+      }
+      if (selected.includes('教材::第一章')) {
+        if (!ids.includes('anki-q1')) additions.push({ ...base, id: 'anki-q1', question: '什么是信息熵？', excerpt: '度量不确定性', parent_id: 'anki-group', sort_order: 1, tags: ['第一章'] })
+        if (!ids.includes('anki-q2')) additions.push({ ...base, id: 'anki-q2', question: '什么是条件熵？', excerpt: '已知 X 时 Y 的不确定性', parent_id: 'anki-group', sort_order: 2, tags: ['第一章'] })
+      }
+      if (selected.includes('教材::第二章') && !ids.includes('anki-q3')) {
+        additions.push({ ...base, id: 'anki-q3', question: '什么是互信息？', excerpt: '两个变量共享的信息量', parent_id: 'anki-group', sort_order: 3, tags: ['第二章'] })
+      }
+      for (const item of additions) {
+        if (!cardState.some((card) => card.id === item.id)) cardState.push(item)
+        if (!ids.includes(item.id)) ids.push(item.id)
+      }
+      return {
+        imported: additions.filter((item) => item.surface_review).length,
+        groups: additions.some((item) => item.id === 'anki-group') ? 1 : 0,
+        skipped: 0,
+        canvas_id: canvasId,
+      }
+    },
+    'plugin:dialog|open': () => '/tmp/anki-sample.txt',
     list_card_links: () => [],
     list_tags: () => [],
     get_ai_settings: () => ({ baseUrl: '', model: '', apiKey: '' }),
@@ -513,6 +646,135 @@ if (STEP === 'clear') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: STEP, modes }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+if (STEP === 'canvas') {
+  await page.waitForTimeout(1400)
+  const picker = page.locator('[data-testid="canvas-select"]').first()
+  const expected = Number(process.env.CARD_COUNT ?? 3)
+  if (!(await picker.count())) {
+    problems.push('缺少画布选择器')
+  } else {
+    const initialNodes = await page.locator('.mindmap-node').count()
+    if (initialNodes !== expected) problems.push(`默认画布节点数异常：${initialNodes} / ${expected}`)
+    const options = await picker.locator('option').allTextContents()
+    if (options.length < 3) problems.push(`画布下拉选项不足：${JSON.stringify(options)}`)
+
+    // 画布常驻红线：切换画布不允许卸载并重建 React Flow。
+    await page.evaluate(() => {
+      document.querySelector('.react-flow')?.setAttribute('data-canvas-probe', 'kept')
+    })
+    await picker.selectOption('doc-canvas')
+    await page.waitForTimeout(1100)
+    const nodesOnA = await page.locator('.mindmap-node').count()
+    if (nodesOnA !== 2) problems.push(`本书脑图 A 应只有 2 张卡片，实际 ${nodesOnA}`)
+    const probe = await page.locator('.react-flow').first().getAttribute('data-canvas-probe').catch(() => null)
+    if (probe !== 'kept') problems.push('切换画布时 React Flow 被卸载重建')
+
+    await picker.selectOption('book-canvas-b')
+    await page.waitForTimeout(900)
+    const nodesOnB = await page.locator('.mindmap-node').count()
+    if (nodesOnB !== 1) problems.push(`本书脑图 B 应只有 1 张卡片，实际 ${nodesOnB}`)
+    await picker.selectOption('main')
+    await page.waitForTimeout(900)
+    const nodesBack = await page.locator('.mindmap-node').count()
+    if (nodesBack !== expected) problems.push(`切回默认画布后节点数异常：${nodesBack}`)
+
+    // 新建（默认绑定本书）→ 重命名 → 删除，验证 CRUD 与回落。
+    await page.locator('[data-testid="canvas-create"]').first().click()
+    await page.waitForSelector('[data-testid="canvas-name"]')
+    await page.locator('[data-testid="canvas-name"]').fill('回归专用画布')
+    const bind = page.locator('[data-testid="canvas-bind"]')
+    if (!(await bind.count())) problems.push('缺少「绑定到当前这本书」选项')
+    else if (!(await bind.isChecked())) problems.push('文档工作台新建画布时未默认绑定本书')
+    await page.locator('[data-testid="canvas-submit"]').click()
+    await page.waitForTimeout(1100)
+    const created = await page.evaluate(() => (window.__canvasOps ?? []).filter((op) => op.kind === 'create'))
+    if (created.length !== 1 || created[0].document_id !== 'doc1') {
+      problems.push(`新建画布未绑定文档：${JSON.stringify(created)}`)
+    }
+    const activeId = await picker.inputValue()
+    if (activeId === 'main') problems.push('新建画布后没有自动切换')
+    const emptyNodes = await page.locator('.mindmap-node').count()
+    if (emptyNodes !== 0) problems.push(`新建画布应为空，实际 ${emptyNodes} 个节点`)
+
+    await page.locator('[data-testid="canvas-rename"]').first().click()
+    await page.waitForSelector('[data-testid="canvas-name"]')
+    await page.locator('[data-testid="canvas-name"]').fill('回归专用画布（改名）')
+    await page.locator('[data-testid="canvas-submit"]').click()
+    await page.waitForTimeout(700)
+    const renamed = await page.evaluate(() => (window.__canvasOps ?? []).filter((op) => op.kind === 'rename'))
+    if (renamed.length !== 1 || renamed[0].name !== '回归专用画布（改名）') {
+      problems.push(`重命名未生效：${JSON.stringify(renamed)}`)
+    }
+
+    await page.locator('[data-testid="canvas-delete"]').first().click()
+    await page.waitForSelector('[data-testid="canvas-submit"]')
+    await page.locator('[data-testid="canvas-submit"]').click()
+    await page.waitForTimeout(1100)
+    const deleted = await page.evaluate(() => (window.__canvasOps ?? []).filter((op) => op.kind === 'delete'))
+    if (deleted.length !== 1) problems.push('删除画布未调用后端')
+    const finalId = await picker.inputValue()
+    if (finalId !== 'main') problems.push(`删除当前画布后未回落到 main：${finalId}`)
+    const finalNodes = await page.locator('.mindmap-node').count()
+    if (finalNodes !== expected) problems.push(`删除画布后默认画布卡片未恢复：${finalNodes}`)
+  }
+  const ops = await page.evaluate(() => window.__canvasOps ?? [])
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, ops }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+if (STEP === 'anki') {
+  await page.waitForTimeout(1400)
+  const picker = page.locator('[data-testid="canvas-select"]').first()
+  // 先切到本书画布 A，验证导入只影响当前画布。
+  await picker.selectOption('doc-canvas')
+  await page.waitForTimeout(900)
+  const beforeA = await page.locator('.mindmap-node').count()
+  const open = page.locator('[data-testid="anki-open"]').first()
+  if (!(await open.count())) {
+    problems.push('缺少导入 Anki 入口')
+  } else {
+    await open.click()
+    await page.waitForSelector('.anki-dialog')
+    await page.locator('[data-testid="anki-pick"]').click()
+    await page.waitForSelector('[data-testid="anki-summary"]')
+    const total = await page.locator('[data-testid="anki-total"]').innerText()
+    if (!total.includes('3')) problems.push(`预览卡数异常：${total}`)
+    const decks = await page.locator('[data-testid="anki-deck"]').count()
+    if (decks !== 2) problems.push(`牌组数异常：${decks}`)
+    await page.locator('[data-testid="anki-deck"]').nth(1).locator('input').uncheck()
+    const foot = await page.locator('.anki-dialog-foot').innerText()
+    if (!foot.includes('2 张卡片')) problems.push(`勾选后导入数量未更新：${foot.slice(0, 80)}`)
+    await page.locator('.anki-decks-head button', { hasText: '全选' }).click()
+    await page.locator('[data-testid="anki-import"]').click()
+    await page.waitForTimeout(1600)
+    const inputs = await page.evaluate(() => window.__ankiImportInputs ?? [])
+    if (inputs.length !== 1 || inputs[0].canvas_id !== 'doc-canvas') {
+      problems.push(`导入目标画布错误：${JSON.stringify(inputs)}`)
+    }
+    const afterA = await page.locator('.mindmap-node').count()
+    if (afterA <= beforeA) problems.push(`导入后画布 A 节点没有增加：${beforeA} → ${afterA}`)
+    const notice = await page.locator('.mindmap-notice').innerText().catch(() => '')
+    if (!notice.includes('已导入')) problems.push(`缺少导入结果提示：${notice.slice(0, 80)}`)
+
+    await picker.selectOption('main')
+    await page.waitForTimeout(900)
+    const titles = await page.locator('.mindmap-node').allInnerTexts()
+    if (titles.some((text) => text.includes('什么是信息熵'))) problems.push('Anki 卡片串到了默认画布')
+    const membership = await page.evaluate(() => window.__layoutMembership ?? {})
+    if ((membership.main ?? []).some((id) => id.startsWith('anki-'))) {
+      problems.push('默认画布成员被 Anki 导入污染')
+    }
+    if (!(membership['doc-canvas'] ?? []).includes('anki-q1')) {
+      problems.push('目标画布未登记新导入的卡片')
+    }
+  }
+  const membership = await page.evaluate(() => window.__layoutMembership ?? {})
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: STEP, membership }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

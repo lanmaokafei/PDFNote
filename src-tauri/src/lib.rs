@@ -1,6 +1,8 @@
 mod ai;
+mod anki;
 mod backup;
 mod book;
+mod canvases;
 mod cards;
 mod commands;
 mod db;
@@ -48,6 +50,12 @@ pub fn run() {
             commands::remove_card_from_mindmap,
             commands::delete_card,
             commands::clear_mindmap_cards,
+            commands::list_mindmap_canvases,
+            commands::create_mindmap_canvas,
+            commands::rename_mindmap_canvas,
+            commands::delete_mindmap_canvas,
+            commands::preview_anki_txt,
+            commands::import_anki_txt,
             commands::list_annotations,
             commands::update_annotation_geometry,
             commands::remove_annotation,

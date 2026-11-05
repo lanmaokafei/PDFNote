@@ -1,0 +1,94 @@
+.anki-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 84;
+  display: grid;
+  padding: 24px;
+  background: rgba(28, 36, 30, .38);
+  place-items: center;
+}
+
+.anki-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: min(86vh, 900px);
+  border-radius: 14px;
+  background: #fbfcf9;
+  box-shadow: 0 24px 60px rgba(20, 28, 22, .22);
+  overflow: hidden;
+}
+
+.anki-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #e6ebe1;
+}
+.anki-eyebrow { color: #7d8a72; font-size: 10px; font-weight: 600; letter-spacing: .12em; }
+.anki-dialog-head h2 { display: flex; align-items: center; gap: 7px; margin: 4px 0 5px; color: #26332b; font-size: 17px; font-weight: 600; }
+.anki-dialog-head p { margin: 0; color: #6d7967; font-size: 11.5px; line-height: 1.6; }
+.anki-dialog-head code { padding: 1px 4px; border-radius: 4px; background: #eef2e9; font-size: 11px; }
+.anki-dialog-head > button {
+  display: grid; width: 28px; height: 28px; flex: 0 0 auto;
+  border: 1px solid #e2e7dd; border-radius: 8px; color: #6b7568; background: #fff; cursor: pointer;
+  place-items: center;
+}
+
+.anki-dialog-body { display: flex; flex-direction: column; gap: 12px; padding: 14px 20px; overflow: auto; }
+.anki-pick {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 14px; border: 1px dashed #a9b9a1; border-radius: 9px;
+  color: #3f5b45; background: #f4f8f0; font-size: 12px; font-weight: 500; cursor: pointer;
+}
+.anki-pick:hover { background: #ebf3e7; }
+.anki-pick:disabled { opacity: .6; cursor: not-allowed; }
+.is-spinning { animation: anki-spin 1s linear infinite; }
+@keyframes anki-spin { to { transform: rotate(360deg); } }
+.anki-path { margin: -4px 0 0; color: #8a9685; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.anki-summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 9px 12px; border: 1px solid #e3e9dd; border-radius: 8px; background: #f6f9f3;
+  color: #6d7967; font-size: 11px;
+}
+.anki-summary strong { color: #2f4a35; font-size: 13px; }
+
+.anki-decks { border: 1px solid #e6ebe1; border-radius: 9px; overflow: hidden; }
+.anki-decks-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 11px; background: #f1f5ed; color: #40563f; font-size: 11.5px;
+}
+.anki-decks-head > div { display: flex; gap: 6px; }
+.anki-decks-head button, .anki-dialog-foot button {
+  padding: 5px 11px; border: 1px solid #dce4d6; border-radius: 6px;
+  color: #4d5f4a; background: #fff; font-size: 11px; cursor: pointer;
+}
+.anki-decks-head button:hover, .anki-dialog-foot button:hover { background: #f3f7ef; }
+.anki-deck-list { max-height: 190px; overflow: auto; }
+.anki-deck-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 11px; border-top: 1px solid #eef2ea; color: #3d4b3d; font-size: 11.5px; cursor: pointer;
+}
+.anki-deck-row:hover { background: #f7faf4; }
+.anki-deck-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anki-deck-count { color: #8a9685; font-size: 10.5px; }
+
+.anki-samples { display: flex; flex-direction: column; gap: 7px; }
+.anki-samples > strong { color: #40563f; font-size: 11.5px; }
+.anki-sample { padding: 8px 11px; border-left: 3px solid #c7d9bf; border-radius: 5px; background: #f7faf5; }
+.anki-sample-deck { display: block; margin-bottom: 3px; color: #8a9685; font-size: 10px; }
+.anki-sample p { margin: 2px 0; color: #3d4b3d; font-size: 11.5px; line-height: 1.55; word-break: break-word; }
+.anki-sample-back { color: #6d7967 !important; }
+.anki-error { margin: 0; padding: 8px 11px; border-radius: 7px; background: #fdeceb; color: #a53f36; font-size: 11.5px; }
+
+.anki-dialog-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 20px; border-top: 1px solid #e6ebe1; color: #7d8a72; font-size: 11px;
+}
+.anki-dialog-foot > div { display: flex; gap: 8px; }
+.anki-dialog-foot button.primary { border-color: #5c7c5b; background: #5c7c5b; color: #fff; }
+.anki-dialog-foot button.primary:hover { background: #4e6d4d; }
+.anki-dialog-foot button:disabled { opacity: .55; cursor: not-allowed; }

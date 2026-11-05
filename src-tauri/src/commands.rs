@@ -1,4 +1,4 @@
-use crate::{ai, backup, book, cards, documents, models, review, state::AppState};
+use crate::{ai, anki, backup, book, canvases, cards, documents, models, review, state::AppState};
 use tauri::{ipc::Response, State};
 
 /// 可选的视觉模型设置。未配置时应用不发任何网络请求。
@@ -73,8 +73,9 @@ pub fn apply_book_outline(
     state: State<'_, AppState>,
     document_id: String,
     mode: String,
+    canvas_id: Option<String>,
 ) -> Result<u32, String> {
-    book::apply_outline(&state, document_id, mode)
+    book::apply_outline(&state, document_id, mode, canvas_id)
 }
 
 /// 清空某模式的拆书中间产物（已生成的卡片保留）。
@@ -210,8 +211,12 @@ pub fn update_card_content(
 }
 
 #[tauri::command]
-pub fn remove_card_from_mindmap(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    cards::remove_card_from_mindmap(&state, id)
+pub fn remove_card_from_mindmap(
+    state: State<'_, AppState>,
+    id: String,
+    canvas_id: Option<String>,
+) -> Result<(), String> {
+    cards::remove_card_from_mindmap(&state, id, canvas_id)
 }
 
 #[tauri::command]
@@ -219,10 +224,61 @@ pub fn delete_card(state: State<'_, AppState>, id: String) -> Result<(), String>
     cards::delete_card(&state, id)
 }
 
-/// 批量清空脑图卡片：remove 仅关闭投影，delete 彻底删除。
+/// 批量清空指定画布的卡片：remove 仅移除该画布布局，delete 彻底删除卡片。
 #[tauri::command(async)]
-pub fn clear_mindmap_cards(state: State<'_, AppState>, mode: String) -> Result<u32, String> {
-    cards::clear_mindmap_cards(&state, mode)
+pub fn clear_mindmap_cards(
+    state: State<'_, AppState>,
+    mode: String,
+    canvas_id: Option<String>,
+) -> Result<u32, String> {
+    cards::clear_mindmap_cards(&state, mode, canvas_id)
+}
+
+#[tauri::command]
+pub fn list_mindmap_canvases(
+    state: State<'_, AppState>,
+    document_id: Option<String>,
+) -> Result<Vec<models::MindmapCanvas>, String> {
+    canvases::list_canvases(&state, document_id)
+}
+
+#[tauri::command]
+pub fn create_mindmap_canvas(
+    state: State<'_, AppState>,
+    input: models::CreateMindmapCanvasInput,
+) -> Result<models::MindmapCanvas, String> {
+    canvases::create_canvas(&state, input)
+}
+
+#[tauri::command]
+pub fn rename_mindmap_canvas(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<models::MindmapCanvas, String> {
+    canvases::rename_canvas(&state, id, name)
+}
+
+#[tauri::command]
+pub fn delete_mindmap_canvas(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<u32, String> {
+    canvases::delete_canvas(&state, id)
+}
+
+#[tauri::command]
+pub fn preview_anki_txt(source_path: String) -> Result<anki::AnkiPreview, String> {
+    anki::preview_anki_txt(&source_path)
+}
+
+/// 大批量写库，放 async 线程避免阻塞 WebView。
+#[tauri::command(async)]
+pub fn import_anki_txt(
+    state: State<'_, AppState>,
+    input: anki::AnkiImportInput,
+) -> Result<anki::AnkiImportResult, String> {
+    anki::import_anki_txt(&state, input)
 }
 
 #[tauri::command]

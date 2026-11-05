@@ -611,12 +611,24 @@ fn effective_page(node: &OutlineNode) -> Option<u32> {
 }
 
 /// 阶段二之后：把骨架写成卡片与脑图节点（同一事务）。
-pub fn apply_outline(state: &AppState, document_id: String, mode: String) -> Result<u32, String> {
+/// 卡片内容全局唯一，但布局按画布隔离；同一张卡可以补一行布局出现在新画布。
+pub fn apply_outline(
+    state: &AppState,
+    document_id: String,
+    mode: String,
+    canvas_id: Option<String>,
+) -> Result<u32, String> {
     let outline = load_outline(state, document_id.clone(), mode)?;
+    let canvas_id = canvas_id
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| crate::canvases::DEFAULT_CANVAS_ID.into());
     let mut connection = state.db()?;
     let transaction = connection
         .transaction()
         .map_err(|error| error.to_string())?;
+    if !crate::canvases::canvas_exists(&transaction, &canvas_id)? {
+        return Err(format!("画布 {canvas_id} 不存在，请先新建画布"));
+    }
     let timestamp = now();
     let mut created = 0_u32;
     let mut next_y = 0.0_f64;
@@ -627,6 +639,7 @@ pub fn apply_outline(state: &AppState, document_id: String, mode: String) -> Res
             None,
             0,
             &document_id,
+            &canvas_id,
             &timestamp,
             &mut created,
             &mut next_y,
@@ -643,23 +656,36 @@ fn place_node(
     parent_id: Option<&str>,
     depth: u32,
     document_id: &str,
+    canvas_id: &str,
     timestamp: &str,
     created: &mut u32,
     next_y: &mut f64,
 ) -> Result<Option<(String, f64)>, String> {
-    // 同文档同标题已存在时复用：重复点「写入脑图」不会翻倍。
-    let existing: Option<(String, f64)> = connection
+    // 同文档同标题已存在时复用卡片内容；若还没出现在当前画布，补一行布局即可。
+    let existing: Option<(String, f64, bool)> = connection
         .query_row(
-            "SELECT c.id, COALESCE(l.y, 0) FROM cards c
-             LEFT JOIN mindmap_layout l ON l.card_id = c.id AND l.canvas_id = 'main'
+            "SELECT c.id, COALESCE(l.y, 0),
+                    EXISTS(SELECT 1 FROM mindmap_layout l2
+                           WHERE l2.card_id = c.id AND l2.canvas_id = ?3)
+             FROM cards c
+             LEFT JOIN mindmap_layout l ON l.card_id = c.id AND l.canvas_id = ?3
              WHERE c.document_id IS ?1 AND c.question = ?2 LIMIT 1",
-            params![document_id, node.title],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            params![document_id, node.title, canvas_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
         .map_err(|error| error.to_string())?;
 
-    if let Some((id, y)) = existing {
+    if let Some((id, y, in_canvas)) = existing {
+        if !in_canvas {
+            connection
+                .execute(
+                    "INSERT INTO mindmap_layout (card_id, canvas_id, x, y, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![id, canvas_id, depth as f64 * 320.0, y, timestamp],
+                )
+                .map_err(|error| error.to_string())?;
+        }
         // 已存在也继续补子节点，避免中途失败后只应用了一半。
         for child in &node.children {
             place_node(
@@ -668,6 +694,7 @@ fn place_node(
                 Some(&id),
                 depth + 1,
                 document_id,
+                canvas_id,
                 timestamp,
                 created,
                 next_y,
@@ -714,6 +741,7 @@ fn place_node(
             Some(&id),
             depth + 1,
             document_id,
+            canvas_id,
             timestamp,
             created,
             next_y,
@@ -733,8 +761,8 @@ fn place_node(
     connection
         .execute(
             "INSERT INTO mindmap_layout (card_id, canvas_id, x, y, updated_at)
-             VALUES (?1, 'main', ?2, ?3, ?4)",
-            params![id, x, y, timestamp],
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, canvas_id, x, y, timestamp],
         )
         .map_err(|error| error.to_string())?;
     *created += 1;
@@ -835,10 +863,10 @@ mod tests {
                 .unwrap();
         }
 
-        let created = apply_outline(&state, "doc1".into(), "structure".into()).unwrap();
+        let created = apply_outline(&state, "doc1".into(), "structure".into(), None).unwrap();
         assert_eq!(created, 2);
         // 重复应用不翻倍
-        let again = apply_outline(&state, "doc1".into(), "structure".into()).unwrap();
+        let again = apply_outline(&state, "doc1".into(), "structure".into(), None).unwrap();
         assert_eq!(again, 0);
 
         let connection = state.db().unwrap();
@@ -862,6 +890,40 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM annotations", [], |row| row.get(0))
             .unwrap();
         assert_eq!(annotations, 0, "拆书节点不应在 PDF 上生成整页高亮");
+        drop(connection);
+
+        // 同一份骨架再写进另一张画布：卡片内容复用，只补该画布的布局行。
+        crate::canvases::create_canvas(
+            &state,
+            crate::models::CreateMindmapCanvasInput {
+                id: Some("second-canvas".into()),
+                name: "第二张脑图".into(),
+                document_id: None,
+            },
+        )
+        .unwrap();
+        let second = apply_outline(
+            &state,
+            "doc1".into(),
+            "structure".into(),
+            Some("second-canvas".into()),
+        )
+        .unwrap();
+        assert_eq!(second, 0, "卡片已存在，不应重复建卡");
+        let connection = state.db().unwrap();
+        let cards_after: i64 = connection
+            .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
+            .unwrap();
+        let in_second: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM mindmap_layout WHERE canvas_id = 'second-canvas'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cards_after, 2);
+        assert_eq!(in_second, 2);
+        drop(connection);
         let _ = std::fs::remove_dir_all(&directory);
     }
 
@@ -898,7 +960,7 @@ mod tests {
                 .unwrap();
         }
 
-        let created = apply_outline(&state, "doc1".into(), "vocabulary".into()).unwrap();
+        let created = apply_outline(&state, "doc1".into(), "vocabulary".into(), None).unwrap();
         assert_eq!(created, 2);
         let connection = state.db().unwrap();
         let (page, doc): (i64, Option<String>) = connection
@@ -1035,7 +1097,7 @@ mod tests {
                 .unwrap();
         }
 
-        let created = apply_outline(&state, "doc1".into(), "structure".into()).unwrap();
+        let created = apply_outline(&state, "doc1".into(), "structure".into(), None).unwrap();
         assert_eq!(created, 4, "4 层骨架应写出 4 张卡片");
         let connection = state.db().unwrap();
         let xs: Vec<f64> = {

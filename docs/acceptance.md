@@ -21,7 +21,7 @@
 
 Rust 测试覆盖：
 
-1. schema v1 → v2 → v3 → v4 → v5 → v6 → v7 → v8 迁移（阅读进度、标签/链接/墨迹、摘录图像、页面文字缓存、标题链接别名、留白、拆书）、外键与索引。
+1. schema v1 → v2 → … → v8 → v9 迁移（阅读进度、标签/链接/墨迹、摘录图像、页面文字缓存、标题链接别名、留白、拆书、多画布）、外键与索引。
 2. WAL、foreign_keys 安全设置。
 3. 同内容 PDF 去重、非 PDF 拒绝、缺失/哈希不一致检测。
 4. 删除文档时保留卡片、清理标注与 PDF。
@@ -65,6 +65,7 @@ Rust 测试覆盖：
 | OCR 建卡 | Rust 真机 + 浏览器实测 | 标注-only 建卡通过；0.8.0 起为 Apple Vision 单引擎，真机中文图识别出「信息化」；已移除 Tesseract 与 63MB 离线模型 |
 | 可选文字层（0.9.0） | Rust 真机 + 无头 Chrome | 4 行中文图返回归一化行坐标（2.81s）；缓存往返与旧备份兼容测试通过；透明 DOM 文字拖选精确到字符，可复制/建卡；0.10.1 起选区字形保持透明（`::selection` color/fill 均为 `rgba(0,0,0,0)`），与 PDF 原字无重影 |
 | 元素右键菜单（0.10.0） | Vitest + 无头 Chrome | 原生 Reload 菜单被接管；文字选区/标注/墨迹/脑图节点/文档卡片按元素给菜单；动作执行、边界翻转、ESC 与键盘导航、输入框系统菜单均通过 |
+| 多画布与 AnkiDroid 导入（0.20.0） | Rust + Vitest + 无头 Chrome + 真实导出 | `cargo test --lib` 77 项通过（画布 CRUD、按画布移除/清空、拆书写第二画布、两种 txt 格式、HTML 清洗、建树、幂等导入、牌组筛选、跨格式答案补齐）；`ANKI_FIXTURE_PATH` 校验两份真实 AnkiDroid 导出各 1455 张卡；`STEP=canvas` 验证默认画布 3 张 / 本书 A 2 张 / 本书 B 1 张、切换时 React Flow DOM 探针保持、新建绑定 doc1、重命名、删除回落 main 且卡片恢复；`STEP=anki` 验证预览 3 张 / 2 牌组、取消勾选后计数变 2、导入写入 `doc-canvas` 且 `main` 成员不被污染；`STEP=all CARD_COUNT=120` 与其余 15 个既有场景全绿 |
 | 卡片笔记展开与滚动（0.19.0） | Vitest + 无头 Chrome | `isClampable` 4 项（短文本、多段 AI 解析、超长单段、公式不折叠）；`STEP=note-expand` 实测 AI 解析写回后自动展开（1115 字完整渲染）、`line-clamp: none` + `overflow-y: auto` + 170px 限高（内容 711px）、滚轮滚动 200px 且 viewport transform 不变、收起恢复折叠、点击正文再展开、大纲行显示并可展开笔记；`STEP=math` 复验公式仍不被裁切 |
 | 可设拆分层级（0.18.0） | Vitest + Rust + 无头 Chrome | 默认 2 层、4 层偏好写入 localStorage 且刷新后仍生效；阶段一/阶段二命令均收到 `depth=4`；预览渲染到 L4、统计 4 节点 4 层；写入 4 张卡片；改回 2 层后旧骨架失效且命令参数同步；Rust 覆盖 depth 收敛、按层截断、提示词嵌套示例、旧 `outline_json` 兼容、4 层父子链与 x=0/320/640/960 布局 |
 | 脑图整理与清空（0.17.0） | Vitest + Rust + 无头 Chrome | 26 张独立卡片整理成紧凑网格（长宽比 / 不重叠 / 缩放 ≥ 0.2）、整理后命令调用与坐标落库；清空对话框两种模式往返、remove 保留卡片、delete 清空节点与卡片；Rust 覆盖级联清理与非法模式拒绝 |

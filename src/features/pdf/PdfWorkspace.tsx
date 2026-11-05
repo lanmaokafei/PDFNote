@@ -8,6 +8,7 @@ import {
   type PDFPageProxy,
 } from 'pdfjs-dist'
 import type { OcrLine } from '../../services/pdfnote'
+import { notifyMindmapChanged, readCanvasId } from '../mindmap/canvas'
 import type {
   Annotation,
   AnnotationGeometry,
@@ -912,7 +913,10 @@ export function PdfWorkspace({
     }
 
     try {
+      // 从 PDF 划重点建卡时写入读者当前选中的画布，而不是永远塞进 main。
+      const targetCanvasId = readCanvasId(document.id)
       const card = await createCard({
+        canvas_id: targetCanvasId,
         source_ref: { document_id: document.id, page: page.pageNumber, bbox: rect },
         excerpt: finalExcerpt,
         question: finalExcerpt
@@ -935,6 +939,7 @@ export function PdfWorkspace({
         }
       }
       invalidateAnnotations(page.pageNumber)
+      notifyMindmapChanged(targetCanvasId)
       callbacksRef.current.onCardsChanged()
       if (aiFormula) {
         setNotice('公式已由视觉模型识别为 LaTeX，原图同时保留，请核对上下标后保存。')

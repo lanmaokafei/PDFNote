@@ -241,6 +241,27 @@ pub struct AnnotationInput {
     pub style: serde_json::Value,
 }
 
+/// 画布可绑定文档（document_id = Some），也可以是全局画布（None）。
+/// card_count 是该画布在 mindmap_layout 里的卡片数，由查询时计算。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MindmapCanvas {
+    pub id: String,
+    pub document_id: Option<String>,
+    pub name: String,
+    pub card_count: u32,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateMindmapCanvasInput {
+    /// 前端可生成 UUID；不传时由后端分配。
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: String,
+    pub document_id: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateCardInput {
     pub source_ref: Option<SourceRef>,
@@ -251,6 +272,9 @@ pub struct CreateCardInput {
     #[serde(default)]
     pub question: String,
     pub parent_id: Option<String>,
+    /// 新卡片写入哪张画布；旧调用不传时落到默认画布 main。
+    #[serde(default)]
+    pub canvas_id: Option<String>,
     #[serde(default)]
     pub sort_order: i64,
     pub annotation: Option<AnnotationInput>,

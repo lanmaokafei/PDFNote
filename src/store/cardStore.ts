@@ -6,7 +6,7 @@ interface CardState {
   cardsById: Record<string, Card>
   loadCards: () => Promise<void>
   createCard: (input: CreateCardInput) => Promise<Card>
-  removeFromMindmap: (id: string) => Promise<void>
+  removeFromMindmap: (id: string, canvasId?: string) => Promise<void>
   deleteCard: (id: string) => Promise<void>
 }
 
@@ -28,8 +28,8 @@ export const useCardStore = create<CardState>((set) => ({
     return card
   },
 
-  removeFromMindmap: async (id) => {
-    await api.removeCardFromMindmap(id)
+  removeFromMindmap: async (id, canvasId) => {
+    await api.removeCardFromMindmap(id, canvasId)
     set((state) => {
       const card = state.cardsById[id]
       if (!card) return state

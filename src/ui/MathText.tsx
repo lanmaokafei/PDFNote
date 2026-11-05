@@ -42,14 +42,23 @@ function renderToHtml(text: string): string {
 }
 
 // 同一个公式会在多个视图反复出现（脑图、大纲、复习），缓存渲染结果避免重复排版。
+// 上千张卡时缓存会装满：命中后移到队尾做 LRU，满了只淘汰最旧的一条——
+// 以前是 `cache.clear()` 整体清空，缩小/平移导致节点反复挂载时会退化成「每次都重排」。
 const cache = new Map<string, string>()
-const CACHE_LIMIT = 400
+const CACHE_LIMIT = 1200
 
 function renderCached(text: string): string {
   const hit = cache.get(text)
-  if (hit !== undefined) return hit
+  if (hit !== undefined) {
+    cache.delete(text)
+    cache.set(text, hit)
+    return hit
+  }
   const html = renderToHtml(text)
-  if (cache.size >= CACHE_LIMIT) cache.clear()
+  if (cache.size >= CACHE_LIMIT) {
+    const oldest = cache.keys().next().value
+    if (oldest !== undefined) cache.delete(oldest)
+  }
   cache.set(text, html)
   return html
 }

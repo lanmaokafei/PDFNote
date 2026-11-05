@@ -114,6 +114,19 @@
   transition: border-color .15s, box-shadow .15s;
 }
 .mindmap-node.is-selected { border-color: #72896a; box-shadow: 0 0 0 2px #72896a22, 0 12px 30px #3442341c; }
+/* 低缩放（zoom < 0.45）：只画标题条。少掉 KaTeX / 图片 / 按钮后，
+   上千个节点同时挂载也能保持平移和拖拽流畅。 */
+.mindmap-node.is-lite { padding: 7px 10px; border-radius: 7px; box-shadow: 0 2px 8px #3442340d; }
+.mindmap-node.is-lite h3 {
+  margin: 0;
+  overflow: hidden;
+  color: #3d4c3f;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .mindmap-node.is-recall { border-color: #c8d4bf; }
 .mindmap-node-missing { padding: 14px; color: #9a6b5e; font-size: 9px; }
 .mindmap-node-header { display: flex; align-items: center; gap: 8px; padding: 10px 11px 8px; }

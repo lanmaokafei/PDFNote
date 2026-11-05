@@ -84,7 +84,7 @@ const document = {
   updated_at: '2026-11-03T00:00:00.000Z',
 }
 
-await page.addInitScript(({ cards, document, pdfBase64 }) => {
+await page.addInitScript(({ cards, document, pdfBase64, dense }) => {
   const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0))
   const cardState = cards.map((card) => ({ ...card }))
   const noteState = []
@@ -274,6 +274,17 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
         const seeded = cards.findIndex((card) => card.id === id)
         // main 上的种子卡片沿用旧坐标，保证既有场景的位置断言不变。
         const isSeededOnMain = seeded >= 0 && canvasId === 'main'
+        // DENSE=1：把卡片铺成密集网格，模拟真实 Anki 题库（26 个牌组 × 数十道题），
+        // 用于验证缩小后视口里同时出现几百个节点时是否仍然流畅。
+        if (dense && seeded >= 0) {
+          return {
+            card_id: id,
+            canvas_id: canvasId,
+            x: 80 + (seeded % 24) * 300,
+            y: 80 + Math.floor(seeded / 24) * 190,
+            updated_at: '2026-11-03T00:00:00.000Z',
+          }
+        }
         return {
           card_id: id,
           canvas_id: canvasId,
@@ -410,7 +421,7 @@ await page.addInitScript(({ cards, document, pdfBase64 }) => {
     },
     transformCallback: (callback) => callback,
   }
-}, { cards, document, pdfBase64 })
+}, { cards, document, pdfBase64, dense: process.env.DENSE === '1' })
 
 await page.goto('http://127.0.0.1:1420/', { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.app-shell')
@@ -431,7 +442,7 @@ if (process.env.STEP === 'perf') {
   })
   const started = Date.now()
   await page.locator('.document-card').first().click()
-  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, { timeout: 120000 })
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
   const firstNodeMs = Date.now() - started
   await page.waitForTimeout(2500)
   const settleMs = Date.now() - started
@@ -465,6 +476,132 @@ if (process.env.STEP === 'perf') {
     settleMs,
     ...metrics,
   }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=zoom-drag：缩小到能看见上百个节点后，连续点击 + 拖动几张卡。
+// 这是「缩小后拖几次像卡死」的复现场景：低缩放下视口覆盖节点数暴涨，
+// 每次挂载/测量/选中都可能重建整张 nodes 表。
+if (process.env.STEP === 'zoom-drag') {
+  await page.evaluate(() => {
+    window.__perf = { longTasks: [] }
+    try {
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) window.__perf.longTasks.push(Math.round(entry.duration))
+      }).observe({ entryTypes: ['longtask'] })
+    } catch { /* ignore */ }
+  })
+  await page.locator('.document-card').first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(1500)
+
+  const readZoom = () => page.evaluate(() => {
+    const viewport = document.querySelector('.react-flow__viewport')
+    if (!viewport) return 1
+    return Number(new DOMMatrix(getComputedStyle(viewport).transform).a.toFixed(3))
+  })
+
+  // 用 ⌘+滚轮缩小（画布左下角的 Controls 在分栏里会被 PDF 工具坞挡住，点不到）。
+  // 指针放在左上角（树根附近）再缩，缩放后视口里仍是内容最密的一块。
+  const pane = await page.locator('.react-flow__pane').first().boundingBox()
+  if (!pane) {
+    problems.push('画布不可见，无法缩小')
+  } else {
+    await page.mouse.move(pane.x + 80, pane.y + 80)
+    await page.keyboard.down('Meta')
+    for (let i = 0; i < 10; i += 1) {
+      await page.mouse.wheel(0, 300)
+      await page.waitForTimeout(140)
+    }
+    await page.keyboard.up('Meta')
+  }
+  await page.waitForTimeout(600)
+  const zoom = await readZoom()
+  const nodesAtZoom = await page.locator('.mindmap-node').count()
+  // 只统计拖拽阶段的长任务，别把首屏加载算进来。
+  await page.evaluate(() => { window.__perf.longTasks = [] })
+
+  // 用 rAF 计帧：拖拽墙钟时间含 Playwright 逐事件派发的固定开销，
+  // 帧率才是用户感知的「断断续续」。
+  await page.evaluate(() => {
+    window.__frames = { count: 0, start: performance.now(), worst: 0, last: performance.now(), slow: 0 }
+    const tick = () => {
+      const now = performance.now()
+      const delta = now - window.__frames.last
+      window.__frames.last = now
+      if (window.__frames.count > 0) {
+        window.__frames.worst = Math.max(window.__frames.worst, Math.round(delta))
+        if (delta > 50) window.__frames.slow += 1
+      }
+      window.__frames.count += 1
+      window.__frames.raf = requestAnimationFrame(tick)
+    }
+    window.__frames.raf = requestAnimationFrame(tick)
+  })
+  const dragMs = []
+  for (let round = 0; round < 3; round += 1) {
+    const node = page.locator('.mindmap-node').nth(round)
+    if (!(await node.count())) break
+    const box = await node.boundingBox()
+    if (!box) break
+    const started = Date.now()
+    await page.evaluate(() => { window.__nodeRenders = 0; window.__ctxBuilds = 0; window.__nodeMounts = 0; window.__nodeMounts = 0 })
+    // 低缩放下节点只有几像素高，必须点正中心，否则会落到画布上变成平移。
+    await page.mouse.move(box.x + box.width / 2, box.y + Math.max(1, box.height / 2))
+    await page.mouse.down()
+    for (let step = 0; step < 8; step += 1) {
+      await page.mouse.move(box.x + box.width / 2 + step * 5, box.y + Math.max(1, box.height / 2) + step * 6, { steps: 2 })
+    }
+    await page.mouse.up()
+    dragMs.push(Date.now() - started)
+    await page.waitForTimeout(350)
+  }
+
+  const frames = await page.evaluate(() => {
+    cancelAnimationFrame(window.__frames.raf)
+    const elapsed = performance.now() - window.__frames.start
+    return {
+      frames: window.__frames.count,
+      elapsed: Math.round(elapsed),
+      fps: Math.round((window.__frames.count / elapsed) * 1000),
+      worstFrame: window.__frames.worst,
+      slowFrames: window.__frames.slow,
+    }
+  })
+
+  const metrics = await page.evaluate(() => {
+    const longTasks = window.__perf.longTasks
+    return {
+      nodes: document.querySelectorAll('.mindmap-node').length,
+      liteNodes: document.querySelectorAll('.mindmap-node.is-lite').length,
+      katex: document.querySelectorAll('.mindmap-node .katex').length,
+      edges: document.querySelectorAll('.react-flow__edge').length,
+      domTotal: document.querySelectorAll('*').length,
+      longTaskCount: longTasks.length,
+      longTaskTotal: longTasks.reduce((sum, value) => sum + value, 0),
+      longTaskMax: longTasks.length ? Math.max(...longTasks) : 0,
+      heapMb: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
+    }
+  })
+  // 低缩放必须整体降级为「标题条」：不该再出现 KaTeX，DOM 也要受控。
+  if (zoom < 0.45) {
+    if (metrics.liteNodes !== metrics.nodes) {
+      problems.push(`低缩放未整体降级：lite=${metrics.liteNodes} / nodes=${metrics.nodes}`)
+    }
+    if (metrics.katex > 0) problems.push(`低缩放仍在渲染 KaTeX：${metrics.katex}`)
+    if (metrics.domTotal > 12000) problems.push(`低缩放 DOM 过大：${metrics.domTotal}`)
+  }
+  if (metrics.longTaskMax > 400) {
+    problems.push(`拖拽出现 ${metrics.longTaskMax}ms 长任务`)
+  }
+  if (dragMs.length && Math.max(...dragMs) > 700) {
+    problems.push(`单次拖拽耗时 ${Math.max(...dragMs)}ms`)
+  }
+  if (frames.worstFrame > 320) {
+    problems.push(`拖拽出现 ${frames.worstFrame}ms 单帧`)
+  }
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'zoom-drag', cardCount: CARD_COUNT, zoom, nodesAtZoom, dragMs, frames, ...metrics }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

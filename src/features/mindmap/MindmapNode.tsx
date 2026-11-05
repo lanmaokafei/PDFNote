@@ -20,11 +20,33 @@ function cardTitle(card: Card): string {
   return card.question.trim() || card.excerpt.trim() || card.user_note.trim() || '未命名卡片'
 }
 
+function sameNodeProps(previous: NodeProps<MindmapFlowNode>, next: NodeProps<MindmapFlowNode>): boolean {
+  // React Flow 在拖拽每一帧都会把 dragging / positionAbsolute 等字段换新。
+  // 卡片内容只取决于 id / data / selected，其余变化一律不重渲染，
+  // 否则低缩放下 338 个节点会在一次拖拽里重渲染近万次。
+  return previous.id === next.id
+    && previous.data === next.data
+    && previous.selected === next.selected
+}
+
 export const MindmapNode = memo(function MindmapNode({ data, selected }: NodeProps<MindmapFlowNode>) {
   const card = useCardStore((state) => state.cardsById[data.card_id])
   const context = useContext(MindmapNodeContext)
   if (!context) throw new Error('MindmapNode must be rendered inside MindmapWorkspace')
   if (!card) return <div className="mindmap-node mindmap-node-missing">卡片已不可用</div>
+
+  // 低缩放下文字本来就看不清：只画一条标题，省掉 KaTeX、图片、标签和全部按钮。
+  // 节点仍可点选、拖拽，交互行为不变，只是 DOM 与渲染成本降到十分之一。
+  if (context.lite) {
+    return (
+      <article className={`mindmap-node is-lite${selected ? ' is-selected' : ''}`}>
+        <Handle className="mindmap-handle" type="target" position={Position.Left} />
+        <h3 title={cardTitle(card)}>{cardTitle(card)}</h3>
+        <Handle className="mindmap-handle" type="source" position={Position.Right} />
+      </article>
+    )
+  }
+
   // 子节点数由工作区预算好：节点内部不再扫全表（否则 1000+ 卡时是 O(n²)）。
   const childCount = context.childCounts.get(card.id) ?? 0
 
@@ -150,4 +172,4 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
       <Handle className="mindmap-handle" type="source" position={Position.Right} />
     </article>
   )
-})
+}, sameNodeProps)

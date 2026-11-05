@@ -3,6 +3,11 @@ import type { Rating } from '../../domain/card'
 
 export interface MindmapNodeContextValue {
   busy: boolean
+  /**
+   * 缩得很小（zoom < 0.45）时只画标题条：此时文字本来就不可读，却仍要挂上百个
+   * KaTeX / 图片 / 按钮。lite 模式让低缩放下的平移与拖拽保持流畅。
+   */
+  lite: boolean
   collapsedIds: ReadonlySet<string>
   /**
    * 当前画布的「父 → 直接子节点数」。

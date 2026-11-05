@@ -13,6 +13,7 @@ import {
   type Edge,
   type NodeChange,
   type OnNodeDrag,
+  type Viewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { save as saveDialog } from '@tauri-apps/plugin-dialog'
@@ -99,6 +100,9 @@ const MINIMAP_NODE_LIMIT = 400
 const AUTO_FIT_NODE_LIMIT = 400
 // 大图的「适应视图」只框住前若干个节点，保证缩放后文字仍然可读。
 const READABLE_FIT_NODES = 40
+// 低缩放时不渲染边：338 个节点能带出 1000+ 条 smoothstep 路径，拖拽时每帧都要重算，
+// 而那个比例下边只是一层灰线，反而盖住标题条。
+const NO_EDGES: Edge[] = []
 // 大纲首屏只渲染这么多行，其余按需追加（上千行全量挂载会卡住切换）。
 const OUTLINE_PAGE = 200
 // 传给 React Flow 的对象/数组必须保持引用稳定：StoreUpdater 会逐字段比较，
@@ -161,6 +165,25 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
   // 尺寸回写熔断：极端情况下（容器 0 宽、图片抖动）测量会连续变化，
   // 超过阈值后本秒内停止回写，直接断开 StoreUpdater ↔ onNodesChange 的回路。
   const measuredBurstRef = useRef({ windowStart: 0, count: 0 })
+  /**
+   * 平移 / 缩放 / 拖拽期间先不把尺寸写回 state。
+   * 每次写回都会重建整张 nodes 数组（1483 个对象）并让 React Flow 重新 adopt 一遍，
+   * 而低缩放下视口里同时挂着一千多个节点，写一次就是几百毫秒的卡顿。
+   * 交互结束后一次性 flush，期间只记在 ref 里。
+   */
+  const interactingRef = useRef(false)
+  const pendingMeasureRef = useRef<Record<string, { width: number; height: number }>>({})
+  const flushMeasures = useCallback(() => {
+    const pending = pendingMeasureRef.current
+    if (!Object.keys(pending).length) return
+    pendingMeasureRef.current = {}
+    setMeasuredSizes((current) => ({ ...current, ...pending }))
+  }, [])
+  const beginInteraction = useCallback(() => { interactingRef.current = true }, [])
+  const endInteraction = useCallback(() => {
+    interactingRef.current = false
+    flushMeasures()
+  }, [flushMeasures])
   const arrangeTimerRef = useRef<number | null>(null)
   /** 首次加载只自动适配一次视图；切换画布时不要反复抢用户的视口。 */
   const initialFitRef = useRef(false)
@@ -177,6 +200,18 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
    * 切换动作卡住几秒；其余行按需追加，成本随用户实际翻到的位置增长。
    */
   const [outlineLimit, setOutlineLimit] = useState(OUTLINE_PAGE)
+  /**
+   * 低缩放（<0.45）时节点只画标题条。用滞后阈值（退出要回到 0.55）避免
+   * 用户停在临界点附近时反复切换，反而更卡。
+   */
+  const [lite, setLite] = useState(false)
+  const liteRef = useRef(false)
+  const handleViewportMove = useCallback((_event: unknown, viewport: Viewport) => {
+    const next = viewport.zoom < (liteRef.current ? 0.55 : 0.45)
+    if (next === liteRef.current) return
+    liteRef.current = next
+    setLite(next)
+  }, [])
   const [exporting, setExporting] = useState(false)
   const [links, setLinks] = useState<CardLink[]>([])
   const [tagTarget, setTagTarget] = useState<string | null>(null)
@@ -341,25 +376,59 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
     return map
   }, [orderedVisibleCards])
 
-  const nodes = useMemo<MindmapFlowNode[]>(
-    () => orderedVisibleCards.map((card) => {
+  /**
+   * 复用没变化的节点对象：React Flow 的 `adoptUserNodes` 对「引用未变」的节点走快路径，
+   * 否则每次选中 / 尺寸回写都要为上千个节点重建对象并重算 handleBounds。
+   */
+  const nodeCache = useMemo(() => new Map<string, MindmapFlowNode>(), [])
+  const nodes = useMemo<MindmapFlowNode[]>(() => {
+    const cache = nodeCache
+    const next: MindmapFlowNode[] = []
+    const seen = new Set<string>()
+    for (const card of orderedVisibleCards) {
+      seen.add(card.id)
       const size = measuredSizes[card.id]
-      return {
+      const position = positions[card.id] ?? DEFAULT_NODE_POSITION
+      const data = nodeData.get(card.id)
+      const selected = selectedIds.has(card.id)
+      const width = size?.width ?? (compact ? COMPACT_NODE_WIDTH : NODE_WIDTH)
+      const height = size?.height ?? NODE_ESTIMATED_HEIGHT
+      const previous = cache.get(card.id)
+      if (previous
+        && previous.position === position
+        && previous.data === data
+        && previous.selected === selected
+        && previous.width === width
+        && previous.height === height
+        && previous.measured === size) {
+        next.push(previous)
+        continue
+      }
+      const node: MindmapFlowNode = {
         id: card.id,
         type: 'mindmapCard',
-        position: positions[card.id] ?? DEFAULT_NODE_POSITION,
+        position,
         // data 必须保持稳定引用，否则 StoreUpdater 与 onNodesChange 会形成更新回环（React #185）。
-        data: nodeData.get(card.id) ?? { card_id: card.id },
-        selected: selectedIds.has(card.id),
+        data: data ?? { card_id: card.id },
+        selected,
         // 未挂载（视口外）的节点没有 measured，用估算值兜住 fitView / 边线计算。
-        width: size?.width ?? (compact ? COMPACT_NODE_WIDTH : NODE_WIDTH),
-        height: size?.height ?? NODE_ESTIMATED_HEIGHT,
+        width,
+        height,
         // 保留 React Flow 的实测尺寸，否则拖拽时会提示节点未初始化。
         ...(size ? { measured: size } : {}),
       }
-    }),
-    [compact, measuredSizes, nodeData, orderedVisibleCards, positions, selectedIds],
-  )
+      // 这里的 Map 只作为「上一帧节点对象」的缓存，写入发生在同一次 useMemo 内、
+      // 且完全由输入决定，不会产生渲染副作用之外的可见变化。
+      // oxlint-disable-next-line react/immutability
+      cache.set(card.id, node)
+      next.push(node)
+    }
+    for (const id of cache.keys()) {
+      // oxlint-disable-next-line react/immutability
+      if (!seen.has(id)) cache.delete(id)
+    }
+    return next
+  }, [compact, measuredSizes, nodeCache, nodeData, orderedVisibleCards, positions, selectedIds])
   const edges = useMemo<Edge[]>(() => {
     const hierarchy = orderedVisibleCards.flatMap((card) => {
       if (!card.parent_id || !visibleIds.has(card.parent_id)) return []
@@ -696,32 +765,56 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
       return next
     })
 
-    setMeasuredSizes((current) => {
-      const now = Date.now()
-      if (now - measuredBurstRef.current.windowStart > 1000) {
-        measuredBurstRef.current = { windowStart: now, count: 0 }
-      }
-      let next = current
-      for (const change of changes) {
-        if (change.type !== 'dimensions' || !change.dimensions) continue
-        const { width, height } = change.dimensions
-        // 容器尚未布局时测量值是 0，回写后 React Flow 会立刻重新测量，容易成环。
-        if (width < 2 || height < 2) continue
-        if (measuredBurstRef.current.count > 60) break
-        const previous = next[change.id]
-        // 只同步首次测量与明显布局变化（折叠展开等）。几像素的抖动一律忽略：
-        // 每次回写都会重建整个 nodes 数组并触发 React Flow 重新测量。
-        if (previous
-          && Math.abs(previous.width - width) <= 24
-          && Math.abs(previous.height - height) <= 24) {
-          continue
+    // 交互期间（平移 / 缩放 / 拖拽）只缓冲尺寸，不 setState：
+    // 每次回写都会重建整张 nodes 并让 React Flow 重新 adopt 1483 个节点。
+    const dimensionChanges = changes.filter(
+      (change): change is NodeChange<MindmapFlowNode> & {
+        type: 'dimensions'
+        id: string
+        dimensions: { width: number; height: number }
+      } => change.type === 'dimensions' && Boolean(change.dimensions),
+    )
+    if (interactingRef.current || liteRef.current) {
+      // 交互期间先不写；低缩放（lite）下节点只剩标题条，尺寸变化没有意义，
+      // 直接丢弃 —— 否则缩放结束时一次 flush 会让 React Flow 重新 adopt 上千个节点。
+      if (!liteRef.current) {
+        for (const change of dimensionChanges) {
+          const dimensions = change.dimensions
+          if (dimensions.width < 2 || dimensions.height < 2) continue
+          pendingMeasureRef.current[change.id] = {
+            width: dimensions.width,
+            height: dimensions.height,
+          }
         }
-        if (next === current) next = { ...current }
-        next[change.id] = { width, height }
-        measuredBurstRef.current.count += 1
       }
-      return next
-    })
+    } else if (dimensionChanges.length) {
+      setMeasuredSizes((current) => {
+        const now = Date.now()
+        if (now - measuredBurstRef.current.windowStart > 1000) {
+          measuredBurstRef.current = { windowStart: now, count: 0 }
+        }
+        let next = current
+        for (const change of changes) {
+          if (change.type !== 'dimensions' || !change.dimensions) continue
+          const { width, height } = change.dimensions
+          // 容器尚未布局时测量值是 0，回写后 React Flow 会立刻重新测量，容易成环。
+          if (width < 2 || height < 2) continue
+          if (measuredBurstRef.current.count > 60) break
+          const previous = next[change.id]
+          // 只同步首次测量与明显布局变化（折叠展开等）。几像素的抖动一律忽略：
+          // 每次回写都会重建整个 nodes 数组并触发 React Flow 重新测量。
+          if (previous
+            && Math.abs(previous.width - width) <= 24
+            && Math.abs(previous.height - height) <= 24) {
+            continue
+          }
+          if (next === current) next = { ...current }
+          next[change.id] = { width, height }
+          measuredBurstRef.current.count += 1
+        }
+        return next
+      })
+    }
   }, [queueSelection])
 
 
@@ -746,28 +839,37 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
   }, [changeParent])
 
   const handleNodeDragStop: OnNodeDrag<MindmapFlowNode> = useCallback((_event, draggedNode, draggedNodes) => {
+    // 拖拽期间尺寸只进了缓冲，松手这里统一写回一次。
+    endInteraction()
     const batch = draggedNodes.length
       ? draggedNodes
       : nodes.filter((node) => node.id === draggedNode.id || node.selected)
     const dropTarget = getIntersectingNodes(draggedNode).find((node) => node.id !== draggedNode.id)
 
+    // 只是挪了位置：直接落盘，不占「忙碌」锁。
+    // 占锁会把 `busy` 写进 context 与 `nodesDraggable`，一次拖拽触发两轮全画布重渲染。
+    if (!dropTarget) {
+      void persistPositions(batch)
+        .then(() => setNotice(`已保存 ${batch.length} 个节点坐标。`))
+        .catch((reason) => setError(errorMessage(reason)))
+      return
+    }
+
     void runTask(async () => {
       await persistPositions(batch)
-      if (dropTarget) {
-        const latest = useCardStore.getState().cardsById[draggedNode.id]
-        if (latest && latest.parent_id !== dropTarget.id) {
-          const latestCards = Object.values(useCardStore.getState().cardsById).filter(
-            (card) => card.surface_mindmap && card.id !== draggedNode.id,
-          )
-          await moveCard(draggedNode.id, dropTarget.id, nextSortOrder(latestCards, dropTarget.id))
-          await syncCards()
-          setNotice(`已保存 ${batch.length} 个节点坐标，并更新父级。`)
-          return
-        }
+      const latest = useCardStore.getState().cardsById[draggedNode.id]
+      if (latest && latest.parent_id !== dropTarget.id) {
+        const latestCards = Object.values(useCardStore.getState().cardsById).filter(
+          (card) => card.surface_mindmap && card.id !== draggedNode.id,
+        )
+        await moveCard(draggedNode.id, dropTarget.id, nextSortOrder(latestCards, dropTarget.id))
+        await syncCards()
+        setNotice(`已保存 ${batch.length} 个节点坐标，并更新父级。`)
+        return
       }
       setNotice(`已保存 ${batch.length} 个节点坐标。`)
     })
-  }, [getIntersectingNodes, nodes, persistPositions, runTask, syncCards])
+  }, [endInteraction, getIntersectingNodes, nodes, persistPositions, runTask, syncCards])
 
   // 整理后要等 React Flow 应用新坐标，再对齐视口；否则用户仍停在旧的缩放/平移上，
   // 看起来像「卡片没有聚拢」。卸载时清掉定时器，避免对已销毁实例调用 fitView。
@@ -1146,27 +1248,37 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
   const editingCard = editor && editor !== 'new' ? cardsById[editor] : null
   const confirmationCard = confirmation ? cardsById[confirmation.id] : undefined
 
+  /**
+   * 节点 context 必须 memo：以前每次渲染都新建对象和内联回调，父组件任何状态
+   * （提示条、busy、选中）变化都会让上千个挂载节点全部重渲染。
+   */
+  const nodeContext = useMemo(() => ({
+    busy,
+    collapsedIds,
+    childCounts,
+    lite,
+    recallActive,
+    revealedIds,
+    ratedIds,
+    ratingPendingIds,
+    recallErrors,
+    onEdit: (id: string) => setEditor(id),
+    onTag: (id: string) => setTagTarget(id),
+    onLink: (id: string) => setLinkTarget(id),
+    onToggle: (id: string) => void toggleCard(id),
+    onReveal: revealAnswer,
+    onRate: (id: string, rating: Rating) => void rateCard(id, rating),
+    onRemove: (id: string) => setConfirmation({ kind: 'remove', id }),
+    onDelete: (id: string) => setConfirmation({ kind: 'delete', id }),
+    onOpenSource: openSource,
+    onExplain: (id: string) => void explainCard(id),
+  }), [
+    busy, childCounts, collapsedIds, explainCard, lite, openSource, rateCard,
+    ratedIds, ratingPendingIds, recallActive, recallErrors, revealedIds, revealAnswer, toggleCard,
+  ])
+
   return (
-    <MindmapNodeContext.Provider value={{
-      busy,
-      collapsedIds,
-      childCounts,
-      recallActive,
-      revealedIds,
-      ratedIds,
-      ratingPendingIds,
-      recallErrors,
-      onEdit: (id) => setEditor(id),
-      onTag: (id) => setTagTarget(id),
-      onLink: (id) => setLinkTarget(id),
-      onToggle: (id) => void toggleCard(id),
-      onReveal: revealAnswer,
-      onRate: (id, rating) => void rateCard(id, rating),
-      onRemove: (id) => setConfirmation({ kind: 'remove', id }),
-      onDelete: (id) => setConfirmation({ kind: 'delete', id }),
-      onOpenSource: openSource,
-      onExplain: (id) => void explainCard(id),
-    }}>
+    <MindmapNodeContext.Provider value={nodeContext}>
     <section className={`mindmap-workspace${compact ? ' is-embedded' : ''}`} aria-label="知识脑图工作区">
       {!compact && (
       <header className="mindmap-header">
@@ -1302,11 +1414,15 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
             <div className={`mindmap-flow-host${viewMode === 'outline' ? ' is-hidden' : ''}`}>
               <ReactFlow<MindmapFlowNode, Edge>
             nodes={nodes}
-            edges={edges}
+            edges={lite ? NO_EDGES : edges}
             nodeTypes={nodeTypes}
             onNodesChange={handleNodesChange}
+            onNodeDragStart={beginInteraction}
             onNodeDragStop={handleNodeDragStop}
             onConnect={handleConnect}
+            onMove={handleViewportMove}
+            onMoveStart={beginInteraction}
+            onMoveEnd={endInteraction}
             onNodeContextMenu={handleNodeContextMenu}
             onPaneContextMenu={handlePaneContextMenu}
             fitViewOptions={FIT_VIEW_OPTIONS}
@@ -1316,8 +1432,10 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
             defaultViewport={compact ? COMPACT_VIEWPORT : undefined}
             minZoom={0.15}
             maxZoom={1.8}
-            nodesDraggable={!busy}
-            nodesConnectable={!busy}
+            // 低缩放（lite）下把拖动让给画布平移：这个比例下看不清卡片，
+            // 而 React Flow 会为每个可见节点逐帧重建（338 个节点一次拖拽近 8000 次渲染）。
+            nodesDraggable={!busy && !lite}
+            nodesConnectable={!busy && !lite}
             deleteKeyCode={null}
             selectionKeyCode="Shift"
             panOnDrag={PAN_ON_DRAG}

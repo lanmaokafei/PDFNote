@@ -11,6 +11,7 @@
 - **PDF 工作区**：PDF.js 连续滚动与页级虚拟化、256KB Range 分块读取、缩放、页码跳转、自动回到上次阅读页、高亮/矩形框选建卡、文字层提取、Apple Vision OCR、标注拖拽、标注删除语义选择、文档遮挡主动回忆。
 - **可选文字层（0.9.0）**：切到「文字」工具后可像 Word 一样在页面上随手拖选文字，选中即复制或直接建卡。页面打开时后台整页识别一次（有 PDF 文字层则用精确字形坐标，扫描页用 Apple Vision 行级 OCR），结果带每行坐标并缓存到 SQLite，之后所有点选/框选零延迟。详见 [Apple Vision OCR](docs/ocr.md)。
 - **元素右键菜单（0.10.0）**：接管 WKWebView 只有 Reload 的原生右键菜单。选中文字可复制/引用/建卡，标注可加标签、链接、合并、删除，墨迹可单条删除，页面空白处可切工具、缩放、翻页、复制本页文字；脑图节点、资料库文档、复习卡片与全局空白区也都有对应操作。详见 [应用内右键菜单](docs/context-menu.md)。
+- **主动回忆输入与答案对比反馈（0.21.0）**：复习卡正面那句静态提示换成答案输入框，先写出来再揭示背面；系统把输入与原文摘录 / 个人笔记做本地文本对比，给出匹配度、一句话评价以及「已写到 / 待补上」的要点词。揭示前不泄露答案，评分仍由你自评，输入不落库。支持 `⌘/Ctrl + Enter`。详见 [主动回忆输入与答案对比反馈](docs/review-answer-feedback.md)。
 - **多画布脑图与 AnkiDroid 导入（0.20.0）**：同一本书可以建多张脑图，也可以建不绑定书的全局画布；每张画布的卡片与坐标互相隔离，选择偏好按书记住。支持导入 AnkiDroid 导出的 txt（标准 6 列 / 仅正面两种格式），牌组 `::` 层级变成脑图分组，正面 / 背面变成问题卡与摘录，可按牌组勾选、按画布去重并自动整理。详见 [多画布脑图与 AnkiDroid 导入](docs/mindmap-canvases.md)。
 - **卡片笔记完整阅读（0.19.0）**：脑图卡片与大纲行的摘录 / 笔记不再被写死截断。长文本默认折叠成几行并标「展开 ⌄」，点标题或正文即展开；内容太长时卡片内出现滚动条，滚轮只滚文字、不平移画布。AI 解析写回笔记后会自动展开，大纲行也能看到笔记。
 - **可设拆分层级（0.18.0）**：AI 拆书向导新增「拆分层级」，默认 2 层、可选 1–5 层；选 4 层就能把「章 → 小节 → 名词 → 解释」一次拆出来，阶段一多抽名词定义、阶段二按层生成骨架，设置会记住。详见 [AI 拆书](docs/ai-book-digest.md)。
@@ -55,10 +56,11 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri build
 ```
 
-2026-11-05（0.20.0）本地验证结果：
+2026-11-05（0.21.0）本地验证结果：
 
 - Rust：77 项测试通过、2 项 Vision 真机集成按需运行（需 `OCR_TEST_IMAGE` / `OCR_PAGE_TEST_IMAGE`）；覆盖迁移至 v9、画布 CRUD 与按画布移除/清空、拆书写第二画布、AnkiDroid 两种导出格式解析、HTML 清洗、建树、幂等导入、牌组筛选、跨格式答案补齐，以及此前的防环、评分幂等、备份往返、旧备份列兼容、页面文字缓存、坏包保护、视觉模型通道、留白与拆书链路。
-- 前端：78 项 Vitest 通过（归一化几何、遮挡合并、FSRS 状态映射、大纲导出、脑图折叠可见性、紧凑网格布局、标注缓存联动清理、公式特征检测与决策、LaTeX 检测与切分、识别失败摘要、文字层行提取、右键菜单定位、标题链接字典、拆书深度偏好、长文本折叠判定）。
+- 前端：91 项 Vitest 通过（新增 13 项答案对比：归一化、加权 F1、要点命中/待补、空输入不泄露、无文字答案、粘贴惩罚等；其余覆盖归一化几何、遮挡合并、FSRS 状态映射、大纲导出、脑图折叠可见性、紧凑网格布局、标注缓存联动清理、公式特征检测与决策、LaTeX 检测与切分、识别失败摘要、文字层行提取、右键菜单定位、标题链接字典、拆书深度偏好、长文本折叠判定）。
+- 复习对比反馈冒烟：`node scripts/review-answer-smoke.mjs`（需 dev server），验证提示已替换、揭示前不泄露答案、快捷键揭示、匹配度实时更新、清空回落、评分后切卡复位与无文字答案降级反馈。
 - 真实 Anki 文件：`ANKI_FIXTURE_PATH=<txt> cargo test --lib parses_real_export_when_fixture_is_provided -- --nocapture`，两份参考导出各解析出 1455 张卡（26 个牌组 / 仅正面 1 个「未分组」）。
 - 设置面板冒烟：`node scripts/settings-smoke.mjs`（需 dev server），验证模型配置对话框字段、非桌面环境提示与关闭。
 - 脑图端到端回归（`scripts/mindmap-regression.mjs`，需 dev server）：18 个场景全绿，含 `STEP=canvas`（画布隔离、切换不卸载 React Flow、新建 / 重命名 / 删除与回落）、`STEP=anki`（预览、牌组勾选、导入不串画布）、`STEP=note-expand`、`STEP=arrange`、`STEP=clear`、`STEP=depth`、`STEP=digest`、`STEP=notes` 等；`CARD_COUNT=120 STEP=all` 专治 React #185。
@@ -80,7 +82,7 @@ src/features/mindmap/    脑图与脑图回忆
 src/features/review/     FSRS 调度与复习界面
 src/features/backup/     备份与恢复
 src-tauri/src/           Rust 命令、数据访问、备份、文件管理
-src-tauri/migrations/    SQLite schema v8（001 初始化 → 002 阅读进度 → 003 协作能力 → 004 摘录图像 → 005 页面文字缓存 → 006 标题链接别名 → 007 留白 → 008 拆书）
+src-tauri/migrations/    SQLite schema v9（001 初始化 → 002 阅读进度 → 003 协作能力 → 004 摘录图像 → 005 页面文字缓存 → 006 标题链接别名 → 007 留白 → 008 拆书 → 009 多画布）
 src-tauri/capabilities/  主窗口最小权限
 public/pdfjs/            离线 PDF.js worker / fonts / cmaps
 docs/                    架构、实施、数据恢复与已知限制
@@ -89,6 +91,7 @@ scripts/contextmenu-smoke.mjs  右键菜单冒烟脚本（需 dev server）
 scripts/titlelink-smoke.mjs    标题链接匹配与高亮定位冒烟（需 dev server）
 scripts/settings-smoke.mjs     设置面板冒烟（需 dev server）
 scripts/mindmap-regression.mjs 脑图 React #185 回归（需 dev server）
+scripts/review-answer-smoke.mjs 复习主动回忆输入与答案对比反馈冒烟（需 dev server）
 ```
 
 ## 关键设计
@@ -104,8 +107,8 @@ scripts/mindmap-regression.mjs 脑图 React #185 回归（需 dev server）
 已生成并校验：
 
 ```text
-release/PDFNote_0.20.0_aarch64.dmg
-release/PDFNote_0.20.0_aarch64.dmg.sha256
+release/PDFNote_0.21.0_aarch64.dmg
+release/PDFNote_0.21.0_aarch64.dmg.sha256
 ```
 
 该构建为 ad-hoc 签名，未做 Apple Developer 公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许。
@@ -159,6 +162,8 @@ killall Dock
 ```
 
 ## 重要修复
+
+- 0.21.0 把复习卡正面「请在心里组织答案」这句静态提示换成**答案输入框**：揭示背面后按本地加权 F1 给出匹配度、评价与已写到 / 待补上的要点词，输入可继续修改并实时重算。揭示前不渲染任何答案要点，输入不落库、不参与 FSRS 评分；`scripts/review-answer-smoke.mjs` 覆盖完整链路与降级分支。
 
 - 0.20.0 新增**多画布与 AnkiDroid txt 导入**：schema 升到 v9（`mindmap_canvases`），归属复用 `mindmap_layout` 复合主键，`surface_mindmap` 变成派生开关；建卡、整理、清空、拆书、导入全部按 `canvasId` 作用域。备份 overwrite / merge 纳入画布表，旧备份自动补回 `main`。`STEP=canvas` / `STEP=anki` 回归覆盖画布隔离、切换不卸载 React Flow、画布 CRUD、牌组勾选与导入不串画布。
 
@@ -224,6 +229,7 @@ killall Dock
 
 ## 文档
 
+- [主动回忆输入与答案对比反馈](docs/review-answer-feedback.md)
 - [多画布脑图与 AnkiDroid 导入](docs/mindmap-canvases.md)
 - [应用内右键菜单](docs/context-menu.md)
 - [脑图自动整理与清空卡片](docs/mindmap-layout.md)

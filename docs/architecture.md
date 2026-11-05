@@ -1,7 +1,7 @@
 # PDFNote 架构基线（阶段 01 + 02）
 
-版本：0.20.0  
-状态：已落地工程骨架，OCR 为 macOS Apple Vision 单引擎，扫描页提供整页识别后的可选文字层；schema 升至 v9（`page_notes` 留白、`book_analysis`/`book_outline` 拆书、`mindmap_canvases` 多画布）。AI 拆书的两阶段提示词、节点预算与解析截断均由读者设置的 `depth`（1–5 层，默认 2）驱动，`outline_json` 记录本次深度；脑图卡片与大纲行的正文由 `ExpandableField` 统一渲染（长文本折叠 → 点击展开 → 限高滚动，AI 解析写回后自动展开，不改数据库）；0.20.0 起 `(canvas_id, card_id)` 决定卡片出现在哪张画布，`surface_mindmap` 是派生开关，并支持 AnkiDroid txt 按牌组建树导入；标题链接由本地关键词字典驱动；公式可选交给用户配置的视觉模型转 LaTeX（默认不联网），全视图提供应用内元素右键菜单
+版本：0.21.0  
+状态：已落地工程骨架，OCR 为 macOS Apple Vision 单引擎，扫描页提供整页识别后的可选文字层；schema 升至 v9（`page_notes` 留白、`book_analysis`/`book_outline` 拆书、`mindmap_canvases` 多画布）。AI 拆书的两阶段提示词、节点预算与解析截断均由读者设置的 `depth`（1–5 层，默认 2）驱动，`outline_json` 记录本次深度；脑图卡片与大纲行的正文由 `ExpandableField` 统一渲染（长文本折叠 → 点击展开 → 限高滚动，AI 解析写回后自动展开，不改数据库）；0.20.0 起 `(canvas_id, card_id)` 决定卡片出现在哪张画布，`surface_mindmap` 是派生开关，并支持 AnkiDroid txt 按牌组建树导入；标题链接由本地关键词字典驱动；公式可选交给用户配置的视觉模型转 LaTeX（默认不联网），全视图提供应用内元素右键菜单；0.21.0 复习卡正面改为主动回忆输入框，揭示背面后用 `answerMatch.ts` 纯函数生成文本对比反馈（不落库、不参与 FSRS）
 
 ## 1. 不可破坏的架构约束
 
@@ -102,6 +102,7 @@ PDF 标注动作 / 脑图操作 / 复习评分
 - command 返回提交后的 Card，不以“前端推测已写入”作为成功。
 - store 以 id 规范化保存，所有视图订阅同一对象；编辑摘录后无需跨视图同步。
 - 高频拖拽只修改视图临时态，pointerup 或防抖结束后再提交 command。
+- 复习的主动回忆输入与其对比反馈是**纯视图临时态**：不发起 invoke、不写 SQLite、不进备份；只有四档评分才沿上面的链路落盘。
 - 多窗口不是首版范围；若未来开放，需增加 Rust event revision，不能依赖 Zustand 跨窗口同步。
 
 ## 5. “从脑图移除”与“删除卡片”

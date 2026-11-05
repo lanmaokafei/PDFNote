@@ -54,7 +54,42 @@
 .review-question { min-height: 205px; padding: 36px 34px 28px; display: flex; flex-direction: column; justify-content: center; }
 .review-face-label { display: block; color: #819078; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
 .review-question h2 { margin: 18px 0 14px; color: #2c3b30; font-family: Georgia, "Songti SC", serif; font-size: clamp(22px, 2.4vw, 30px); font-weight: 400; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-.review-question p { margin: 0; color: #90978d; font-size: 12px; }
+.review-question > p { margin: 0; color: #90978d; font-size: 12px; }
+
+/* 主动回忆输入框：替换原来那句静态提示（0.21.0） */
+.review-recall { margin-top: 20px; display: grid; gap: 8px; }
+.review-recall-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: #687361; font-size: 11px; font-weight: 650; }
+.review-recall-label small { color: #9aa195; font-size: 10px; font-weight: 400; }
+.review-recall-input { width: 100%; min-height: 88px; max-height: 220px; resize: vertical; padding: 11px 13px; border: 1px solid #d9dfd4; border-radius: 8px; color: #344137; background: #fcfdfb; font-size: 13px; line-height: 1.75; }
+.review-recall-input::placeholder { color: #a7afa2; }
+.review-recall-input:focus { border-color: #8da183; background: #fff; }
+.review-recall-input:disabled { opacity: .6; }
+.review-recall-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #979f92; font-size: 10px; }
+.review-recall-foot button { flex: 0 0 auto; padding: 3px 8px; border: 1px solid #dfe4da; border-radius: 5px; color: #6d7968; background: #fff; font-size: 10px; }
+.review-recall-foot button:hover:not(:disabled) { background: #f0f4ec; }
+
+/* 揭示答案后才出现的对比反馈 */
+.review-match { margin-top: 4px; padding: 14px 16px 12px; border: 1px solid #dfe7d8; border-radius: 9px; background: #f6f9f2; }
+.review-match-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.review-match-badge { padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.review-match-badge.is-excellent { color: #3e6b39; background: #e3f0dd; }
+.review-match-badge.is-good { color: #3f6a63; background: #dff0ec; }
+.review-match-badge.is-partial { color: #8a6a2c; background: #faf0d7; }
+.review-match-badge.is-miss { color: #9b574b; background: #f8e6e0; }
+.review-match-badge.is-empty,
+.review-match-badge.is-no-answer { color: #7c8378; background: #e9ede5; }
+.review-match-score { color: #5b6856; font-size: 12px; font-weight: 650; }
+.review-match-meter { height: 5px; margin-top: 10px; overflow: hidden; border-radius: 5px; background: #e6ece0; }
+.review-match-meter > span { display: block; height: 100%; border-radius: inherit; background: #6f8c62; transition: width .25s ease; }
+.review-match .review-match-summary { margin: 10px 0 0; color: #4d5a4a; font-size: 12px; line-height: 1.7; }
+.review-match-terms { margin-top: 10px; }
+.review-match-terms > span { display: block; margin-bottom: 6px; color: #8a9385; font-size: 10px; font-weight: 650; letter-spacing: .4px; }
+.review-match-terms ul { margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; list-style: none; }
+.review-match-terms li { max-width: 100%; padding: 4px 8px; border: 1px solid; border-radius: 5px; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.review-match-terms.is-hit li { color: #3f6b3c; border-color: #cfe0c9; background: #eef6ea; }
+.review-match-terms.is-miss li { color: #8b6246; border-color: #e8d8c4; background: #fbf5ec; }
+.review-match .review-match-note { margin: 11px 0 0; color: #9aa195; font-size: 10px; line-height: 1.6; }
+
 .review-answer { padding: 0 34px 28px; display: grid; gap: 12px; }
 .review-answer section { padding: 18px 20px; border-left: 3px solid #a8b79d; border-radius: 0 7px 7px 0; background: #f5f7f1; }
 .review-answer section:last-child { border-left-color: #c3b98e; background: #faf8f0; }
@@ -161,7 +196,8 @@
 @media (prefers-reduced-motion: reduce) {
   .review-loading > span { animation: none; }
   .review-progress > span,
-  .review-rating { transition: none; }
+  .review-rating,
+  .review-match-meter > span { transition: none; }
 }
 
 /* 卡片摘录图像（扫描版公式/图表） */

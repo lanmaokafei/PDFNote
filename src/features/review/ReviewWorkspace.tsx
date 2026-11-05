@@ -6,6 +6,7 @@ import { MathText } from '../../ui/MathText'
 import { useContextMenu } from '../../ui/contextMenuCore'
 import { getReviewStats, listDueCards, updateCardContent } from '../../services/pdfnote'
 import { useCardStore } from '../../store/cardStore'
+import { MATCH_LABELS, evaluateAnswer } from './answerMatch'
 import { reviewCard } from './scheduler'
 import './ReviewWorkspace.css'
 
@@ -84,6 +85,8 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [revealed, setRevealed] = useState(false)
+  /** 主动回忆输入：只在当前会话内存里，不写数据库、不参与 FSRS 评分。 */
+  const [answerDraft, setAnswerDraft] = useState('')
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<DraftContent>({ question: '', excerpt: '', user_note: '' })
   const [savingContent, setSavingContent] = useState(false)
@@ -116,6 +119,7 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
       setSessionTotal(cards.length)
       setCompleted(0)
       setRevealed(false)
+      setAnswerDraft('')
       setEditing(false)
       setLastReviewed(null)
       setNotice('')
@@ -172,6 +176,7 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
         setCompleted((count) => count + 1)
         setLastReviewed({ question: card.question.trim() || '未命名卡片', due: updated.due, rating })
         setRevealed(false)
+        setAnswerDraft('')
       }
       await refreshCommittedData()
     } catch (reason) {
@@ -241,6 +246,14 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
     })
   }
 
+  // 揭示答案之前也会计算，但不渲染任何要点，避免提前泄露答案内容。
+  const answerMatch = useMemo(
+    () => evaluateAnswer(answerDraft, [current?.excerpt ?? '', current?.user_note ?? '']),
+    [answerDraft, current?.excerpt, current?.user_note],
+  )
+  const matchPercent = Math.round(answerMatch.score * 100)
+  const hasMatchScore = answerMatch.level !== 'empty' && answerMatch.level !== 'no-answer'
+
   const trend = useMemo(() => buildFourteenDayTrend(stats), [stats])
   const maxReviews = Math.max(1, ...trend.map((item) => item.reviews))
   const hasTrend = trend.some((item) => item.reviews > 0)
@@ -258,7 +271,7 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
         <div>
           <p className="review-eyebrow">ACTIVE RECALL · FSRS</p>
           <h1>复习工作区</h1>
-          <p>先回忆，再揭示答案。每次评分都会立即保存到本地数据库。</p>
+          <p>先写出你的答案，再揭示背面查看对比反馈；每次评分都会立即保存到本地数据库。</p>
         </div>
         <button className="review-refresh" type="button" onClick={() => void loadWorkspace()} disabled={busy || loading}>
           {loading ? '正在检查…' : '重新检查到期卡片'}
@@ -353,7 +366,74 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
                         loading="lazy"
                       />
                     )}
-                    <p>请在心里组织答案，准备好后再查看背面。</p>
+                    <div className="review-recall">
+                      <label className="review-recall-label" htmlFor="review-recall-input">
+                        <span>先写出你的答案</span>
+                        <small>{answerMatch.inputLength} 字</small>
+                      </label>
+                      <textarea
+                        id="review-recall-input"
+                        data-testid="review-recall-input"
+                        className="review-recall-input"
+                        value={answerDraft}
+                        onChange={(event) => setAnswerDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                            event.preventDefault()
+                            if (!revealed) setRevealed(true)
+                          }
+                        }}
+                        rows={3}
+                        placeholder="用自己的话写出答案；⌘/Ctrl + Enter 查看背面与对比结果"
+                        disabled={busy}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <div className="review-recall-foot">
+                        <span>
+                          {revealed
+                            ? '可以继续修改，对比结果会实时更新'
+                            : '写好后点下方按钮查看答案与对比反馈'}
+                        </span>
+                        {answerDraft.length > 0 && (
+                          <button type="button" onClick={() => setAnswerDraft('')} disabled={busy}>清空</button>
+                        )}
+                      </div>
+
+                      {revealed && (
+                        <div className="review-match" data-testid="review-match" role="status" aria-live="polite">
+                          <div className="review-match-head">
+                            <span className={`review-match-badge is-${answerMatch.level}`} data-testid="review-match-level">
+                              {MATCH_LABELS[answerMatch.level]}
+                            </span>
+                            {hasMatchScore && (
+                              <span className="review-match-score" data-testid="review-match-score">
+                                文本匹配 {matchPercent}%
+                              </span>
+                            )}
+                          </div>
+                          {hasMatchScore && (
+                            <div className="review-match-meter" aria-hidden="true">
+                              <span style={{ width: `${matchPercent}%` }} />
+                            </div>
+                          )}
+                          <p className="review-match-summary">{answerMatch.summary}</p>
+                          {answerMatch.matched.length > 0 && (
+                            <div className="review-match-terms is-hit" data-testid="review-match-hit">
+                              <span>已写到</span>
+                              <ul>{answerMatch.matched.map((term) => <li key={term}>{term}</li>)}</ul>
+                            </div>
+                          )}
+                          {answerMatch.missing.length > 0 && (
+                            <div className="review-match-terms is-miss" data-testid="review-match-miss">
+                              <span>待补上</span>
+                              <ul>{answerMatch.missing.map((term) => <li key={term}>{term}</li>)}</ul>
+                            </div>
+                          )}
+                          <p className="review-match-note">反馈是本地文本相似度，不写入数据库；评分仍以你的自评为准。</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {revealed && (
@@ -387,12 +467,18 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
 
                   <div className="review-card-actions">
                     {!revealed ? (
-                      <button className="review-reveal" type="button" onClick={() => setRevealed(true)} disabled={busy}>
-                        显示答案
+                      <button
+                        className="review-reveal"
+                        type="button"
+                        data-testid="review-reveal"
+                        onClick={() => setRevealed(true)}
+                        disabled={busy}
+                      >
+                        显示答案并对比
                       </button>
                     ) : (
                       <div className="review-rating-area">
-                        <p>这次回忆怎么样？评分后将立即保存并进入下一张。</p>
+                        <p>对比结果见上方，评分仍由你决定；提交后立即保存并进入下一张。</p>
                         <div className="review-rating-grid">
                           {RATING_OPTIONS.map((option) => (
                             <button

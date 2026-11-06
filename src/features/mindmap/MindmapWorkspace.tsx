@@ -76,6 +76,12 @@ import {
   saveCanvasId,
 } from './canvas'
 import {
+  nextMindmapInsertPoint,
+  readMindmapViewportCenter,
+  resetMindmapInsertSequence,
+  setMindmapViewportCenter,
+} from './viewport'
+import {
   TREE_X_GAP,
   TREE_Y_GAP,
   buildTreeLayout,
@@ -148,7 +154,11 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
   const createCardInStore = useCardStore((state) => state.createCard)
   const removeFromMindmap = useCardStore((state) => state.removeFromMindmap)
   const deleteCard = useCardStore((state) => state.deleteCard)
-  const { getIntersectingNodes, fitView: fitViewInstance } = useReactFlow<MindmapFlowNode, Edge>()
+  const {
+    getIntersectingNodes,
+    fitView: fitViewInstance,
+    getViewport,
+  } = useReactFlow<MindmapFlowNode, Edge>()
 
   // 当前画布：全局独立视图只用 main，文档工作台会按 documentId 单独记住上次选的画布。
   const [canvasId, setCanvasId] = useState(() => readCanvasId(documentId))
@@ -180,11 +190,29 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
     setMeasuredSizes((current) => ({ ...current, ...pending }))
   }, [])
   const beginInteraction = useCallback(() => { interactingRef.current = true }, [])
+  /**
+   * 把当前视口中心换算成世界坐标存进共享模块：
+   * PDF 建卡发生在左栏，需要知道右栏画布此刻「看的是哪一块」。
+   */
+  const publishViewportCenter = useCallback(() => {
+    const host = hostRef.current
+    if (!host) return
+    const rect = host.getBoundingClientRect()
+    if (rect.width < 2 || rect.height < 2) return
+    const viewport = getViewport()
+    setMindmapViewportCenter({
+      x: (rect.width / 2 - viewport.x) / viewport.zoom,
+      y: (rect.height / 2 - viewport.y) / viewport.zoom,
+    })
+  }, [getViewport])
   const endInteraction = useCallback(() => {
     interactingRef.current = false
     flushMeasures()
-  }, [flushMeasures])
+    publishViewportCenter()
+  }, [flushMeasures, publishViewportCenter])
   const arrangeTimerRef = useRef<number | null>(null)
+  /** 画布容器：用它的尺寸把「视口中心」换算成世界坐标，供建卡落点使用。 */
+  const hostRef = useRef<HTMLDivElement>(null)
   /** 首次加载只自动适配一次视图；切换画布时不要反复抢用户的视口。 */
   const initialFitRef = useRef(false)
   const [loading, setLoading] = useState(true)
@@ -484,7 +512,13 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
 
       for (const card of latestCards) {
         const saved = savedById.get(card.id)
-        if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+        // (0,0) 是建卡时的占位坐标（layout 列默认值），不是用户摆的位置：
+        // 把它当成「未定位」，下一张新卡的落点由当前视口中心决定。
+        const placed = saved
+          && Number.isFinite(saved.x)
+          && Number.isFinite(saved.y)
+          && (saved.x !== 0 || saved.y !== 0)
+        if (placed) {
           nextPositions[card.id] = { x: saved.x, y: saved.y }
         } else {
           stranded.push(card)
@@ -494,11 +528,21 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
       // 只有真的缺坐标才跑布局：已经排好版的画布（哪怕 1483 张）打开时不再做一次 O(n) 重排。
       const missing: MindmapLayoutInput[] = []
       if (stranded.length) {
-        const generated = buildTreeLayout(latestCards)
-        for (const card of stranded) {
-          const point = generated[card.id] ?? DEFAULT_NODE_POSITION
-          nextPositions[card.id] = point
-          missing.push({ card_id: card.id, canvas_id: canvasId, ...point })
+        const insert = readMindmapViewportCenter() ? nextMindmapInsertPoint() : undefined
+        if (insert) {
+          // 已知视口中心：新卡落在用户正在看的位置，而不是画布原点。
+          stranded.forEach((card, index) => {
+            const point = index === 0 ? insert : { x: insert.x, y: insert.y + index * 210 }
+            nextPositions[card.id] = point
+            missing.push({ card_id: card.id, canvas_id: canvasId, ...point })
+          })
+        } else {
+          const generated = buildTreeLayout(latestCards)
+          for (const card of stranded) {
+            const point = generated[card.id] ?? DEFAULT_NODE_POSITION
+            nextPositions[card.id] = point
+            missing.push({ card_id: card.id, canvas_id: canvasId, ...point })
+          }
         }
       }
 
@@ -507,6 +551,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
       setLayoutScope(canvasId)
       setSelectedIds(new Set())
       setHasLoaded(true)
+      // 让 PDF 建卡侧立刻能读到当前视口中心（首屏 fitView 之后也要更新）。
+      window.requestAnimationFrame(() => publishViewportCenter())
       timings.compute = Math.round(performance.now() - perfStart)
       // 只在内存里留一份加载耗时，供性能回归读取；不打印，避免生产环境刷控制台。
       window.requestAnimationFrame(() => {
@@ -538,7 +584,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
     } finally {
       setLoading(false)
     }
-  }, [canvasId, compact, documentId, fitReadable, loadCards])
+  }, [canvasId, compact, documentId, fitReadable, loadCards, publishViewportCenter])
 
   useEffect(() => {
     void refresh()
@@ -585,9 +631,15 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
     const missing = cards.filter((card) => !positions[card.id])
     if (!missing.length) return
 
-    // 大画布上补一两张新卡时不再为全部节点重排：贴着父节点放，找不到父节点就排到已有内容下方。
+    // 新卡优先落在当前视口中心；没有视口信息时才退回「贴父节点 / 排到下方」。
     let points: Record<string, Point>
-    if (cards.length > AUTO_FIT_NODE_LIMIT) {
+    const insert = readMindmapViewportCenter() ? nextMindmapInsertPoint() : undefined
+    if (insert) {
+      points = {}
+      missing.forEach((card, index) => {
+        points[card.id] = index === 0 ? insert : { x: insert.x, y: insert.y + index * 210 }
+      })
+    } else if (cards.length > AUTO_FIT_NODE_LIMIT) {
       let maxY = 0
       for (const point of Object.values(positions)) maxY = Math.max(maxY, point.y)
       points = {}
@@ -618,6 +670,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
 
   const selectCanvas = useCallback((id: string) => {
     if (id === canvasId) return
+    // 换画布相当于换了一块桌面：新卡重新从视口正中心开始。
+    resetMindmapInsertSequence()
     saveCanvasId(documentId, id)
     setCanvasId(id)
     setNotice(`已切换到「${canvases.find((canvas) => canvas.id === id)?.name ?? id}」。`)
@@ -916,8 +970,11 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
         canvas_id: canvasId,
         sort_order: nextSortOrder(latestCards, null),
       })
-      const nextY = Math.max(80, ...Object.values(positions).map((point) => point.y + TREE_Y_GAP))
-      const point = { x: 80, y: nextY }
+      // 新卡落在当前视口中心（而不是画布左下角），连续建卡按 3×3 环错开。
+      const point = nextMindmapInsertPoint() ?? {
+        x: 80,
+        y: Math.max(80, ...Object.values(positions).map((value) => value.y + TREE_Y_GAP)),
+      }
       setPositions((current) => ({ ...current, [card.id]: point }))
       setEditor(null)
       try {
@@ -1411,7 +1468,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
           <div className="mindmap-state"><span className="mindmap-state-mark">◇</span><h2>「{canvasName}」还是空的</h2><p>新建独立卡片、从 PDF 划重点，或导入 AnkiDroid 导出的 txt；每张画布的卡片与坐标互相独立。</p><div className="mindmap-state-actions"><button type="button" className="mindmap-button primary" onClick={() => setEditor('new')}>新建独立卡片</button><button type="button" className="mindmap-button" onClick={() => setAnkiOpen(true)}>导入 Anki 牌组</button></div></div>
         ) : (
           <>
-            <div className={`mindmap-flow-host${viewMode === 'outline' ? ' is-hidden' : ''}`}>
+            <div className={`mindmap-flow-host${viewMode === 'outline' ? ' is-hidden' : ''}`} ref={hostRef}>
               <ReactFlow<MindmapFlowNode, Edge>
             nodes={nodes}
             edges={lite ? NO_EDGES : edges}

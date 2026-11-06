@@ -249,6 +249,8 @@ mod tests {
             question: "问题".into(),
             parent_id: None,
             canvas_id: None,
+            x: None,
+            y: None,
             sort_order: 0,
             annotation: None,
             excerpt_image: None,
@@ -289,6 +291,7 @@ mod tests {
             source_ref: None, excerpt: "内容".into(), user_note: "".into(), question: "Q".into(),
             parent_id: None, canvas_id: Some("temp".into()), sort_order: 0,
             annotation: None, excerpt_image: None, link_aliases: None,
+            x: None, y: None,
         }).unwrap();
         let removed = delete_canvas(&state, "temp".into()).unwrap();
         assert_eq!(removed, 1);

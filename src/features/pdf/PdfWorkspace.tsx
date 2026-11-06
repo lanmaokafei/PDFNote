@@ -9,6 +9,7 @@ import {
 } from 'pdfjs-dist'
 import type { OcrLine } from '../../services/pdfnote'
 import { notifyMindmapChanged, readCanvasId } from '../mindmap/canvas'
+import { nextMindmapInsertPoint } from '../mindmap/viewport'
 import type {
   Annotation,
   AnnotationGeometry,
@@ -915,8 +916,11 @@ export function PdfWorkspace({
     try {
       // 从 PDF 划重点建卡时写入读者当前选中的画布，而不是永远塞进 main。
       const targetCanvasId = readCanvasId(document.id)
+      // 落点 = 右栏画布此刻的视口中心：用户不用再缩小去找新卡。
+      const insertPoint = nextMindmapInsertPoint()
       const card = await createCard({
         canvas_id: targetCanvasId,
+        ...(insertPoint ?? {}),
         source_ref: { document_id: document.id, page: page.pageNumber, bbox: rect },
         excerpt: finalExcerpt,
         question: finalExcerpt

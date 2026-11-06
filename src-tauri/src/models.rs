@@ -283,6 +283,12 @@ pub struct CreateCardInput {
     /// 标题链接别名（分号分隔），创建时可选。
     #[serde(default)]
     pub link_aliases: Option<String>,
+    /// 新卡片在画布上的落点（世界坐标）。PDF 建卡时由右栏视口中心决定；
+    /// 不传时写 0,0，脑图刷新时按当前视口中心补位。
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -819,6 +819,8 @@ mod tests {
                     style: serde_json::json!({}),
                 }),
                 canvas_id: None,
+                x: None,
+                y: None,
             },
         )
         .unwrap();
@@ -895,6 +897,8 @@ mod tests {
                 excerpt_image: None,
                 link_aliases: None,
                 canvas_id: None,
+                x: None,
+                y: None,
             },
         )
         .unwrap();
@@ -1022,6 +1026,8 @@ mod overwrite_tests {
                 excerpt_image: None,
                 link_aliases: None,
                 canvas_id: None,
+                x: None,
+                y: None,
             },
         )
         .unwrap();
@@ -1093,6 +1099,8 @@ mod backup_freshness_tests {
                 excerpt_image: None,
                 link_aliases: None,
                 canvas_id: None,
+                x: None,
+                y: None,
             },
         )
         .unwrap();

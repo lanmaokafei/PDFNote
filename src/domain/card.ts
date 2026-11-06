@@ -65,6 +65,9 @@ export interface Annotation extends AnnotationInput {
 }
 
 export interface CreateCardInput {
+  /** 新卡片在画布上的落点（世界坐标）；不传时由数据库写 0,0，脑图刷新时按视口中心补位。 */
+  x?: number
+  y?: number
   source_ref?: SourceRef
   excerpt?: string
   user_note?: string

@@ -605,6 +605,77 @@ if (process.env.STEP === 'zoom-drag') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=insert-center：PDF 建卡后脑图刷新，新卡必须落在画布当前视口中心，
+// 而不是固定原点 / 左下角。这里用脑图自己的「新建」验证同一条落点链路。
+if (process.env.STEP === 'insert-center') {
+  await page.locator('.document-card').first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(1200)
+
+  // 先把画布拖到别处，确保「视口中心」和默认视口不同。
+  const pane = await page.locator('.react-flow__pane').first().boundingBox()
+  if (!pane) {
+    problems.push('画布不可见，无法平移')
+  } else {
+    await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(pane.x + pane.width / 2 + 180, pane.y + pane.height / 2 + 140, { steps: 8 })
+    await page.mouse.up()
+    await page.waitForTimeout(500)
+  }
+
+  const center = await page.evaluate(() => {
+    const host = document.querySelector('.mindmap-flow-host')
+    const viewport = document.querySelector('.react-flow__viewport')
+    const rect = host.getBoundingClientRect()
+    const matrix = new DOMMatrix(getComputedStyle(viewport).transform)
+    return {
+      x: (rect.width / 2 - matrix.e) / matrix.a,
+      y: (rect.height / 2 - matrix.f) / matrix.a,
+      zoom: Number(matrix.a.toFixed(3)),
+    }
+  })
+
+  const createCard = async (question) => {
+    await page.locator('.mindmap-float-actions button', { hasText: '新建' }).first().click()
+    await page.waitForSelector('.mindmap-editor', { timeout: 4000 })
+    await page.locator('.mindmap-editor textarea').first().fill(question)
+    await page.getByRole('button', { name: '创建卡片' }).click()
+    await page.waitForTimeout(1000)
+    const id = await page.evaluate(() => {
+      const items = window.__cardState ?? []
+      return items[items.length - 1]?.id ?? null
+    })
+    return page.evaluate((cardId) => {
+      const rows = (window.__layoutState ?? []).filter((row) => row.card_id === cardId)
+      return rows[rows.length - 1] ?? null
+    }, id)
+  }
+
+  const first = await createCard('视口中心测试卡一')
+  const second = await createCard('视口中心测试卡二')
+
+  const expectX = center.x - 254 / 2
+  const expectY = center.y - 190 / 2
+  if (!first) problems.push('第一张新卡没有写入布局')
+  if (!second) problems.push('第二张新卡没有写入布局')
+  if (first) {
+    if (Math.abs(first.x - expectX) > 3 || Math.abs(first.y - expectY) > 3) {
+      problems.push(`新卡没有落在视口中心：期望 (${expectX.toFixed(0)}, ${expectY.toFixed(0)})，实际 (${first.x}, ${first.y})`)
+    }
+    if (first.x === 80 && first.y >= 80) problems.push('新卡仍在旧的固定坐标')
+  }
+  if (first && second) {
+    if (Math.abs(second.x - first.x - 36) > 2) {
+      problems.push(`连续建卡没有错开：${first.x} → ${second.x}`)
+    }
+  }
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'insert-center', zoom: center.zoom, center, first, second }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // 打开资料库里的文档 → 左 PDF 右脑图
 const card = page.locator('.document-card').first()
 if (await card.count()) {

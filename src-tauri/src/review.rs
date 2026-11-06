@@ -274,6 +274,8 @@ mod tests {
                 excerpt_image: None,
                 link_aliases: None,
                 canvas_id: None,
+                x: None,
+                y: None,
             },
         )
         .unwrap();

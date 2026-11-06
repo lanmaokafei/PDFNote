@@ -75,6 +75,9 @@ pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, Str
         .unwrap_or_else(|| canvases::DEFAULT_CANVAS_ID.into());
     let id = Uuid::new_v4().to_string();
     let timestamp = now();
+    // 非有限值（NaN/Inf）会让 React Flow 的坐标计算彻底失效，直接丢弃。
+    let layout_x = input.x.filter(|value| value.is_finite()).unwrap_or(0.0);
+    let layout_y = input.y.filter(|value| value.is_finite()).unwrap_or(0.0);
     let mut database = state.db()?;
     let transaction = database.transaction().map_err(|error| error.to_string())?;
     if !canvases::canvas_exists(&transaction, &canvas_id)? {
@@ -142,8 +145,9 @@ pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, Str
 
     transaction
         .execute(
-            "INSERT INTO mindmap_layout (card_id, canvas_id, updated_at) VALUES (?1, ?2, ?3)",
-            params![id, canvas_id, timestamp],
+            "INSERT INTO mindmap_layout (card_id, canvas_id, x, y, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, canvas_id, layout_x, layout_y, timestamp],
         )
         .map_err(|error| error.to_string())?;
     let card = get_card(&transaction, &id)?;
@@ -994,6 +998,8 @@ mod tests {
             excerpt_image: None,
             link_aliases: None,
             canvas_id: None,
+            x: None,
+            y: None,
         }
     }
 
@@ -1005,6 +1011,45 @@ mod tests {
         assert_eq!(card.scheduled_days, 0);
         assert_eq!(card.learning_steps, 0);
         assert_eq!(list_mindmap_layout(&state, None).unwrap().len(), 1);
+    }
+
+    fn layout_position(state: &AppState, card_id: &str) -> (f64, f64) {
+        let database = state.db().unwrap();
+        database
+            .query_row(
+                "SELECT x, y FROM mindmap_layout WHERE card_id = ?1",
+                params![card_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn create_card_writes_requested_layout_position() {
+        let (_directory, state) = test_state();
+        let mut payload = input("带落点的卡片", None);
+        payload.x = Some(640.0);
+        payload.y = Some(360.0);
+        let card = create_card(&state, payload).unwrap();
+        assert_eq!(layout_position(&state, &card.id), (640.0, 360.0));
+    }
+
+    #[test]
+    fn create_card_without_position_falls_back_to_origin() {
+        let (_directory, state) = test_state();
+        let card = create_card(&state, input("没有落点", None)).unwrap();
+        // 0,0 是占位值：脑图刷新时会按当前视口中心补位。
+        assert_eq!(layout_position(&state, &card.id), (0.0, 0.0));
+    }
+
+    #[test]
+    fn create_card_ignores_non_finite_position() {
+        let (_directory, state) = test_state();
+        let mut payload = input("非法落点", None);
+        payload.x = Some(f64::NAN);
+        payload.y = Some(f64::INFINITY);
+        let card = create_card(&state, payload).unwrap();
+        assert_eq!(layout_position(&state, &card.id), (0.0, 0.0));
     }
 
     #[test]
@@ -1047,6 +1092,8 @@ mod tests {
                     style: serde_json::json!({}),
                 }),
                 canvas_id: None,
+                x: None,
+                y: None,
             },
         )
         .unwrap();
@@ -1071,6 +1118,8 @@ mod tests {
                 link_aliases: None,
                 annotation: None,
                 canvas_id: None,
+                x: None,
+                y: None,
             },
         )
         .unwrap();

@@ -143,7 +143,7 @@ app-data/               运行时生成，不随安装包写入
   pdfs/                 按内容哈希命名的 PDF
   backups/              自动备份与轮转
   tmp/                  导入/导出临时文件，启动时清理
-  updates/              在线升级下载的 DMG（.part 校验通过才改名落盘）
+  updates/              在线升级下载的 DMG（.part 校验通过才改名落盘；升级后的下次启动清理已装版本）
 ```
 
 - capabilities 仅启用 core 与 dialog open；未授予前端任意文件系统访问。

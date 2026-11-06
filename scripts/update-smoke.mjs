@@ -33,6 +33,7 @@ await page.addInitScript((availableInfo) => {
   const eventListeners = {}
   window.__eventListeners = eventListeners
   window.__installerCalls = []
+  window.__quitCalls = 0
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined }
   const handlers = {
     get_bootstrap_status: () => ({ database_ready: true, schema_version: 9, document_count: 0, card_count: 0 }),
@@ -67,6 +68,10 @@ await page.addInitScript((availableInfo) => {
     },
     open_update_installer: (args) => {
       window.__installerCalls.push(args?.path ?? '')
+      return null
+    },
+    quit_app: () => {
+      window.__quitCalls += 1
       return null
     },
     'plugin:event|listen': (args) => {
@@ -159,8 +164,18 @@ await page.waitForTimeout(400)
   }
   const text = await page.locator('.update-dialog').innerText()
   if (!text.includes('安装器已打开')) problems.push(`升级完成提示缺失：${text.slice(0, 150)}`)
+  if (!text.includes('应用将自动退出')) problems.push('缺少自动退出提示')
+  if (!(await page.locator('.update-dialog button', { hasText: '立即退出' }).count())) {
+    problems.push('缺少「立即退出」按钮')
+  }
 }
-await page.locator('.update-dialog button', { hasText: '完成' }).click()
+// 打开安装器约 2 秒后必须调用 quit_app：运行中的 app 会让 Finder 拒绝覆盖安装。
+await page.waitForTimeout(2300)
+{
+  const quitCalls = await page.evaluate(() => window.__quitCalls)
+  if (quitCalls !== 1) problems.push(`安装器打开后未自动退出应用：quit_app 调用 ${quitCalls} 次`)
+}
+await page.locator('.update-dialog button[aria-label="关闭更新提示"]').click()
 await page.waitForSelector('.update-dialog', { state: 'detached', timeout: 3000 })
 // 设置面板在升级流程后仍开着，先关掉，阶段 4 重新走完整入口。
 await page.locator('.settings-dialog button[aria-label="关闭设置"]').click()

@@ -609,6 +609,13 @@ pub fn open_update_installer(path: String) -> Result<(), String> {
     update::open_installer(&path)
 }
 
+/// 打开安装器后退出应用：运行中的 PDFNote.app 会让 Finder 判定「正在使用中」，
+/// 拖进 Applications 覆盖安装会失败。前端先提示再调用这里。
+#[tauri::command(async)]
+pub fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 #[cfg(test)]
 mod tests {
     use super::export_markdown;

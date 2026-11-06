@@ -7,6 +7,7 @@ import {
   onUpdateProgress,
   openUpdateInstaller,
   progressPercent,
+  quitApp,
   rememberDismissedVersion,
   type DownloadProgress,
   type UpdateInfo,
@@ -90,6 +91,11 @@ export function UpdatePrompt({ initialInfo, onClose }: UpdatePromptProps) {
     try {
       await openUpdateInstaller(downloadedPath)
       setPhase('installed')
+      // 安装器窗口起来后必须退出应用：运行中的 PDFNote.app 会被 Finder 判定「正在使用中」，
+      // 拖进 Applications 覆盖安装会失败。留 2 秒让用户看到提示。
+      window.setTimeout(() => {
+        void quitApp().catch(() => undefined)
+      }, 2000)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
       setPhase('error')
@@ -183,8 +189,11 @@ export function UpdatePrompt({ initialInfo, onClose }: UpdatePromptProps) {
           <p className="update-status is-ok" role="status">
             <CheckCircle2 size={16} />
             <span>
-              安装器已打开。
-              <small>请把 PDFNote.app 拖进 Applications 覆盖安装，然后重新打开应用即完成升级。</small>
+              安装器已打开，应用将自动退出。
+              <small>
+                运行中的 PDFNote.app 无法被覆盖——本应用会在 2 秒后退出。
+                退出后把 PDFNote.app 拖进 Applications 覆盖安装，再重新打开即完成升级。
+              </small>
             </span>
           </p>
         )}
@@ -207,7 +216,9 @@ export function UpdatePrompt({ initialInfo, onClose }: UpdatePromptProps) {
             <button type="button" onClick={onClose} disabled={locked}>关闭</button>
           )}
           {phase === 'installed' && (
-            <button type="button" onClick={onClose}>完成</button>
+            <button type="button" onClick={() => { void quitApp().catch(() => undefined) }}>
+              立即退出
+            </button>
           )}
           {phase === 'error' && (
             <button type="button" onClick={dismiss} disabled={busy}>关闭</button>

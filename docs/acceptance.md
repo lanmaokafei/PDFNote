@@ -12,6 +12,8 @@
 | 在线升级冒烟（0.32.0） | `node scripts/update-smoke.mjs` | 通过：自动检测弹提示 →「稍后」记忆 → 手动检查 → 下载进度（0<%<100）→ SHA-256 校验完成 → 点击升级调起 DMG 安装器 → 已是最新/网络失败/浏览器环境三条兜底 |
 | 设置按钮与模型列表（0.32.1） | `node scripts/update-smoke.mjs` 阶段 4.5 | 「检查更新」按钮高度 32px 与其他按钮一致；测试连接命中模型后仍显示「可用模型」列表 |
 | 微缩导航图配色（0.32.1） | `STEP=tone ARRANGE_FOREST=1 CARD_COUNT=26` | 独立视图 26 个缩略色块 17 种色调、0 偏色，色块跟随节点节气色 |
+| 安装器后自动退出（0.32.2） | `node scripts/update-smoke.mjs` | 打开安装器后提示「应用将自动退出」，约 2 秒 `quit_app` 调用 1 次 |
+| 安装包启动清理（0.32.2） | `cargo test --lib update::` | 已装版本 DMG 与 `.sha256`/`.part` 删除、更新版本保留、无关文件不误删 |
 | 文字层冒烟 | `node scripts/textlayer-smoke.mjs` | 通过：透明 DOM 文字可原生拖选「信息系统项目管」，选区 bbox 换算正确 |
 | 右键菜单冒烟 | `node scripts/contextmenu-smoke.mjs` | 通过：原生 Reload 菜单被接管、菜单项执行动作、右下角翻转、键盘导航、输入框保留系统菜单、选区读取与跨层判定 |
 | TypeScript + 打包 | `npm run build` | 通过 |

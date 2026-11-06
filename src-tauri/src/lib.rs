@@ -93,6 +93,7 @@ pub fn run() {
             commands::get_app_version,
             commands::download_update,
             commands::open_update_installer,
+            commands::quit_app,
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
@@ -106,6 +107,8 @@ pub fn run() {
                     }
                 }
             }
+            // 更新完成后（新版本首次启动）删掉已安装版本的安装包，避免 updates/ 越积越大。
+            update::cleanup_installed_packages(&data_dir);
 
             let database_path = data_dir.join("pdfnote.db");
             let database = db::open(&database_path)

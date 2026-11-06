@@ -324,6 +324,63 @@ async fn fetch_checksum(client: &reqwest::Client, url: &str) -> Result<String, S
     parse_checksum(&text)
 }
 
+/// 从安装包文件名里取出语义化版本号（`PDFNote_0.32.1_aarch64.dmg` → `0.32.1`）。
+pub fn installer_version_of(file_name: &str) -> Option<String> {
+    let stem = file_name.strip_suffix(".dmg")?;
+    let mut parts = stem.split('_');
+    if parts.next()? != "PDFNote" {
+        return None;
+    }
+    let version = parts.next()?;
+    if !parts.next()?.starts_with("aarch64") {
+        return None;
+    }
+    if parse_version(version).is_none() {
+        return None;
+    }
+    Some(version.to_string())
+}
+
+/// 启动时清理「已经装过」的更新包：只保留比当前版本更新的安装包（用户还没装），
+/// 其余 DMG 与所有 `.sha256` / `.part` 中间文件直接删除，避免更新目录越积越大。
+///
+/// 删除时机选在下次启动而不是安装当下：安装器窗口正引着这个 DMG，用户还没把
+/// PDFNote.app 拖进 Applications 时不能动它。
+pub fn cleanup_installed_packages(data_dir: &Path) {
+    let updates_dir = data_dir.join("updates");
+    let Ok(entries) = fs::read_dir(&updates_dir) else {
+        return;
+    };
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let path = entry.path();
+        let file_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        match extension {
+            "dmg" => {
+                let installed = installer_version_of(&file_name)
+                    .and_then(|version| compare_versions(&version, current_version()))
+                    .map(|ordering| ordering != Ordering::Greater)
+                    // 命名解析不出来（不是本应用下载的）也一并清掉。
+                    .unwrap_or(true);
+                if installed {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+            "sha256" | "part" => {
+                let _ = fs::remove_file(&path);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// 打开已下载的 DMG 安装器（macOS 挂载后由用户拖入 Applications）。
 pub fn open_installer(path: &str) -> Result<(), String> {
     let target = Path::new(path);
@@ -495,5 +552,48 @@ mod tests {
             .unwrap_err()
             .contains(".dmg"));
         let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn parses_installer_version_from_file_name() {
+        assert_eq!(
+            installer_version_of("PDFNote_0.32.1_aarch64.dmg"),
+            Some("0.32.1".to_string())
+        );
+        assert_eq!(
+            installer_version_of("PDFNote_v0.32.1_aarch64.dmg"),
+            Some("v0.32.1".to_string())
+        );
+        assert_eq!(installer_version_of("PDFNote_0.32.1.dmg"), None);
+        assert_eq!(installer_version_of("Something_0.32.1_aarch64.dmg"), None);
+        assert_eq!(installer_version_of("PDFNote_abc_aarch64.dmg"), None);
+        assert_eq!(installer_version_of("PDFNote_0.32.1_aarch64.zip"), None);
+    }
+
+    #[test]
+    fn cleanup_keeps_only_newer_installers() {
+        let data_dir = std::env::temp_dir().join(format!("pdfnote-clean-{}", uuid::Uuid::new_v4()));
+        let updates = data_dir.join("updates");
+        fs::create_dir_all(&updates).unwrap();
+        // 已安装/更旧的版本要删，更新版本（用户还没装）要留。
+        let older = updates.join("PDFNote_0.0.1_aarch64.dmg");
+        let current = updates.join(format!("PDFNote_{}_aarch64.dmg", current_version()));
+        let newer = updates.join("PDFNote_99.0.0_aarch64.dmg");
+        let checksum = updates.join("PDFNote_99.0.0_aarch64.dmg.sha256");
+        let part = updates.join("PDFNote_99.0.0_aarch64.dmg.part");
+        let unknown = updates.join("hello.txt");
+        for path in [&older, &current, &newer, &checksum, &part, &unknown] {
+            fs::write(path, b"x").unwrap();
+        }
+
+        cleanup_installed_packages(&data_dir);
+
+        assert!(!older.exists(), "旧版本安装包应被删除");
+        assert!(!current.exists(), "当前版本安装包应被删除");
+        assert!(newer.exists(), "更新版本安装包应保留");
+        assert!(!checksum.exists(), "校验文件应被删除");
+        assert!(!part.exists(), "半截文件应被删除");
+        assert!(unknown.exists(), "非更新目录文件不能误删");
+        let _ = fs::remove_dir_all(&data_dir);
     }
 }

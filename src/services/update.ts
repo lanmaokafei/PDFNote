@@ -51,6 +51,15 @@ export async function openUpdateInstaller(path: string): Promise<void> {
   return invoke('open_update_installer', { path })
 }
 
+/**
+ * 退出应用。安装器打开后必须退出：运行中的 PDFNote.app 会让 Finder 判定
+ * 「正在使用中」，拖进 Applications 覆盖安装会失败。
+ */
+export async function quitApp(): Promise<void> {
+  if (!isTauriRuntime()) return
+  return invoke('quit_app')
+}
+
 /** 订阅下载进度；返回取消订阅函数。 */
 export function onUpdateProgress(
   handler: (progress: DownloadProgress) => void,

@@ -143,10 +143,12 @@ app-data/               运行时生成，不随安装包写入
   pdfs/                 按内容哈希命名的 PDF
   backups/              自动备份与轮转
   tmp/                  导入/导出临时文件，启动时清理
+  updates/              在线升级下载的 DMG（.part 校验通过才改名落盘）
 ```
 
 - capabilities 仅启用 core 与 dialog open；未授予前端任意文件系统访问。
 - 文件复制、SHA-256、PDF 字节读取、zip、哈希校验均在 Rust，避免 WebView 大文件内存复制和路径越权。
+- 在线升级（0.32.0）的网络请求（GitHub Releases 检查、DMG 下载、.sha256 获取）全部在 Rust `update.rs`（reqwest + rustls）完成，前端 CSP 保持 `connect-src 'self'` 不放开；下载进度经 `update-download-progress` 事件推送。
 - 前端只负责交互、PDF.js 渲染、归一化几何与 FSRS 调度计算。
 - 开发期静态资源来自 Vite `/pdfjs/...`；打包后同一相对 URL 来自 frontendDist，不引用开发机绝对路径。
 - PDF.js worker 使用 `new URL('/pdfjs/pdf.worker.min.mjs', window.location.origin)` 的统一封装，并通过测试确认 asset 协议下可用；字体和 CMap 路径同步配置。
@@ -162,6 +164,6 @@ app-data/               运行时生成，不随安装包写入
 
 ## 9. 当前落地范围
 
-已实现：完整资料库与 PDF 工作区、三视图共享 Card、脑图与主动回忆、FSRS 复习、ZIP 备份恢复、崩溃边界、macOS Release 安装包。
+已实现：完整资料库与 PDF 工作区、三视图共享 Card、脑图与主动回忆、FSRS 复习、ZIP 备份恢复、崩溃边界、在线检测升级（GitHub Releases 检查 → 下载进度 → SHA-256 校验 → 打开 DMG 安装器），macOS Release 安装包。
 
 大数据文件策略：PDF 不再经 asset 协议整本读取，而是由 Rust `read_pdf_chunk` 提供受控 Range 分块，PDF.js 使用 `PDFDataRangeTransport` 按需拉取；页面代理使用 16 项 LRU 上限。备份与文件哈希等重任务在 Tauri 线程池执行。

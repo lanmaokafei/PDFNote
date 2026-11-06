@@ -1,4 +1,4 @@
-use crate::{ai, anki, backup, book, canvases, cards, documents, models, review, state::AppState};
+use crate::{ai, anki, backup, book, canvases, cards, documents, models, review, state::AppState, update};
 use tauri::{ipc::Response, State};
 
 /// 可选的视觉模型设置。未配置时应用不发任何网络请求。
@@ -578,6 +578,35 @@ pub fn append_crash_log(state: State<'_, AppState>, payload: String) -> Result<S
         let _ = std::fs::remove_file(oldest);
     }
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// 检查 GitHub Releases 是否有新版本（启动后自动调用 + 设置里手动调用）。
+#[tauri::command]
+pub async fn check_for_update() -> Result<update::UpdateInfo, String> {
+    update::check_for_update().await
+}
+
+/// 当前应用版本号（设置页展示用，不联网）。
+#[tauri::command(async)]
+pub fn get_app_version() -> String {
+    update::current_version().to_string()
+}
+
+/// 下载更新安装包，过程通过 `update-download-progress` 事件报告进度，
+/// 完成后校验 SHA-256 再落盘，返回本地 DMG 路径。
+#[tauri::command]
+pub async fn download_update(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    info: update::UpdateInfo,
+) -> Result<String, String> {
+    update::download_update(&app, &state, &info).await
+}
+
+/// 打开已下载并校验过的 DMG 安装器（挂载后由用户拖入 Applications）。
+#[tauri::command(async)]
+pub fn open_update_installer(path: String) -> Result<(), String> {
+    update::open_installer(&path)
 }
 
 #[cfg(test)]

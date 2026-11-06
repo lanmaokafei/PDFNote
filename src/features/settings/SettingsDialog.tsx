@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Cpu, Eye, EyeOff, ShieldCheck } from 'lucide-react'
+import { Cpu, Eye, EyeOff, ShieldCheck, Sparkles } from 'lucide-react'
 import {
   EMPTY_AI_SETTINGS,
   getAiSettings,
@@ -12,15 +12,18 @@ import {
   type AiSettings,
   type AiTestResult,
 } from '../../services/ai'
+import { getAppVersion } from '../../services/update'
 import './SettingsDialog.css'
 
 interface SettingsDialogProps {
   onClose: () => void
   /** 配置变化后通知调用方刷新「公式能否 AI 识别」的判断。 */
   onSaved?: (settings: AiSettings) => void
+  /** 打开「软件更新」检查对话框（设置页只做入口，检测/下载都在对话框里）。 */
+  onCheckUpdate?: () => void
 }
 
-export function SettingsDialog({ onClose, onSaved }: SettingsDialogProps) {
+export function SettingsDialog({ onClose, onSaved, onCheckUpdate }: SettingsDialogProps) {
   const [draft, setDraft] = useState<AiSettings>(EMPTY_AI_SETTINGS)
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -36,6 +39,7 @@ export function SettingsDialog({ onClose, onSaved }: SettingsDialogProps) {
   const [taskResult, setTaskResult] = useState('')
   const [taskError, setTaskError] = useState('')
   const [taskCopied, setTaskCopied] = useState(false)
+  const [appVersion, setAppVersion] = useState('')
 
   useEffect(() => {
     let active = true
@@ -50,6 +54,14 @@ export function SettingsDialog({ onClose, onSaved }: SettingsDialogProps) {
         setError(reason instanceof Error ? reason.message : String(reason))
         setLoaded(true)
       })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    getAppVersion()
+      .then((version) => { if (active) setAppVersion(version) })
+      .catch(() => undefined)
     return () => { active = false }
   }, [])
 
@@ -270,6 +282,25 @@ export function SettingsDialog({ onClose, onSaved }: SettingsDialogProps) {
         {testError && <p className="settings-error" role="alert">连接测试失败：{testError}</p>}
         {error && <p className="settings-error" role="alert">{error}</p>}
         {notice && <p className="settings-notice" role="status">{notice}</p>}
+
+        <section className="settings-update" aria-label="软件更新">
+          <div className="settings-update-row">
+            <span>
+              <Sparkles size={14} />
+              软件更新
+              <small>当前版本 {appVersion ? `v${appVersion}` : '—'} · 检查 GitHub Releases 是否有新包</small>
+            </span>
+            <button
+              type="button"
+              className="settings-test-button"
+              onClick={() => onCheckUpdate?.()}
+              disabled={!onCheckUpdate}
+              data-testid="settings-check-update"
+            >
+              检查更新
+            </button>
+          </div>
+        </section>
 
         <footer>
           <button

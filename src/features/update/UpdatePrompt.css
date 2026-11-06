@@ -1,0 +1,252 @@
+.update-backdrop {
+  position: fixed;
+  z-index: 92;
+  inset: 0;
+  display: grid;
+  padding: 24px;
+  background: rgba(28, 36, 30, .34);
+  backdrop-filter: blur(3px);
+  place-items: center;
+}
+
+.update-dialog {
+  display: flex;
+  width: min(460px, 100%);
+  max-height: min(80vh, 640px);
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px;
+  overflow: auto;
+  border: 1px solid #e2e6e0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(24, 34, 27, .26);
+}
+
+.update-dialog header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.update-dialog header small {
+  color: #3f6a85;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+}
+
+.update-dialog header h2 {
+  margin: 4px 0 0;
+  color: #1f2b24;
+  font-size: 18px;
+}
+
+.update-dialog header button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 6px;
+  color: #5f665f;
+  background: #eef1ea;
+  font-size: 16px;
+  cursor: pointer;
+  place-items: center;
+}
+
+.update-dialog header button:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.update-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 11px 12px;
+  border-radius: 9px;
+  color: #4c5a50;
+  background: #f4f8f3;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.update-status svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #4f7a5a;
+}
+
+.update-status strong {
+  color: #23402c;
+}
+
+.update-status span {
+  display: block;
+}
+
+.update-status small {
+  display: block;
+  margin-top: 3px;
+  color: #7a857c;
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.update-status.is-new {
+  background: #eef4fb;
+  color: #2f4c63;
+}
+
+.update-status.is-new svg {
+  color: #3f6a85;
+}
+
+.update-status.is-new strong {
+  color: #274b64;
+}
+
+.update-status.is-ready {
+  background: #f3f9ee;
+}
+
+.update-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: #8a3f31;
+  background: #fbeeec;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.update-error svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.update-notes {
+  border: 1px solid #e6eae3;
+  border-radius: 9px;
+  background: #fafbf8;
+}
+
+.update-notes summary {
+  padding: 9px 12px;
+  color: #4c5a50;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+  user-select: none;
+}
+
+.update-notes pre {
+  max-height: 180px;
+  margin: 0;
+  padding: 0 12px 11px;
+  overflow: auto;
+  color: #55605a;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 9px;
+  background: #f4f8f3;
+}
+
+.update-progress-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #4c5a50;
+  font-size: 12px;
+}
+
+.update-progress-label svg {
+  color: #4f7a5a;
+}
+
+.update-progress-label strong {
+  margin-left: auto;
+  color: #23402c;
+  font-variant-numeric: tabular-nums;
+}
+
+.update-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e3e9df;
+}
+
+.update-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #5b8a68, #4f7a5a);
+  transition: width .18s ease;
+}
+
+.update-progress > small {
+  color: #7a857c;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.update-dialog footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.update-footer-spacer {
+  flex: 1;
+}
+
+.update-dialog footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid #dde3d8;
+  border-radius: 8px;
+  color: #4c5a50;
+  background: #f6f8f3;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.update-dialog footer button:hover:not(:disabled) {
+  background: #eef2e9;
+}
+
+.update-dialog footer button.primary {
+  border-color: #4f7a5a;
+  color: #fff;
+  background: #4f7a5a;
+}
+
+.update-dialog footer button.primary:hover:not(:disabled) {
+  background: #456c4f;
+}
+
+.update-dialog footer button:disabled {
+  opacity: .55;
+  cursor: default;
+}

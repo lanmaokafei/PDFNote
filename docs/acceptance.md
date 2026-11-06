@@ -9,6 +9,7 @@
 | --- | --- | --- |
 | Rust 数据层 | `cargo test --manifest-path src-tauri/Cargo.toml -- --include-ignored` | 29 passed（含 2 项 Vision 真机：中文识别 + 行级坐标） |
 | 前端单元 | `npm run test` | 25 passed（6 files，含文字层行提取与选区文本、右键菜单定位边界） |
+| 在线升级冒烟（0.32.0） | `node scripts/update-smoke.mjs` | 通过：自动检测弹提示 →「稍后」记忆 → 手动检查 → 下载进度（0<%<100）→ SHA-256 校验完成 → 点击升级调起 DMG 安装器 → 已是最新/网络失败/浏览器环境三条兜底 |
 | 文字层冒烟 | `node scripts/textlayer-smoke.mjs` | 通过：透明 DOM 文字可原生拖选「信息系统项目管」，选区 bbox 换算正确 |
 | 右键菜单冒烟 | `node scripts/contextmenu-smoke.mjs` | 通过：原生 Reload 菜单被接管、菜单项执行动作、右下角翻转、键盘导航、输入框保留系统菜单、选区读取与跨层判定 |
 | TypeScript + 打包 | `npm run build` | 通过 |

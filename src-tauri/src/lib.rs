@@ -13,6 +13,7 @@ mod ocr;
 mod page_text;
 mod review;
 mod state;
+mod update;
 
 use state::AppState;
 use std::{fs, io};
@@ -88,6 +89,10 @@ pub fn run() {
             commands::import_backup,
             commands::auto_backup,
             commands::append_crash_log,
+            commands::check_for_update,
+            commands::get_app_version,
+            commands::download_update,
+            commands::open_update_installer,
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;

@@ -27,6 +27,9 @@ const ReviewWorkspace = lazy(() =>
 const BackupWorkspace = lazy(() =>
   import('./features/backup/BackupWorkspace').then((module) => ({ default: module.BackupWorkspace })),
 )
+const UpdatePrompt = lazy(() =>
+  import('./features/update/UpdatePrompt').then((module) => ({ default: module.UpdatePrompt })),
+)
 
 function ViewLoading({ label }: { label: string }) {
   return <div className="app-view-loading"><span /><strong>{label}</strong></div>
@@ -37,6 +40,8 @@ import {
   isTauriRuntime,
   updateDocumentMetadata,
 } from './services/pdfnote'
+import { autoCheckUpdate } from './services/update'
+import type { UpdateInfo } from './services/update'
 import { useCardStore } from './store/cardStore'
 
 type View = 'library' | 'mindmap' | 'review' | 'backup'
@@ -49,6 +54,8 @@ function App() {
   const [showMindmap, setShowMindmap] = useState(true)
   const [searchToken, setSearchToken] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [updatePromptOpen, setUpdatePromptOpen] = useState(false)
+  const [updatePromptInfo, setUpdatePromptInfo] = useState<UpdateInfo | null>(null)
   const [jumpTarget, setJumpTarget] = useState<{ documentId: string; page: number; token: number } | null>(null)
   const { menu, show, close } = useContextMenu()
   const loadCards = useCardStore((state) => state.loadCards)
@@ -103,6 +110,23 @@ function App() {
     return () => {
       window.clearTimeout(timer)
       window.clearInterval(interval)
+    }
+  }, [desktop])
+
+  useEffect(() => {
+    if (!desktop) return
+    // 启动约 8 秒后后台检查 GitHub Releases；有新版且用户没点过「稍后」才弹升级提示。
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void autoCheckUpdate().then((info) => {
+        if (!info || cancelled) return
+        setUpdatePromptInfo(info)
+        setUpdatePromptOpen(true)
+      })
+    }, 8_000)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
     }
   }, [desktop])
 
@@ -284,7 +308,24 @@ function App() {
           </>
         )}
       </main>
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsDialog
+          onClose={() => setSettingsOpen(false)}
+          onCheckUpdate={() => {
+            // 手动检查：不带缓存信息，对话框挂载后自行检查。
+            setUpdatePromptInfo(null)
+            setUpdatePromptOpen(true)
+          }}
+        />
+      )}
+      {updatePromptOpen && (
+        <Suspense fallback={null}>
+          <UpdatePrompt
+            initialInfo={updatePromptInfo}
+            onClose={() => setUpdatePromptOpen(false)}
+          />
+        </Suspense>
+      )}
       <ContextMenu state={menu} onClose={close} />
     </div>
   )

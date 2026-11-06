@@ -283,7 +283,6 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       if (Array.isArray(items)) layoutState.push(...items)
       return null
     },
-    list_page_inks: () => [],
     list_mindmap_layout: (args) => {
       const canvasId = args?.canvasId ?? 'main'
       const ids = layoutMembership[canvasId] ?? []

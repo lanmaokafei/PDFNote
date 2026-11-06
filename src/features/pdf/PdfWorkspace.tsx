@@ -81,6 +81,13 @@ const INK_WIDTHS = [
   { label: '中', value: 0.0028 },
   { label: '粗', value: 0.0042 },
 ]
+/** 橡皮直径（CSS px）：命中半径随它变，dot 是工具栏上的预览圆点。 */
+const ERASER_SIZES = [
+  { label: '小', value: 8, dot: 6 },
+  { label: '中', value: 18, dot: 10 },
+  { label: '大', value: 32, dot: 14 },
+  { label: '特大', value: 56, dot: 20 },
+]
 const MIN_SCALE = 0.5
 const MAX_SCALE = 3
 const EMPTY_ANNOTATIONS: Annotation[] = []
@@ -174,6 +181,7 @@ export function PdfWorkspace({
   const [digestOpen, setDigestOpen] = useState(false)
   const [inkColor, setInkColor] = useState(INK_COLORS[0])
   const [inkWidth, setInkWidth] = useState(INK_WIDTHS[1].value)
+  const [eraserSize, setEraserSize] = useState(ERASER_SIZES[1].value)
   const [inkErase, setInkErase] = useState(false)
   // 标题链接默认关闭：卡片库还很小时开启只会有开销，没有「过去的笔记」可浮现。
   const [titleLinkEnabled, setTitleLinkEnabled] = useState(readTitleLinkPreference)
@@ -777,21 +785,32 @@ export function PdfWorkspace({
     }
   }, [document.id, inkColor, inkWidth])
 
-  const handleEraseInk = useCallback(async (id: string) => {
+  /**
+   * 批量擦除：橡皮拖动时可能一次命中多条，松手才统一删，
+   * 免得每一条都写一次数据库、刷一次提示。
+   */
+  const handleEraseInks = useCallback(async (ids: string[]) => {
+    const unique = [...new Set(ids)]
+    if (!unique.length) return
     try {
-      await deletePageInk(id)
+      await Promise.all(unique.map((id) => deletePageInk(id)))
       setInksByPage((previous) => {
+        const drop = new Set(unique)
         const next: Record<number, PageInk[]> = {}
         Object.entries(previous).forEach(([page, items]) => {
-          next[Number(page)] = items.filter((ink) => ink.id !== id)
+          next[Number(page)] = items.filter((ink) => !drop.has(ink.id))
         })
         return next
       })
-      setNotice('墨迹已删除。')
+      setNotice(unique.length > 1 ? `已擦除 ${unique.length} 条墨迹。` : '墨迹已删除。')
     } catch (reason) {
       setOperationError(`删除墨迹失败：${errorMessage(reason)}`)
     }
   }, [])
+
+  const handleEraseInk = useCallback((id: string) => {
+    void handleEraseInks([id])
+  }, [handleEraseInks])
 
   const clearOperation = useCallback(() => {
     setOperationError('')
@@ -1304,6 +1323,8 @@ export function PdfWorkspace({
                   inks={inksByPage[pageNumber] ?? EMPTY_INKS}
                   inkColor={inkColor}
                   inkWidth={inkWidth}
+                  eraserSize={eraserSize}
+                  onEraseInks={(ids) => void handleEraseInks(ids)}
                   inkErase={inkErase}
                   onInk={(bbox, points) => void handleInk(pageNumber, bbox, points)}
                   onEraseInk={(id) => void handleEraseInk(id)}
@@ -1462,9 +1483,29 @@ export function PdfWorkspace({
                 type="button"
                 className={inkErase ? 'is-active' : ''}
                 onClick={() => setInkErase((value) => !value)}
+                title="橡皮：擦掉不想要的墨迹；选中后可调大小，按住拖动可连擦"
               >
                 橡皮
               </button>
+              {/* 橡皮大小：直径就是命中范围，太小不好选中细笔画。 */}
+              {inkErase && (
+                <div className="pdf-eraser-sizes" role="group" aria-label="橡皮大小">
+                  <span className="pdf-eraser-sizes-label">大小</span>
+                  {ERASER_SIZES.map((option) => (
+                    <button
+                      key={option.label}
+                      type="button"
+                      data-testid={`eraser-size-${option.label}`}
+                      className={eraserSize === option.value ? 'is-active' : ''}
+                      onClick={() => setEraserSize(option.value)}
+                      title={`橡皮大小：${option.label}（${option.value}px）`}
+                    >
+                      <span className="pdf-eraser-dot" style={{ width: option.dot, height: option.dot }} />
+                      <em>{option.label}</em>
+                    </button>
+                  ))}
+                </div>
+              )}
               <button type="button" onClick={() => { setTool('select'); setInkErase(false) }}>完成</button>
             </div>
           )}

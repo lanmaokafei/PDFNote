@@ -14,6 +14,7 @@ import {
   toDisplayRect,
   unionRects,
 } from './geometry'
+import { findInkHits, type InkHitCandidate } from './inkErase'
 import {
   cachePageLines,
   ensurePageLines,
@@ -89,6 +90,8 @@ interface PdfPageProps {
   inkColor: string
   inkWidth: number
   inkErase: boolean
+  /** 橡皮直径（CSS px）：命中半径与光标圆圈都按它算。 */
+  eraserSize: number
   excerpts: Record<string, string>
   tool: PdfTool
   recallMode: boolean
@@ -110,6 +113,8 @@ interface PdfPageProps {
   onReveal: (annotationIds: string[]) => void
   onInk: (bbox: NormalizedBBox, points: Array<[number, number]>) => void
   onEraseInk: (id: string) => void
+  /** 橡皮一次可能擦掉多条，松手统一提交。 */
+  onEraseInks: (ids: string[]) => void
   onContextAction: (action: PdfContextAction) => void
   /** 标题链接字典；null 表示功能关闭。 */
   titleLinkIndex: TitleLinkIndex | null
@@ -149,6 +154,7 @@ export function PdfPage({
   inkColor,
   inkWidth,
   inkErase,
+  eraserSize,
   excerpts,
   tool,
   recallMode,
@@ -163,6 +169,7 @@ export function PdfPage({
   onReveal,
   onInk,
   onEraseInk,
+  onEraseInks,
   onContextAction,
   titleLinkIndex,
   onTitleLink,
@@ -178,6 +185,11 @@ export function PdfPage({
   const [retry, setRetry] = useState(0)
   const [interaction, setInteraction] = useState<Interaction | null>(null)
   const [stroke, setStroke] = useState<Array<[number, number]> | null>(null)
+  /** 橡皮光标位置（SVG 坐标）：驱动预览圆圈与悬停高亮。 */
+  const [eraserCursor, setEraserCursor] = useState<Point | null>(null)
+  /** 本次按下已擦掉的 id：先视觉隐藏，松手才统一提交删除。 */
+  const [erasedNow, setErasedNow] = useState<ReadonlySet<string>>(new Set())
+  const erasingRef = useRef(false)
   const [lines, setLines] = useState<OcrLine[]>([])
   const [textStatus, setTextStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [textError, setTextError] = useState('')
@@ -369,6 +381,41 @@ export function PdfPage({
     }
   }, [viewport])
 
+  /** 墨迹折线换算到 SVG 坐标，供橡皮命中判定复用。 */
+  const inkCandidates = useMemo<InkHitCandidate[]>(() => {
+    if (!viewport || !view) return []
+    return inks.map((ink) => ({
+      id: ink.id,
+      width: Math.max(1, (ink.style.width ?? 0.0025) * viewport.width),
+      points: (ink.style.points ?? []).map((point) => {
+        const display = toDisplayRect(
+          { x: point[0], y: point[1], width: 0.0001, height: 0.0001 },
+          viewport,
+          view,
+        )
+        return [display.left, display.top] as [number, number]
+      }),
+    }))
+  }, [inks, viewport, view])
+
+  /** 橡皮直径换算到 SVG 坐标：屏幕像素恒定，不随页面缩放变化。 */
+  const eraseRadius = useMemo(() => {
+    if (!viewport) return eraserSize
+    return eraserSize * (viewport.width / Math.max(cssWidth, 1))
+  }, [cssWidth, eraserSize, viewport])
+
+  const eraserHoverIds = useMemo(() => {
+    if (!inkErase || !eraserCursor) return []
+    // 已经擦掉的不再参与命中：视觉上它也已隐藏。
+    const remaining = inkCandidates.filter((candidate) => !erasedNow.has(candidate.id))
+    return findInkHits(eraserCursor, remaining, eraseRadius)
+  }, [eraseRadius, erasedNow, inkCandidates, inkErase, eraserCursor])
+
+  const eraserHoverIdSet = useMemo(
+    () => new Set(eraserHoverIds.map((hit) => hit.id)),
+    [eraserHoverIds],
+  )
+
   const displayedAnnotations = useMemo(() => {
     if (interaction?.type !== 'move') return annotations
     return annotations.map((annotation) => annotation.id === interaction.annotation.id
@@ -387,10 +434,28 @@ export function PdfPage({
     return searchTitleLinks(titleLinkIndex, lines)
   }, [lines, recallMode, titleLinkIndex])
 
+  /** 把橡皮圈内的墨迹记入待删集合：先视觉隐藏，松手统一提交。 */
+  const eraseAt = (point: Point) => {
+    const hits = findInkHits(point, inkCandidates.filter((c) => !erasedNow.has(c.id)), eraseRadius)
+    if (!hits.length) return
+    const next = new Set(erasedNow)
+    for (const hit of hits) next.add(hit.id)
+    setErasedNow(next)
+  }
+
   const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     if (recallMode || event.button !== 0 || !viewport || !view) return
     if (tool === 'ink') {
-      if (inkErase) return
+      if (inkErase) {
+        // 橡皮：按下即擦，按住拖动可以连续擦；命中范围 = 橡皮大小。
+        event.preventDefault()
+        const point = pointFromEvent(event)
+        event.currentTarget.setPointerCapture(event.pointerId)
+        erasingRef.current = true
+        setEraserCursor(point)
+        eraseAt(point)
+        return
+      }
       event.preventDefault()
       const point = displayPointToNormalized(pointFromEvent(event), viewport, view)
       event.currentTarget.setPointerCapture(event.pointerId)
@@ -422,6 +487,12 @@ export function PdfPage({
   }
 
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (inkErase) {
+      const point = pointFromEvent(event)
+      setEraserCursor(point)
+      if (erasingRef.current) eraseAt(point)
+      return
+    }
     if (stroke) {
       if (!viewport || !view) return
       const point = displayPointToNormalized(pointFromEvent(event), viewport, view)
@@ -513,6 +584,14 @@ export function PdfPage({
   }
 
   const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (erasingRef.current) {
+      erasingRef.current = false
+      if (erasedNow.size > 0) {
+        onEraseInks([...erasedNow])
+        setErasedNow(new Set())
+      }
+      return
+    }
     if (stroke) {
       if (stroke.length >= 2) {
         const xs = stroke.map((point) => point[0])
@@ -778,6 +857,7 @@ export function PdfPage({
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
+            onPointerLeave={() => setEraserCursor(null)}
             onPointerCancel={() => setInteraction(null)}
           >
             <g className="pdf-ink-layer">
@@ -793,7 +873,9 @@ export function PdfPage({
                     return `${index === 0 ? 'M' : 'L'}${display.left} ${display.top}`
                   })
                   .join(' ')
-                if (!path) return null
+                if (!path || erasedNow.has(ink.id)) return null
+                // 橡皮命中统一由 SVG 层处理（含圈外命中与拖动连擦），
+                // 所以路径本身不再挂删除 handler，避免双重删除。
                 return (
                   <path
                     key={ink.id}
@@ -804,15 +886,19 @@ export function PdfPage({
                     strokeWidth={Math.max(1, (ink.style.width ?? 0.0025) * viewport.width)}
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className={`pdf-ink${inkErase ? ' is-erasing' : ''}`}
-                    onPointerDown={(event) => {
-                      if (!inkErase) return
-                      event.stopPropagation()
-                      onEraseInk(ink.id)
-                    }}
+                    className={`pdf-ink${inkErase ? ' is-erasing' : ''}${eraserHoverIdSet.has(ink.id) ? ' is-hover' : ''}`}
                   />
                 )
               })}
+              {/* 橡皮光标：直径就是命中范围，让用户看到「擦得到哪里」。 */}
+              {inkErase && eraserCursor && (
+                <circle
+                  className="pdf-eraser-cursor"
+                  cx={eraserCursor.x}
+                  cy={eraserCursor.y}
+                  r={Math.max(1, eraseRadius)}
+                />
+              )}
               {stroke && stroke.length > 1 && (
                 <path
                   className="pdf-ink-draft"

@@ -988,8 +988,18 @@
 .pdf-ink-layer { pointer-events: none; }
 /* 墨迹线条本身可作为右键目标（父层 none 仍允许子元素覆盖），便于删除单条墨迹。 */
 .pdf-ink { pointer-events: stroke; cursor: context-menu; }
-.pdf-ink.is-erasing { cursor: not-allowed; }
+.pdf-ink.is-erasing { cursor: crosshair; }
+/* 橡皮悬停命中的笔迹：先看清要擦掉哪一条，再落笔。 */
+.pdf-ink.is-hover { stroke: #d94f3d !important; opacity: .8; }
 .pdf-ink-draft { pointer-events: none; }
+/* 橡皮光标圆圈：直径就是命中范围。 */
+.pdf-eraser-cursor {
+  fill: rgba(217, 79, 61, .14);
+  stroke: #d94f3d;
+  stroke-width: 1.2;
+  stroke-dasharray: 3 2;
+  pointer-events: none;
+}
 
 .pdf-ink-palette {
   position: fixed;
@@ -997,8 +1007,11 @@
   bottom: 80px;
   z-index: 46;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
-  gap: 10px;
+  gap: 8px 10px;
+  max-width: calc(100vw - 32px);
   padding: 8px 10px;
   border: 1px solid rgba(26, 32, 26, .08);
   border-radius: 12px;
@@ -1021,6 +1034,44 @@
 .pdf-ink-colors button.is-active { border-color: #2c3a2f; }
 
 .pdf-ink-widths { display: flex; gap: 2px; }
+
+/* 橡皮大小：圆点直径就是命中范围的直观预览。 */
+.pdf-eraser-sizes {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 5px;
+  border: 1px solid rgba(26, 32, 26, .10);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .92);
+}
+.pdf-eraser-sizes-label { color: #7c8676; font-size: 9px; }
+.pdf-eraser-sizes button {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 30px;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #6b7565;
+  cursor: pointer;
+}
+.pdf-eraser-sizes button em { font-style: normal; font-size: 8px; line-height: 1; }
+.pdf-eraser-sizes button:hover { background: #f2f6ec; }
+.pdf-eraser-sizes button.is-active {
+  border-color: #5f7a55;
+  background: #eef4e7;
+  color: #38512f;
+  font-weight: 600;
+}
+.pdf-eraser-dot {
+  display: inline-block;
+  border-radius: 50%;
+  background: currentColor;
+}
 .pdf-ink-widths button,
 .pdf-ink-palette > button {
   height: 26px;

@@ -100,6 +100,8 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
   window.__lastOutline = null
   const layoutState = []
   window.__layoutState = layoutState
+  const inkState = []
+  window.__inkState = inkState
   // 0.20.0 多画布：每张画布有自己的 mindmap_layout 成员；main 装全部种子卡片。
   const canvasState = [
     { id: 'main', document_id: null, name: '默认画布', created_at: '2026-11-03T00:00:00.000Z', updated_at: '2026-11-03T00:00:00.000Z' },
@@ -409,6 +411,29 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       if (input.user_note !== undefined) next.user_note = input.user_note
       cardState[index] = next
       return { ...next }
+    },
+    list_page_inks: () => inkState.slice(),
+    create_page_ink: (args) => {
+      const input = args ?? {}
+      const ink = {
+        id: `ink${inkState.length + 1}`,
+        document_id: input.documentId ?? 'doc1',
+        page: input.page ?? 1,
+        bbox: input.bbox ?? { x: 0, y: 0, width: 0.1, height: 0.1 },
+        style: input.style ?? { color: '#d94f3d', width: 0.0028, points: [] },
+        created_at: '2026-11-03T00:00:00.000Z',
+        updated_at: '2026-11-03T00:00:00.000Z',
+      }
+      inkState.push(ink)
+      window.__inkState = inkState
+      return ink
+    },
+    delete_page_ink: (args) => {
+      const id = args?.id
+      const index = inkState.findIndex((item) => item.id === id)
+      if (index >= 0) inkState.splice(index, 1)
+      window.__inkState = inkState
+      return null
     },
     auto_backup: () => null,
     get_page_ocr: () => null,
@@ -906,6 +931,90 @@ if (process.env.STEP === 'explain') {
   if (process.env.SHOT) await first.screenshot({ path: '/tmp/pdfnote-explain.png' })
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'explain', buttons, noteChars: note.length }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=ink-erase：橡皮必须可调大小，圈到的笔迹就能擦掉（不必正好点在线上）。
+if (process.env.STEP === 'ink-erase') {
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+
+  // 进入墨迹工具
+  await page.locator('.pdf-dock button', { hasText: '墨迹' }).first().click()
+  await page.waitForSelector('.pdf-ink-palette', { timeout: 5000 })
+
+  const svg = page.locator('.pdf-annotation-layer').first()
+  const box = await svg.boundingBox()
+  if (!box) {
+    problems.push('找不到页面画布')
+    await browser.close()
+    console.log(JSON.stringify({ problems, step: 'ink-erase' }))
+    process.exit(1)
+  }
+
+  // 画两条线：上面一条、下面一条
+  const drawLine = async (y) => {
+    await page.mouse.move(box.x + 110, box.y + y)
+    await page.mouse.down()
+    for (let index = 1; index <= 8; index += 1) {
+      await page.mouse.move(box.x + 110 + index * 12, box.y + y)
+    }
+    await page.mouse.up()
+    await page.waitForTimeout(200)
+  }
+  await drawLine(180)
+  await drawLine(280)
+
+  const inkCount = () => page.locator('.pdf-ink').count()
+  if ((await inkCount()) !== 2) problems.push(`画两条线后应有 2 条墨迹，实际 ${await inkCount()}`)
+
+  // 点橡皮：大小选择区必须出现
+  await page.locator('.pdf-ink-palette button', { hasText: '橡皮' }).click()
+  await page.waitForSelector('.pdf-eraser-sizes', { timeout: 5000 })
+  const sizeButtons = await page.locator('.pdf-eraser-sizes button').count()
+  if (sizeButtons !== 4) problems.push(`橡皮大小档位不是 4 档：${sizeButtons}`)
+  if (process.env.SHOT) {
+    await page.locator('.pdf-ink-palette').screenshot({ path: '/tmp/pdfnote-eraser-palette.png' })
+  }
+
+  // 选「特大」，光标圆圈半径要跟着变
+  await page.locator('[data-testid="eraser-size-特大"]').click()
+  await page.waitForTimeout(250)
+  await page.mouse.move(box.x + 150, box.y + 180)
+  await page.waitForTimeout(350)
+  const cursor = await page.evaluate(() => {
+    const circle = document.querySelector('.pdf-eraser-cursor')
+    return circle ? Number.parseFloat(circle.getAttribute('r') ?? '0') : 0
+  })
+  if (!(cursor > 20)) problems.push(`特大橡皮的光标半径太小：${cursor}`)
+  if (process.env.SHOT) {
+    await svg.screenshot({ path: '/tmp/pdfnote-eraser-cursor.png' })
+  }
+
+  // 悬停命中：靠近上面那条线，它应该高亮
+  await page.mouse.move(box.x + 150, box.y + 196)
+  await page.waitForTimeout(300)
+  const hovered = await page.locator('.pdf-ink.is-hover').count()
+  if (hovered < 1) problems.push('悬停在笔迹附近时没有命中高亮')
+
+  // 按住横穿两条线：特大橡皮一次擦掉
+  await page.mouse.move(box.x + 150, box.y + 150)
+  await page.mouse.down()
+  for (let step = 0; step <= 10; step += 1) {
+    await page.mouse.move(box.x + 150, box.y + 150 + step * 18)
+    await page.waitForTimeout(60)
+  }
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+
+  const after = await inkCount()
+  const stored = await page.evaluate(() => (window.__inkState ?? []).length)
+  if (after !== 0) problems.push(`拖动擦除后仍有 ${after} 条墨迹未删`)
+  if (stored !== 0) problems.push(`后端还留着 ${stored} 条墨迹`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'ink-erase', sizeButtons, cursor, hovered, after, stored }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

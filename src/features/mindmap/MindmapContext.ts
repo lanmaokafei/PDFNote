@@ -34,6 +34,8 @@ export interface MindmapNodeContextValue {
   onOpenSource: (id: string) => void
   /** 用模型解析卡片问题，写回笔记。 */
   onExplain: (id: string) => void
+  /** 点卡片徽标：在二十四节气色板里换下一个颜色（写入本地偏好）。 */
+  onCycleTone: (id: string) => void
 }
 
 export const MindmapNodeContext = createContext<MindmapNodeContextValue | null>(null)

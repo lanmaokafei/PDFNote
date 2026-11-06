@@ -3,11 +3,12 @@ import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import type { Card, Rating } from '../../domain/card'
 import { useCardStore } from '../../store/cardStore'
 
-export type MindmapFlowNode = Node<{ card_id: string }, 'mindmapCard'>
+export type MindmapFlowNode = Node<{ card_id: string; tone?: number }, 'mindmapCard'>
 
 import { MindmapNodeContext } from './MindmapContext'
 import { hasMathContent } from '../../ui/latex'
 import { ExpandableField } from './ExpandableField'
+import { toneAt } from './tone'
 
 const ratings: Array<{ value: Rating; label: string }> = [
   { value: 1, label: '重来' },
@@ -35,11 +36,15 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
   if (!context) throw new Error('MindmapNode must be rendered inside MindmapWorkspace')
   if (!card) return <div className="mindmap-node mindmap-node-missing">卡片已不可用</div>
 
+  // 色调由工作区按「子树根」预算好：同一棵树同色，整张画布才有色彩层次。
+  const tone = data.tone ?? 0
+  const palette = toneAt(tone)
+
   // 低缩放下文字本来就看不清：只画一条标题，省掉 KaTeX、图片、标签和全部按钮。
   // 节点仍可点选、拖拽，交互行为不变，只是 DOM 与渲染成本降到十分之一。
   if (context.lite) {
     return (
-      <article className={`mindmap-node is-lite${selected ? ' is-selected' : ''}`}>
+      <article className={`mindmap-node is-lite mindmap-tone-${tone}${selected ? ' is-selected' : ''}`}>
         <Handle className="mindmap-handle" type="target" position={Position.Left} />
         <h3 title={cardTitle(card)}>{cardTitle(card)}</h3>
         <Handle className="mindmap-handle" type="source" position={Position.Right} />
@@ -60,10 +65,19 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
   const recallError = context.recallErrors[card.id]
 
   return (
-    <article className={`mindmap-node${selected ? ' is-selected' : ''}${context.recallActive ? ' is-recall' : ''}`}>
+    <article className={`mindmap-node mindmap-tone-${tone}${selected ? ' is-selected' : ''}${context.recallActive ? ' is-recall' : ''}`}>
       <Handle className="mindmap-handle" type="target" position={Position.Left} />
       <header className="mindmap-node-header">
-        <span className="mindmap-node-index" aria-hidden="true">Q</span>
+        <button
+          type="button"
+          className="mindmap-node-index nodrag"
+          title={`${palette.term}·${palette.color}｜点击换个颜色`}
+          aria-label={`卡片配色：${palette.term}·${palette.color}，点击切换`}
+          onClick={(event) => {
+            event.stopPropagation()
+            context.onCycleTone(card.id)
+          }}
+        >Q</button>
         <h3 title={cardTitle(card)}>{cardTitle(card)}</h3>
         {card.source_ref && (
           <button

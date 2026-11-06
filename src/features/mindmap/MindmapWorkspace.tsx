@@ -93,6 +93,7 @@ import {
   type MindmapSortMode,
   type Point,
 } from './layout'
+import { saveToneOverride, toneIndexMap, toneOverrides } from './tone'
 import './mindmap.css'
 
 const nodeTypes = { mindmapCard: MindmapNode }
@@ -288,6 +289,23 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
         .filter((id): id is string => Boolean(id && ids.has(id))),
     )
   }, [cards])
+
+  /**
+   * 卡片配色：每棵子树按「根节点 id」稳定分配一个二十四节气色，
+   * 同一簇同色 → 上千张卡也不会糊成一片灰绿。手动换色写在 localStorage。
+   */
+  // 手动改过的颜色放进 state：既让 useMemo 有明确依赖，也让换色立刻反映到画布。
+  const [tonePrefs, setTonePrefs] = useState(toneOverrides)
+  const toneByCard = useMemo(() => {
+    const parentOf = new Map<string, string | null>()
+    for (const card of cards) parentOf.set(card.id, card.parent_id)
+    return toneIndexMap(parentOf, tonePrefs)
+  }, [cards, tonePrefs])
+
+  /** 点徽标换色：在这张卡当前色调上 +1，立即重算节点 data。 */
+  const cycleTone = useCallback((cardId: string) => {
+    setTonePrefs(saveToneOverride(cardId, (toneByCard.get(cardId) ?? 0) + 1))
+  }, [toneByCard])
   const collapsedIds = useMemo(() => {
     if (recallActive) {
       return new Set([...parentIds].filter((id) => !recallExpandedIds.has(id)))
@@ -410,10 +428,12 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   // 节点 data 与卡片列表同生命周期：位置/选中变化重建 nodes 时复用同一对象，
   // React Flow 才不会把“位置更新”误判成“节点内容更新”。
   const nodeData = useMemo(() => {
-    const map = new Map<string, { card_id: string }>()
-    for (const card of orderedVisibleCards) map.set(card.id, { card_id: card.id })
+    const map = new Map<string, { card_id: string; tone: number }>()
+    for (const card of orderedVisibleCards) {
+      map.set(card.id, { card_id: card.id, tone: toneByCard.get(card.id) ?? 0 })
+    }
     return map
-  }, [orderedVisibleCards])
+  }, [orderedVisibleCards, toneByCard])
 
   /**
    * 复用没变化的节点对象：React Flow 的 `adoptUserNodes` 对「引用未变」的节点走快路径，
@@ -1405,8 +1425,9 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     onDelete: (id: string) => setConfirmation({ kind: 'delete', id }),
     onOpenSource: openSource,
     onExplain: (id: string) => void explainCard(id),
+    onCycleTone: cycleTone,
   }), [
-    busy, childCounts, collapsedIds, explainCard, lite, openSource, rateCard,
+    busy, childCounts, collapsedIds, cycleTone, explainCard, lite, openSource, rateCard,
     ratedIds, ratingPendingIds, recallActive, recallErrors, revealedIds, revealAnswer, toggleCard,
   ])
 
@@ -1619,7 +1640,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
                   const collapsed = outlineCollapsedIds.has(card.id)
                   return (
                     <div
-                      className="mindmap-outline-row"
+                      className={`mindmap-outline-row mindmap-tone-${toneByCard.get(card.id) ?? 0}`}
                       key={card.id}
                       style={{ paddingLeft: `${12 + depth * 22}px` }}
                       onContextMenu={(event) => handleOutlineContextMenu(event, card)}

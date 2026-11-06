@@ -102,40 +102,95 @@
 .mindmap-spinner { width: 26px; height: 26px; border: 2px solid #dfe6d9; border-top-color: #647e5b; border-radius: 50%; animation: mindmap-spin .8s linear infinite; }
 @keyframes mindmap-spin { to { transform: rotate(360deg); } }
 
+/* ---------- 二十四节气色卡 ----------
+   24 个节气各取一个《中国传统色》里的颜色，派生三档：
+   bar（主色，色条 / 描边）、wash（8% 淡底）、ink（同族深字，对比度 ≥4.5:1）。
+   卡片按「所属子树的根」分配色相，同一簇同色，整张画布才有色彩层次而不是一片杂色。
+   色值由 src/features/mindmap/tone.ts 派生后导出，改色请改那里再重新生成。 */
+.mindmap-node,
+.mindmap-outline-row {
+  --tone-bar: #8ba17f;
+  --tone-wash: #eff3ea;
+  --tone-ink: #40543a;
+  --tone-ring: rgba(139, 161, 127, .22);
+}
+
+.mindmap-tone-0 { --tone-bar: #ecd452; --tone-wash: #fdf9e9; --tone-ink: #847215; --tone-ring: rgba(236, 212, 82, 0.22); } /* 立春·缃叶 */
+.mindmap-tone-1 { --tone-bar: #a9be7b; --tone-wash: #f4f7ee; --tone-ink: #566732; --tone-ring: rgba(169, 190, 123, 0.22); } /* 雨水·春辰 */
+.mindmap-tone-2 { --tone-bar: #f091a0; --tone-wash: #fdf1f3; --tone-ink: #841527; --tone-ring: rgba(240, 145, 160, 0.22); } /* 惊蛰·杨妃 */
+.mindmap-tone-3 { --tone-bar: #bc836b; --tone-wash: #f6efec; --tone-ink: #694130; --tone-ring: rgba(188, 131, 107, 0.22); } /* 春分·紫磨金 */
+.mindmap-tone-4 { --tone-bar: #9b8ea9; --tone-wash: #f2f0f4; --tone-ink: #4c4257; --tone-ring: rgba(155, 142, 169, 0.22); } /* 清明·紫菂 */
+.mindmap-tone-5 { --tone-bar: #68945c; --tone-wash: #ebf1ea; --tone-ink: #405b39; --tone-ring: rgba(104, 148, 92, 0.22); } /* 谷雨·庭芜绿 */
+.mindmap-tone-6 { --tone-bar: #84a729; --tone-wash: #eff4e3; --tone-ink: #4a5d17; --tone-ring: rgba(132, 167, 41, 0.22); } /* 立夏·水龙吟 */
+.mindmap-tone-7 { --tone-bar: #2a6e3f; --tone-wash: #e3ece6; --tone-ink: #14341e; --tone-ring: rgba(42, 110, 63, 0.22); } /* 小满·官绿 */
+.mindmap-tone-8 { --tone-bar: #b4884d; --tone-wash: #f5f0e8; --tone-ink: #6c512d; --tone-ring: rgba(180, 136, 77, 0.22); } /* 芒种·雌黄 */
+.mindmap-tone-9 { --tone-bar: #cb523e; --tone-wash: #f8e9e6; --tone-ink: #792d20; --tone-ring: rgba(203, 82, 62, 0.22); } /* 夏至·赩炽 */
+.mindmap-tone-10 { --tone-bar: #106898; --tone-wash: #e0ebf2; --tone-ink: #0b2e42; --tone-ring: rgba(16, 104, 152, 0.22); } /* 小暑·柔蓝 */
+.mindmap-tone-11 { --tone-bar: #a35f65; --tone-wash: #f3eaeb; --tone-ink: #61383c; --tone-ring: rgba(163, 95, 101, 0.22); } /* 大暑·茹藘 */
+.mindmap-tone-12 { --tone-bar: #88abda; --tone-wash: #f0f4fa; --tone-ink: #244775; --tone-ring: rgba(136, 171, 218, 0.22); } /* 立秋·窃蓝 */
+.mindmap-tone-13 { --tone-bar: #5aa4ae; --tone-wash: #eaf3f4; --tone-ink: #326067; --tone-ring: rgba(90, 164, 174, 0.22); } /* 处暑·天水碧 */
+.mindmap-tone-14 { --tone-bar: #6b7d73; --tone-wash: #eceeed; --tone-ink: #414c45; --tone-ring: rgba(107, 125, 115, 0.22); } /* 白露·千山翠 */
+.mindmap-tone-15 { --tone-bar: #c0ad5e; --tone-wash: #f7f4ea; --tone-ink: #6e612b; --tone-ring: rgba(192, 173, 94, 0.22); } /* 秋分·栾华 */
+.mindmap-tone-16 { --tone-bar: #da9233; --tone-wash: #faf1e4; --tone-ink: #825417; --tone-ring: rgba(218, 146, 51, 0.22); } /* 寒露·杏子 */
+.mindmap-tone-17 { --tone-bar: #b15a43; --tone-wash: #f5eae7; --tone-ink: #6e382a; --tone-ring: rgba(177, 90, 67, 0.22); } /* 霜降·棠梨 */
+.mindmap-tone-18 { --tone-bar: #206864; --tone-wash: #e2ebeb; --tone-ink: #113735; --tone-ring: rgba(32, 104, 100, 0.22); } /* 立冬·石绿 */
+.mindmap-tone-19 { --tone-bar: #b95a89; --tone-wash: #f6eaf0; --tone-ink: #6b2e4c; --tone-ring: rgba(185, 90, 137, 0.22); } /* 小雪·胭脂水 */
+.mindmap-tone-20 { --tone-bar: #a4abd6; --tone-wash: #f3f4fa; --tone-ink: #303869; --tone-ring: rgba(164, 171, 214, 0.22); } /* 大雪·暮山紫 */
+.mindmap-tone-21 { --tone-bar: #b04552; --tone-wash: #f5e7e9; --tone-ink: #6e2b33; --tone-ring: rgba(176, 69, 82, 0.22); } /* 冬至·鞓红 */
+.mindmap-tone-22 { --tone-bar: #a4c9cc; --tone-wash: #f3f8f8; --tone-ink: #375f62; --tone-ring: rgba(164, 201, 204, 0.22); } /* 小寒·井天 */
+.mindmap-tone-23 { --tone-bar: #995d7f; --tone-wash: #f2eaee; --tone-ink: #5f3a4f; --tone-ring: rgba(153, 93, 127, 0.22); } /* 大寒·紫府 */
+
 .mindmap-node {
   width: 254px;
   padding: 0;
   overflow: hidden;
-  border: 1px solid #d7ded3;
-  border-radius: 9px;
-  background: #fcfdf9;
-  box-shadow: 0 9px 24px #34423410;
+  /* 左侧色条是这张卡片的「节气标签」：扫一眼就知道属于哪一簇。 */
+  border: 1px solid #e2e5dc;
+  border-left: 3px solid var(--tone-bar);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px #34423408, 0 10px 24px #3442340d;
   font-family: Inter, ui-sans-serif, -apple-system, sans-serif;
   transition: border-color .15s, box-shadow .15s;
 }
-.mindmap-node.is-selected { border-color: #72896a; box-shadow: 0 0 0 2px #72896a22, 0 12px 30px #3442341c; }
+.mindmap-node.is-selected {
+  border-color: var(--tone-bar);
+  border-left-color: var(--tone-bar);
+  box-shadow: 0 0 0 3px var(--tone-ring), 0 12px 30px #3442341c;
+}
 /* 低缩放（zoom < 0.45）：只画标题条。少掉 KaTeX / 图片 / 按钮后，
-   上千个节点同时挂载也能保持平移和拖拽流畅。 */
-.mindmap-node.is-lite { padding: 7px 10px; border-radius: 7px; box-shadow: 0 2px 8px #3442340d; }
+   上千个节点同时挂载也能保持平移和拖拽流畅。
+   颜色保留：缩到 15% 时文字已经不可读，色块本身就是唯一的辨认依据。 */
+.mindmap-node.is-lite {
+  padding: 7px 10px;
+  border-radius: 6px;
+  border-left-width: 3px;
+  background: var(--tone-wash);
+  box-shadow: 0 1px 3px #3442340d;
+}
 .mindmap-node.is-lite h3 {
   margin: 0;
   overflow: hidden;
-  color: #3d4c3f;
+  color: var(--tone-ink);
   font-size: 10px;
   font-weight: 600;
   line-height: 1.4;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.mindmap-node.is-recall { border-color: #c8d4bf; }
+.mindmap-node.is-recall { border-color: var(--tone-bar); }
 .mindmap-node-missing { padding: 14px; color: #9a6b5e; font-size: 9px; }
-.mindmap-node-header { display: flex; align-items: center; gap: 8px; padding: 10px 11px 8px; }
-.mindmap-node-index { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 4px; color: #f2f5ed; background: #4a614d; font-family: Georgia, serif; font-size: 10px; }
+.mindmap-node-header { display: flex; align-items: center; gap: 8px; padding: 10px 11px 8px; border-bottom: 1px solid #ffffff; background: var(--tone-wash); }
+.mindmap-node-index { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border: 1px solid var(--tone-bar); border-radius: 4px; color: var(--tone-ink); background: #ffffff; font-family: Georgia, serif; font-size: 10px; line-height: 1; cursor: pointer; }
+/* 点徽标 = 换下一个节气色，hover 给出可点的反馈。 */
+.mindmap-node-index:hover { background: var(--tone-wash); }
+.mindmap-node-index:focus-visible { outline: 2px solid var(--tone-bar); outline-offset: 1px; }
 .mindmap-node-header h3 { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: #344237; font-size: 10px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 /* 来源页码：点击后左侧 PDF 跳到对应页 */
-.mindmap-node-page { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #d5e0cb; border-radius: 4px; color: #54734f; background: #eff5e9; font-size: 8px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; cursor: pointer; }
-.mindmap-node-page:hover { border-color: #b3c9a6; background: #e2eed8; }
-.mindmap-collapse { display: inline-flex; align-items: center; gap: 2px; padding: 3px 5px; border: 1px solid #e1e6db; border-radius: 4px; color: #7c8875; background: #f5f7f0; font-size: 8px; cursor: pointer; }
+.mindmap-node-page { flex: 0 0 auto; padding: 2px 5px; border: 1px solid var(--tone-bar); border-radius: 4px; color: var(--tone-ink); background: #ffffff; font-size: 8px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; cursor: pointer; }
+.mindmap-node-page:hover { background: var(--tone-wash); }
+.mindmap-collapse { display: inline-flex; align-items: center; gap: 2px; padding: 3px 5px; border: 1px solid #e1e6db; border-radius: 4px; color: #6f7a69; background: #ffffffb8; font-size: 8px; cursor: pointer; }
+.mindmap-collapse:hover { border-color: var(--tone-bar); color: var(--tone-ink); }
 .mindmap-collapse span { font-size: 10px; line-height: 1; }
 .mindmap-node-content { padding: 0 11px 8px; }
 .mindmap-node-content > .mindmap-field { margin-top: 7px; }
@@ -218,12 +273,12 @@ button.mindmap-field-label:hover { color: #456c43; }
 .mindmap-rating-buttons button:hover { border-color: #a9bba0; background: #eef3e8; }
 .mindmap-rated { display: block; padding: 5px; border-radius: 4px; color: #617b58; background: #eef4e7; font-size: 8px; text-align: center; }
 .mindmap-recall-error { margin: 5px 0 0; color: #9a5042; font-size: 7px; }
-.mindmap-node-actions { display: flex; gap: 2px; padding: 7px 9px; border-top: 1px solid #e9ede4; background: #f8faf5; }
+.mindmap-node-actions { display: flex; gap: 2px; padding: 7px 9px; border-top: 1px solid #f0f1ec; background: #fbfbf8; }
 .mindmap-node-actions button { padding: 4px 6px; border: 0; border-radius: 3px; color: #828c7c; background: transparent; font-size: 7px; cursor: pointer; }
-.mindmap-node-actions button:hover { color: #4d5f48; background: #eef2e8; }
+.mindmap-node-actions button:hover { color: #3f4a3a; background: var(--tone-wash); }
 .mindmap-node-actions .mindmap-delete-action:hover { color: #985447; background: #f8eae5; }
-.mindmap-node-actions .mindmap-explain-action { color: #4d6a52; font-weight: 600; }
-.mindmap-node-actions .mindmap-explain-action:hover { color: #31583a; background: #e6f0df; }
+.mindmap-node-actions .mindmap-explain-action { color: var(--tone-ink); font-weight: 600; }
+.mindmap-node-actions .mindmap-explain-action:hover { color: var(--tone-ink); background: var(--tone-wash); }
 .mindmap-handle { width: 7px !important; height: 7px !important; border: 1px solid #84987b !important; background: #f7faf3 !important; }
 
 .mindmap-editor {
@@ -453,9 +508,11 @@ button.mindmap-field-label:hover { color: #456c43; }
   gap: 8px;
   padding: 9px 18px 9px 0;
   border-bottom: 1px solid #f1f3ed;
+  /* 大纲行也用同一条节气色带：画布与大纲两套视图的颜色始终一一对应。 */
+  box-shadow: inset 3px 0 0 var(--tone-bar);
 }
 
-.mindmap-outline-row:hover { background: #f4f7f0; }
+.mindmap-outline-row:hover { background: var(--tone-wash); }
 
 /* 上千行时首屏只挂 200 行，剩下的按需追加，避免切换大纲卡住几秒。 */
 .mindmap-outline-more { padding: 16px 18px 24px; text-align: center; }
@@ -497,8 +554,9 @@ button.mindmap-field-label:hover { color: #456c43; }
   place-items: center;
   margin-top: 1px;
   border-radius: 4px;
-  color: #f2f5ed;
-  background: #4a614d;
+  color: var(--tone-ink);
+  border: 1px solid var(--tone-bar);
+  background: #ffffff;
   font-family: Georgia, serif;
   font-size: 9px;
 }

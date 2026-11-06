@@ -857,6 +857,99 @@ if (process.env.STEP === 'textlayer') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=tone：卡片必须按「子树根」分到二十四节气色，而不是一片同色。
+// 配合 ARRANGE_FOREST=1 CARD_COUNT=26 跑（26 张互不相连的卡片 = 26 棵独立子树）。
+if (process.env.STEP === 'tone') {
+  await page.locator('.document-card').first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(1500)
+
+  const info = await page.evaluate(() => {
+    const nodes = [...document.querySelectorAll('.mindmap-node')]
+    const toneOf = (node) => [...node.classList].find((name) => name.startsWith('mindmap-tone-')) ?? null
+    const tones = nodes.map(toneOf)
+    const bars = [...new Set(nodes.map((node) => getComputedStyle(node).getPropertyValue('--tone-bar').trim()))]
+    const header = nodes[0]?.querySelector('.mindmap-node-header') ?? null
+    return {
+      total: nodes.length,
+      missingTone: tones.filter((tone) => tone === null).length,
+      distinct: new Set(tones).size,
+      distinctBars: bars.length,
+      sampleBars: bars.slice(0, 8),
+      borderLeft: nodes[0] ? getComputedStyle(nodes[0]).borderLeftColor : null,
+      headerBg: header ? getComputedStyle(header).backgroundColor : null,
+      bodyBg: nodes[0] ? getComputedStyle(nodes[0]).backgroundColor : null,
+    }
+  })
+
+  if (info.total < 20) problems.push(`卡片数量异常：${info.total}`)
+  if (info.missingTone > 0) problems.push(`${info.missingTone} 个节点没有色调类`)
+  if (info.distinct < 10) problems.push(`森林场景只有 ${info.distinct} 种色调，颜色仍然单调`)
+  if (info.distinct !== info.distinctBars) {
+    problems.push(`色调类与 CSS 变量不一致：${info.distinct} 类 / ${info.distinctBars} 色`)
+  }
+  if (info.bodyBg !== 'rgb(255, 255, 255)') problems.push(`卡片底不是白色：${info.bodyBg}`)
+
+  // 点徽标 → 换下一个节气色，并写入本地偏好
+  const firstNode = page.locator('.react-flow__node').first()
+  const toneOfNode = () => firstNode.evaluate((element) =>
+    [...element.querySelector('.mindmap-node').classList].find((name) => name.startsWith('mindmap-tone-')) ?? null)
+  const before = await toneOfNode()
+  await firstNode.locator('.mindmap-node-index').click()
+  await page.waitForTimeout(500)
+  const after = await toneOfNode()
+  if (before === after) problems.push(`点击徽标没有换色：仍是 ${before}`)
+
+  const stored = await page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('pdfnote.mindmap.tone') ?? 'null') } catch { return null }
+  })
+  if (!stored || Object.keys(stored).length === 0) problems.push('手动换色没有写入 localStore')
+  if (after) {
+    const index = Number(String(after).replace('mindmap-tone-', ''))
+    const saved = Object.values(stored ?? {}).map(Number)
+    if (!saved.includes(index)) problems.push(`本地偏好和画布颜色不一致：${saved} vs ${index}`)
+  }
+
+  // 森林场景整理成网格：26 棵树挤成一行时看不出配色层次。
+  const arrange = page.getByRole('button', { name: '整理', exact: true })
+  if (await arrange.count()) {
+    await arrange.first().click()
+    await page.waitForTimeout(1200)
+  }
+  await page.locator('.mindmap-workspace').first().screenshot({ path: '/tmp/tone-cards.png' })
+
+  // 低缩放（lite）下颜色是唯一的辨认依据：节点必须保留各自的色调，不能退回一片灰。
+  const pane = await page.locator('.react-flow__pane').first().boundingBox()
+  let lite = null
+  if (pane) {
+    await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2)
+    await page.keyboard.down('Meta')
+    for (let index = 0; index < 10; index += 1) {
+      await page.mouse.wheel(0, 300)
+      await page.waitForTimeout(120)
+    }
+    await page.keyboard.up('Meta')
+    await page.waitForTimeout(700)
+    lite = await page.evaluate(() => {
+      const nodes = [...document.querySelectorAll('.mindmap-node.is-lite')]
+      return {
+        count: nodes.length,
+        withTone: nodes.filter((node) => [...node.classList].some((name) => name.startsWith('mindmap-tone-'))).length,
+        distinctBars: new Set(nodes.map((node) => getComputedStyle(node).getPropertyValue('--tone-bar').trim())).size,
+        backgrounds: new Set(nodes.map((node) => getComputedStyle(node).backgroundColor)).size,
+      }
+    })
+    if (lite.count === 0) problems.push('低缩放没有进入 lite 模式')
+    if (lite.withTone !== lite.count) problems.push(`lite 节点丢失色调：${lite.withTone}/${lite.count}`)
+    if (lite.distinctBars < 3) problems.push(`lite 只剩 ${lite.distinctBars} 种颜色`)
+    await page.locator('.mindmap-workspace').first().screenshot({ path: '/tmp/tone-lite.png' })
+  }
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'tone', ...info, before, after, stored, lite }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // 打开资料库里的文档 → 左 PDF 右脑图
 const card = page.locator('.document-card').first()
 if (await card.count()) {

@@ -119,6 +119,21 @@ pub fn import_document(state: &AppState, source_path: String) -> Result<Document
                 params![id, title, stored_path, source_path, hash, file_size, timestamp],
             )
             .map_err(|error| error.to_string())?;
+        // 每本新导入的 PDF 都带一张自己的脑图画布：
+        // 否则打开时只能落到全局 main，看到上一本书（例如 AI 拆书）的卡片。
+        let canvas_name: String = title.chars().take(60).collect();
+        transaction
+            .execute(
+                "INSERT INTO mindmap_canvases (id, document_id, name, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?4)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    id,
+                    canvas_name,
+                    timestamp
+                ],
+            )
+            .map_err(|error| error.to_string())?;
         let document = get_document_by_id(&transaction, &id)?.ok_or("文档写入失败")?;
         transaction.commit().map_err(|error| error.to_string())?;
         Ok(document)
@@ -337,6 +352,42 @@ mod tests {
         let stored = state.data_dir.join(first.stored_path);
         assert!(stored.exists(), "PDF 副本必须存在");
         assert_eq!(first.file_status, "ready");
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn import_creates_document_scoped_canvas() {
+        let (directory, state) = test_state();
+        let source = directory.join("带画布.pdf");
+        write_pdf(&source, b"%PDF-1.7 canvas");
+
+        let document = import_document(&state, source.to_string_lossy().to_string()).unwrap();
+        let canvases = crate::canvases::list_canvases(&state, Some(document.id.clone())).unwrap();
+        let own: Vec<_> = canvases
+            .iter()
+            .filter(|canvas| canvas.document_id.as_deref() == Some(document.id.as_str()))
+            .collect();
+        assert_eq!(own.len(), 1, "每本导入的 PDF 都应带一张专属画布");
+        assert_eq!(own[0].name, "带画布");
+        assert!(canvases.iter().any(|canvas| canvas.id == "main"), "全局画布仍然存在");
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn reimporting_same_file_keeps_single_canvas() {
+        let (directory, state) = test_state();
+        let source = directory.join("重复导入.pdf");
+        write_pdf(&source, b"%PDF-1.7 duplicate canvas");
+
+        let first = import_document(&state, source.to_string_lossy().to_string()).unwrap();
+        let second = import_document(&state, source.to_string_lossy().to_string()).unwrap();
+        assert_eq!(first.id, second.id);
+        let canvases = crate::canvases::list_canvases(&state, Some(first.id.clone())).unwrap();
+        assert_eq!(
+            canvases.iter().filter(|canvas| canvas.document_id.is_some()).count(),
+            1,
+            "去重导入不应重复创建画布"
+        );
         let _ = fs::remove_dir_all(&directory);
     }
 

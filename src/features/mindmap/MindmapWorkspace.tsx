@@ -41,6 +41,7 @@ import { ContextMenu } from '../../ui/ContextMenu'
 import { useContextMenu, type ContextMenuSection } from '../../ui/contextMenuCore'
 import {
   clearMindmapCards,
+  createMindmapCanvas,
   exportMarkdownFile,
   isTauriRuntime,
   listCardLinks,
@@ -72,7 +73,9 @@ import type { AnkiImportResult } from '../../services/anki'
 import {
   DEFAULT_CANVAS_ID,
   MINDMAP_CHANGED_EVENT,
+  documentCanvasName,
   readCanvasId,
+  readCanvasPreference,
   saveCanvasId,
 } from './canvas'
 import {
@@ -141,6 +144,8 @@ interface MindmapWorkspaceProps {
   compact?: boolean
   /** 文档工作台传入：加载全局画布 + 这本书的专属画布，并把选择偏好按文档记住。 */
   documentId?: string | null
+  /** 文档标题：新导入 / 升级前导入的书缺少专属画布时，用它给画布命名。 */
+  documentTitle?: string | null
 }
 
 interface ConfirmationState {
@@ -148,7 +153,7 @@ interface ConfirmationState {
   id: string
 }
 
-function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: MindmapWorkspaceProps) {
+function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, documentTitle = null }: MindmapWorkspaceProps) {
   const cardsById = useCardStore((state) => state.cardsById)
   const loadCards = useCardStore((state) => state.loadCards)
   const createCardInStore = useCardStore((state) => state.createCard)
@@ -163,6 +168,12 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
   // 当前画布：全局独立视图只用 main，文档工作台会按 documentId 单独记住上次选的画布。
   const [canvasId, setCanvasId] = useState(() => readCanvasId(documentId))
   const [canvases, setCanvases] = useState<MindmapCanvas[]>([])
+  /**
+   * 画布归属解析完成前不加载成员：否则新导入的书会先用 main 拉一遍，
+   * 短暂闪出全局画布（例如上一本书的 AI 拆书内容）。
+   */
+  const [canvasResolved, setCanvasResolved] = useState(() => !documentId)
+  const canvasResolvedRef = useRef(!documentId)
   /** 当前画布的 mindmap_layout 成员；surface_mindmap 只是「在任意画布出现」的派生开关。 */
   const [layoutCardIds, setLayoutCardIds] = useState<ReadonlySet<string>>(new Set())
   /** 这批成员属于哪张画布；切换过程中旧成员仍渲染，避免 React Flow 被卸载。 */
@@ -586,28 +597,93 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null }: M
     }
   }, [canvasId, compact, documentId, fitReadable, loadCards, publishViewportCenter])
 
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  /** 首次进入 / 切换文档时校验画布偏好：文档被删或画布被删后回落到 main。 */
+  /**
+   * 打开文档时先确定画布归属（在加载卡片之前）：
+   * 1. 用户选过的画布优先 —— 下次打开自动关联同一张；
+   * 2. 否则用这本书最新的专属画布；
+   * 3. 升级前导入的书没有专属画布、且从未选过 → 补建一张，名字用文档标题。
+   *
+   * 之前这里默认回落到 main（全局画布），而 main 里往往是上一本书的 AI 拆书内容，
+   * 于是新导入的 PDF 打开看到的是别人的脑图。
+   */
   useEffect(() => {
     let cancelled = false
-    void listMindmapCanvases(documentId ?? null).then((list) => {
-      if (cancelled) return
-      setCanvases(list)
-      const preferred = readCanvasId(documentId)
-      const fallback = list.find((canvas) => canvas.id === DEFAULT_CANVAS_ID)?.id
-        ?? list[0]?.id
-        ?? DEFAULT_CANVAS_ID
-      const next = list.some((canvas) => canvas.id === preferred) ? preferred : fallback
-      if (next !== canvasId) {
+    canvasResolvedRef.current = !documentId
+    setCanvasResolved(!documentId)
+    if (!documentId) {
+      void listMindmapCanvases(null).then((list) => {
+        if (cancelled) return
+        setCanvases(list)
+        const preferred = readCanvasPreference(null)
+        const fallback = list.some((canvas) => canvas.id === DEFAULT_CANVAS_ID)
+          ? DEFAULT_CANVAS_ID
+          : list[0]?.id ?? DEFAULT_CANVAS_ID
+        const next = preferred && list.some((canvas) => canvas.id === preferred) ? preferred : fallback
+        saveCanvasId(null, next)
         setCanvasId(next)
+        canvasResolvedRef.current = true
+        setCanvasResolved(true)
+      }).catch((reason) => {
+        if (cancelled) return
+        setError(`画布列表加载失败：${errorMessage(reason)}`)
+        canvasResolvedRef.current = true
+        setCanvasResolved(true)
+      })
+      return () => { cancelled = true }
+    }
+
+    void (async () => {
+      try {
+        let list = await listMindmapCanvases(documentId)
+        if (cancelled) return
+        const own = list.filter((canvas) => canvas.document_id === documentId)
+        const preferred = readCanvasPreference(documentId)
+
+        // 只要这本书还没有专属画布就补一张：老版本导入的文档也一样，
+        // 否则它们会继续停留在全局 main（上一本书的拆书内容）。
+        if (!own.length) {
+          const created = await createMindmapCanvas({
+            name: documentCanvasName(documentTitle),
+            document_id: documentId,
+          })
+          if (cancelled) return
+          list = await listMindmapCanvases(documentId)
+          if (cancelled) return
+          setCanvases(list)
+          saveCanvasId(documentId, created.id)
+          setCanvasId(created.id)
+          canvasResolvedRef.current = true
+          setCanvasResolved(true)
+          return
+        }
+
+        setCanvases(list)
+        const latestOwn = own
+          .slice()
+          .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+        const next = (preferred && list.some((canvas) => canvas.id === preferred) ? preferred : null)
+          ?? latestOwn?.id
+          ?? list.find((canvas) => canvas.id === DEFAULT_CANVAS_ID)?.id
+          ?? list[0]?.id
+          ?? DEFAULT_CANVAS_ID
         saveCanvasId(documentId, next)
+        setCanvasId(next)
+        canvasResolvedRef.current = true
+        setCanvasResolved(true)
+      } catch (reason) {
+        if (cancelled) return
+        setError(`画布列表加载失败：${errorMessage(reason)}`)
+        canvasResolvedRef.current = true
+        setCanvasResolved(true)
       }
-    }).catch((reason) => setError(`画布列表加载失败：${errorMessage(reason)}`))
+    })()
     return () => { cancelled = true }
-  }, [canvasId, documentId])
+  }, [documentId, documentTitle])
+
+  useEffect(() => {
+    if (!canvasResolved) return
+    void refresh()
+  }, [canvasResolved, refresh])
 
   /** PDF 建卡、AI 拆书、Anki 导入等外部写入后重新读取当前画布成员。 */
   useEffect(() => {

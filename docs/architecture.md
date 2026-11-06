@@ -1,7 +1,7 @@
 # PDFNote 架构基线（阶段 01 + 02）
 
-版本：0.24.0  
-状态：已落地工程骨架，OCR 为 macOS Apple Vision 单引擎，扫描页提供整页识别后的可选文字层；schema 升至 v9（`page_notes` 留白、`book_analysis`/`book_outline` 拆书、`mindmap_canvases` 多画布）。AI 拆书的两阶段提示词、节点预算与解析截断均由读者设置的 `depth`（1–5 层，默认 2）驱动，`outline_json` 记录本次深度；脑图卡片与大纲行的正文由 `ExpandableField` 统一渲染（长文本折叠 → 点击展开 → 限高滚动，AI 解析写回后自动展开，不改数据库）；0.20.0 起 `(canvas_id, card_id)` 决定卡片出现在哪张画布，`surface_mindmap` 是派生开关，并支持 AnkiDroid txt 按牌组建树导入；标题链接由本地关键词字典驱动；公式可选交给用户配置的视觉模型转 LaTeX（默认不联网），全视图提供应用内元素右键菜单；0.21.0 复习卡正面改为主动回忆输入框，揭示背面后用 `answerMatch.ts` 纯函数生成文本对比反馈（不落库、不参与 FSRS）；0.22.0 脑图超 60 节点启用视口裁剪（`onlyRenderVisibleElements`），子节点数改为工作区预算 `childCounts`，1483 张卡的画布从 8.4s 降到 0.9s；0.23.0 起缩放低于 45% 时节点降级为标题条、边不渲染、拖拽让给画布平移，避免 React Flow 逐帧重建上千个可见节点；0.24.0 新卡落点由右栏视口中心决定（`viewport.ts` 共享状态 + `create_card.x/y`），不再写死原点
+版本：0.25.0  
+状态：已落地工程骨架，OCR 为 macOS Apple Vision 单引擎，扫描页提供整页识别后的可选文字层；schema 升至 v9（`page_notes` 留白、`book_analysis`/`book_outline` 拆书、`mindmap_canvases` 多画布）。AI 拆书的两阶段提示词、节点预算与解析截断均由读者设置的 `depth`（1–5 层，默认 2）驱动，`outline_json` 记录本次深度；脑图卡片与大纲行的正文由 `ExpandableField` 统一渲染（长文本折叠 → 点击展开 → 限高滚动，AI 解析写回后自动展开，不改数据库）；0.20.0 起 `(canvas_id, card_id)` 决定卡片出现在哪张画布，`surface_mindmap` 是派生开关，并支持 AnkiDroid txt 按牌组建树导入；标题链接由本地关键词字典驱动；公式可选交给用户配置的视觉模型转 LaTeX（默认不联网），全视图提供应用内元素右键菜单；0.21.0 复习卡正面改为主动回忆输入框，揭示背面后用 `answerMatch.ts` 纯函数生成文本对比反馈（不落库、不参与 FSRS）；0.22.0 脑图超 60 节点启用视口裁剪（`onlyRenderVisibleElements`），子节点数改为工作区预算 `childCounts`，1483 张卡的画布从 8.4s 降到 0.9s；0.23.0 起缩放低于 45% 时节点降级为标题条、边不渲染、拖拽让给画布平移，避免 React Flow 逐帧重建上千个可见节点；0.24.0 新卡落点由右栏视口中心决定（`viewport.ts` 共享状态 + `create_card.x/y`），不再写死原点；0.25.0 起导入文档时同事务创建专属画布，打开时按「用户偏好 → 本书最新画布 → 补建 → 全局」解析
 
 ## 1. 不可破坏的架构约束
 

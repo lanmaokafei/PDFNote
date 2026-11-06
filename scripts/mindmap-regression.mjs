@@ -84,7 +84,7 @@ const document = {
   updated_at: '2026-11-03T00:00:00.000Z',
 }
 
-await page.addInitScript(({ cards, document, pdfBase64, dense }) => {
+await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, emptyDocCanvas }) => {
   const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0))
   const cardState = cards.map((card) => ({ ...card }))
   const noteState = []
@@ -102,6 +102,17 @@ await page.addInitScript(({ cards, document, pdfBase64, dense }) => {
     { id: 'doc-canvas', document_id: 'doc1', name: '本书脑图 A', created_at: '2026-11-04T00:00:00.000Z', updated_at: '2026-11-04T00:00:00.000Z' },
     { id: 'book-canvas-b', document_id: 'doc1', name: '本书脑图 B', created_at: '2026-11-05T00:00:00.000Z', updated_at: '2026-11-05T00:00:00.000Z' },
   ]
+  // EMPTY_DOC_CANVAS=1：模拟「这本 PDF 还没有自己的画布」（新导入 / 旧版本数据），
+  // 用来验证打开时会自动补建并选中专属画布。
+  if (emptyDocCanvas) {
+    for (let index = canvasState.length - 1; index >= 0; index -= 1) {
+      if (canvasState[index].document_id === document.id) canvasState.splice(index, 1)
+    }
+  }
+  // CANVAS_PREF=none 时不预置画布偏好，让页面走「没有偏好」的解析分支。
+  if (canvasPref && canvasPref !== 'none') {
+    try { localStorage.setItem(`pdfnote.mindmap.canvas.${document.id}`, canvasPref) } catch { /* ignore */ }
+  }
   const layoutMembership = {
     main: cards.map((card) => card.id),
     'doc-canvas': cards.slice(0, 2).map((card) => card.id),
@@ -421,7 +432,7 @@ await page.addInitScript(({ cards, document, pdfBase64, dense }) => {
     },
     transformCallback: (callback) => callback,
   }
-}, { cards, document, pdfBase64, dense: process.env.DENSE === '1' })
+}, { cards, document, pdfBase64, dense: process.env.DENSE === '1', canvasPref: process.env.CANVAS_PREF ?? 'main', emptyDocCanvas: process.env.EMPTY_DOC_CANVAS === '1' })
 
 await page.goto('http://127.0.0.1:1420/', { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.app-shell')
@@ -676,6 +687,53 @@ if (process.env.STEP === 'insert-center') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=doc-canvas：这本 PDF 还没有自己的画布（新导入 / 旧版本数据）时，
+// 打开应自动补建一张并选中，而不是落到全局 main（上一本书的 AI 拆书内容）。
+if (process.env.STEP === 'doc-canvas') {
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('[data-testid="canvas-select"]', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+
+  const picker = page.locator('[data-testid="canvas-select"]').first()
+  const ops = await page.evaluate(() => window.__canvasOps ?? [])
+  const created = ops.filter((op) => op.kind === 'create' && op.document_id === 'doc1')
+  if (created.length !== 1) {
+    problems.push(`没有自动补建专属画布：${JSON.stringify(ops)}`)
+  }
+  const active = await picker.inputValue()
+  if (!created.length || active !== created[0].id) {
+    problems.push(`自动补建后没有选中新画布：active=${active}`)
+  }
+  if (created.length && created[0].name !== '测试教材') {
+    problems.push(`画布没有用文档标题命名：${created[0].name}`)
+  }
+  const nodes = await page.locator('.mindmap-node').count()
+  if (nodes !== 0) problems.push(`新画布应为空，实际 ${nodes} 个节点`)
+  const stored = await page.evaluate(() => {
+    try { return localStorage.getItem('pdfnote.mindmap.canvas.doc1') } catch { return null }
+  })
+  if (!created.length || stored !== created[0].id) {
+    problems.push(`没有记住当前画布，下次打开无法自动关联：${stored}`)
+  }
+
+  // 回到资料库再打开同一本书：必须复用上次的画布，不能再新建一张。
+  await page.getByRole('tab', { name: /资料库/ }).click()
+  await page.waitForSelector('.document-card', { timeout: 15000 })
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('[data-testid="canvas-select"]', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+  const opsAfter = await page.evaluate(() => (window.__canvasOps ?? []).filter((op) => op.kind === 'create'))
+  const activeAfter = await picker.inputValue()
+  if (opsAfter.length !== 1) problems.push(`重新打开文档又新建了画布：${JSON.stringify(opsAfter)}`)
+  if (!created.length || activeAfter !== created[0].id) {
+    problems.push(`重新打开文档没有关联上次的画布：${activeAfter}`)
+  }
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'doc-canvas', active, created, stored }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // 打开资料库里的文档 → 左 PDF 右脑图
 const card = page.locator('.document-card').first()
 if (await card.count()) {
@@ -916,8 +974,14 @@ if (STEP === 'canvas') {
   if (!(await picker.count())) {
     problems.push('缺少画布选择器')
   } else {
+    const initialCanvas = await picker.inputValue()
+    if (initialCanvas !== 'book-canvas-b') {
+      problems.push(`没有偏好时应打开本书最新的画布 book-canvas-b，实际 ${initialCanvas}`)
+    }
     const initialNodes = await page.locator('.mindmap-node').count()
-    if (initialNodes !== expected) problems.push(`默认画布节点数异常：${initialNodes} / ${expected}`)
+    if (initialNodes !== 1) {
+      problems.push(`本书最新画布应只有 1 张卡片，实际 ${initialNodes}`)
+    }
     const options = await picker.locator('option').allTextContents()
     if (options.length < 3) problems.push(`画布下拉选项不足：${JSON.stringify(options)}`)
 

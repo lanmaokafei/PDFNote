@@ -6,14 +6,30 @@ export function canvasPreferenceKey(documentId?: string | null): string {
   return documentId ? `${STORAGE_KEY}.${documentId}` : STORAGE_KEY
 }
 
-export function readCanvasId(documentId?: string | null): string {
+/**
+ * 原始偏好值；没选过返回 null。
+ * 用来区分「用户主动选了全局画布」和「从来没打开过这本书」——
+ * 后者才应该自动补一张本书专属画布。
+ */
+export function readCanvasPreference(documentId?: string | null): string | null {
   try {
-    if (typeof localStorage === 'undefined') return DEFAULT_CANVAS_ID
+    if (typeof localStorage === 'undefined') return null
     const value = localStorage.getItem(canvasPreferenceKey(documentId))
-    return value && value.trim() ? value : DEFAULT_CANVAS_ID
+    return value && value.trim() ? value : null
   } catch {
-    return DEFAULT_CANVAS_ID
+    return null
   }
+}
+
+export function readCanvasId(documentId?: string | null): string {
+  return readCanvasPreference(documentId) ?? DEFAULT_CANVAS_ID
+}
+
+/** 文档专属画布的默认名字：与后端导入时的命名保持一致（最长 60 字）。 */
+export function documentCanvasName(title?: string | null): string {
+  const value = (title ?? '').trim()
+  if (!value) return '本书脑图'
+  return Array.from(value).slice(0, 60).join('')
 }
 
 export function saveCanvasId(documentId: string | null | undefined, canvasId: string): void {

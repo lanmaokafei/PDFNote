@@ -80,7 +80,12 @@ export function StudyWorkspace({
             <span aria-hidden="true" />
           </div>
           <div className="study-pane is-mindmap">
-            <MindmapWorkspace compact documentId={document.id} onCardsChanged={onCardsChanged} />
+            <MindmapWorkspace
+              compact
+              documentId={document.id}
+              documentTitle={document.title}
+              onCardsChanged={onCardsChanged}
+            />
           </div>
         </>
       )}

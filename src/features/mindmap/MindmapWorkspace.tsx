@@ -30,6 +30,7 @@ import {
   ListTree,
   Maximize,
   Merge,
+  Palette,
   Pencil,
   Plus,
   RefreshCw,
@@ -94,6 +95,14 @@ import {
   type Point,
 } from './layout'
 import { saveToneOverride, toneIndexMap, toneOverrides } from './tone'
+import { MindmapStylePanel } from './MindmapStylePanel'
+import {
+  type MindmapCardStyle,
+  MINDMAP_THEMES,
+  readCardStyle,
+  resolveCardStyle,
+  saveCardStyle,
+} from './style'
 import './mindmap.css'
 
 const nodeTypes = { mindmapCard: MindmapNode }
@@ -235,6 +244,9 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   const [editor, setEditor] = useState<'new' | string | null>(null)
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null)
   const [viewMode, setViewMode] = useState<'canvas' | 'outline'>('canvas')
+  /** 卡片样式（卡面/边框/圆角/密度），按画布保存在本地，不写数据库。 */
+  const [cardStyle, setCardStyle] = useState<MindmapCardStyle>(() => readCardStyle(readCanvasId(documentId)))
+  const [styleOpen, setStyleOpen] = useState(false)
   /**
    * 大纲一次只挂载前 OUTLINE_PAGE 行。1483 行 × 两个可展开字段 + KaTeX 会直接把
    * 切换动作卡住几秒；其余行按需追加，成本随用户实际翻到的位置增长。
@@ -306,6 +318,19 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   const cycleTone = useCallback((cardId: string) => {
     setTonePrefs(saveToneOverride(cardId, (toneByCard.get(cardId) ?? 0) + 1))
   }, [toneByCard])
+
+  // 每张画布一套样式：切画布时重新读，不把上一本的风格带过去。
+  useEffect(() => {
+    setCardStyle(readCardStyle(canvasId))
+  }, [canvasId])
+
+  const resolvedStyle = useMemo(() => resolveCardStyle(cardStyle), [cardStyle])
+  const currentTheme = MINDMAP_THEMES.find((theme) => theme.id === cardStyle.theme) ?? MINDMAP_THEMES[0]
+
+  /** 面板里改一项就立即落盘，不需要“保存”按钮。 */
+  const updateCardStyle = useCallback((next: MindmapCardStyle) => {
+    setCardStyle(saveCardStyle(canvasId, next))
+  }, [canvasId])
   const collapsedIds = useMemo(() => {
     if (recallActive) {
       return new Set([...parentIds].filter((id) => !recallExpandedIds.has(id)))
@@ -1319,6 +1344,10 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
         { id: 'link', label: '关联其他卡片…', icon: Link2, onSelect: () => setLinkTarget(cardId) },
         { id: 'merge', label: '合并所选卡片…', icon: Merge, disabled: selectedIds.size < 2 || busy, onSelect: () => setMergeOpen(true) },
       ] },
+      { id: 'appearance', title: '外观', items: [
+        // 样式是画布级的（一本书一套风格），不属于单张卡片，所以只留一个入口。
+        { id: 'style', label: '卡片样式…', icon: Palette, hint: currentTheme.name, onSelect: () => { setEditor(null); setStyleOpen(true) } },
+      ] },
       { id: 'danger', items: [
         { id: 'remove', label: '从脑图移除', icon: LayoutGrid, disabled: busy, onSelect: () => setConfirmation({ kind: 'remove', id: cardId }) },
         { id: 'delete', label: '彻底删除卡片', icon: Trash2, danger: true, disabled: busy, onSelect: () => setConfirmation({ kind: 'delete', id: cardId }) },
@@ -1435,7 +1464,14 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
 
   return (
     <MindmapNodeContext.Provider value={nodeContext}>
-    <section className={`mindmap-workspace${compact ? ' is-embedded' : ''}`} aria-label="知识脑图工作区">
+    <section
+      className={`mindmap-workspace${compact ? ' is-embedded' : ''}`}
+      data-mm-theme={cardStyle.theme}
+      data-mm-surface={resolvedStyle.surface}
+      data-mm-radius={resolvedStyle.radius}
+      data-mm-density={resolvedStyle.density}
+      aria-label="知识脑图工作区"
+    >
       {!compact && (
       <header className="mindmap-header">
         <div>
@@ -1707,6 +1743,13 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
             busy={busy}
             onClose={() => setEditor(null)}
             onSave={saveEditor}
+          />
+        )}
+        {styleOpen && !editor && (
+          <MindmapStylePanel
+            style={cardStyle}
+            onChange={updateCardStyle}
+            onClose={() => setStyleOpen(false)}
           />
         )}
         {confirmation && (

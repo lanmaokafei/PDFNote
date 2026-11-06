@@ -909,6 +909,166 @@ if (process.env.STEP === 'explain') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=style：卡片右键菜单必须能打开样式面板，主题一键替换整套、
+// 单项可自定义、选择按画布保存在本地。
+if (process.env.STEP === 'style') {
+  await page.locator('.document-card').first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(1400)
+
+  const node = page.locator('.react-flow__node').first()
+  await node.click({ button: 'right' })
+  await page.waitForSelector('.context-menu', { timeout: 5000 })
+  const styleItem = page.locator('.context-menu-item', { hasText: '卡片样式' })
+  if (!(await styleItem.count())) problems.push('卡片右键菜单没有「卡片样式」入口')
+  await styleItem.first().click()
+  await page.waitForSelector('[data-testid="style-panel"]', { timeout: 5000 })
+  await page.waitForTimeout(300)
+  if (process.env.SHOT) {
+    await page.locator('[data-testid="style-panel"]').screenshot({ path: '/tmp/pdfnote-style-panel.png' })
+  }
+
+  const readCard = () => page.evaluate(() => {
+    const card = document.querySelector('.mindmap-node')
+    const title = document.querySelector('.mindmap-node-header h3')
+    const root = document.querySelector('.mindmap-workspace')
+    return {
+      bg: getComputedStyle(card).backgroundColor,
+      radius: getComputedStyle(card).borderRadius,
+      titleSize: title ? getComputedStyle(title).fontSize : null,
+      theme: root?.dataset.mmTheme ?? null,
+      surface: root?.dataset.mmSurface ?? null,
+      density: root?.dataset.mmDensity ?? null,
+      stored: localStorage.getItem('pdfnote.mindmap.style.main'),
+    }
+  })
+
+  const before = await readCard()
+  if (before.theme !== 'paper') problems.push(`默认主题不是 paper：${before.theme}`)
+  if (before.bg !== 'rgb(255, 255, 255)') problems.push(`默认卡面不是白色：${before.bg}`)
+
+  // 1) 一键换整套：墨色
+  await page.locator('[data-testid="style-theme-ink"]').click()
+  await page.waitForTimeout(400)
+  const ink = await readCard()
+  if (ink.theme !== 'ink') problems.push(`主题没有切到 ink：${ink.theme}`)
+  if (ink.bg !== 'rgb(36, 41, 37)') problems.push(`墨色卡面没有生效：${ink.bg}`)
+  if (!ink.stored || !ink.stored.includes('ink')) problems.push('样式没有写入本地偏好')
+
+  // 2) 单项自定义：大圆角 + 宽松密度
+  await page.locator('[data-testid="style-radius-round"]').click()
+  await page.waitForTimeout(250)
+  await page.locator('[data-testid="style-density-roomy"]').click()
+  await page.waitForTimeout(350)
+  const custom = await readCard()
+  if (custom.radius !== '14px') problems.push(`圆角没有变成 14px：${custom.radius}`)
+  if (custom.titleSize !== '10.5px') problems.push(`密度没有变成宽松：字号 ${custom.titleSize}`)
+
+  // 3) 换主题会清掉自定义覆盖
+  await page.locator('[data-testid="style-theme-outline"]').click()
+  await page.waitForTimeout(350)
+  const outline = await readCard()
+  if (outline.radius !== '2px') problems.push(`线框主题圆角应为 2px：${outline.radius}`)
+  if (outline.titleSize !== '10px') problems.push(`换主题没有清掉密度覆盖：${outline.titleSize}`)
+
+  // 4) 重载后仍然生效
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.app-shell')
+  await page.locator('.document-card').first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(1200)
+  const after = await readCard()
+  if (after.theme !== 'outline') problems.push(`重载后主题丢失：${after.theme}`)
+  if (after.radius !== '2px') problems.push(`重载后圆角丢失：${after.radius}`)
+
+  if (process.env.SHOT) {
+    await page.locator('.mindmap-workspace').first().screenshot({ path: '/tmp/pdfnote-style-outline.png' })
+  }
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'style', before, ink, custom, outline, after }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=style：卡片右键菜单必须能打开样式面板，主题一键替换整套、
+// 单项可自定义、选择按画布保存在本地。
+if (process.env.STEP === 'style') {
+  await page.locator('.document-card').first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(1400)
+
+  const node = page.locator('.react-flow__node').first()
+  await node.click({ button: 'right' })
+  await page.waitForSelector('.context-menu', { timeout: 5000 })
+  const styleItem = page.locator('.context-menu-item', { hasText: '卡片样式' })
+  if (!(await styleItem.count())) problems.push('卡片右键菜单没有「卡片样式」入口')
+  await styleItem.first().click()
+  await page.waitForSelector('[data-testid="style-panel"]', { timeout: 5000 })
+  await page.waitForTimeout(300)
+  if (process.env.SHOT) {
+    await page.locator('[data-testid="style-panel"]').screenshot({ path: '/tmp/pdfnote-style-panel.png' })
+  }
+
+  const readCard = () => page.evaluate(() => {
+    const card = document.querySelector('.mindmap-node')
+    const title = document.querySelector('.mindmap-node-header h3')
+    const root = document.querySelector('.mindmap-workspace')
+    return {
+      bg: getComputedStyle(card).backgroundColor,
+      radius: getComputedStyle(card).borderRadius,
+      titleSize: title ? getComputedStyle(title).fontSize : null,
+      theme: root?.dataset.mmTheme ?? null,
+      surface: root?.dataset.mmSurface ?? null,
+      density: root?.dataset.mmDensity ?? null,
+      stored: localStorage.getItem('pdfnote.mindmap.style.main'),
+    }
+  })
+
+  const before = await readCard()
+  if (before.theme !== 'paper') problems.push(`默认主题不是 paper：${before.theme}`)
+  if (before.bg !== 'rgb(255, 255, 255)') problems.push(`默认卡面不是白色：${before.bg}`)
+
+  // 1) 一键换整套：墨色
+  await page.locator('[data-testid="style-theme-ink"]').click()
+  await page.waitForTimeout(400)
+  const ink = await readCard()
+  if (ink.theme !== 'ink') problems.push(`主题没有切到 ink：${ink.theme}`)
+  if (ink.bg !== 'rgb(36, 41, 37)') problems.push(`墨色卡面没有生效：${ink.bg}`)
+  if (!ink.stored || !ink.stored.includes('ink')) problems.push('样式没有写入本地偏好')
+
+  // 2) 单项自定义：大圆角 + 宽松密度
+  await page.locator('[data-testid="style-radius-round"]').click()
+  await page.waitForTimeout(250)
+  await page.locator('[data-testid="style-density-roomy"]').click()
+  await page.waitForTimeout(350)
+  const custom = await readCard()
+  if (custom.radius !== '14px') problems.push(`圆角没有变成 14px：${custom.radius}`)
+  if (custom.titleSize !== '10.5px') problems.push(`密度没有变成宽松：字号 ${custom.titleSize}`)
+
+  // 3) 换主题会清掉自定义覆盖
+  await page.locator('[data-testid="style-theme-outline"]').click()
+  await page.waitForTimeout(350)
+  const outline = await readCard()
+  if (outline.radius !== '2px') problems.push(`线框主题圆角应为 2px：${outline.radius}`)
+  if (outline.titleSize !== '10px') problems.push(`换主题没有清掉密度覆盖：${outline.titleSize}`)
+
+  // 4) 重载后仍然生效
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.app-shell')
+  await page.locator('.document-card').first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(1200)
+  const after = await readCard()
+  if (after.theme !== 'outline') problems.push(`重载后主题丢失：${after.theme}`)
+  if (after.radius !== '2px') problems.push(`重载后圆角丢失：${after.radius}`)
+
+  if (process.env.SHOT) {
+    await page.locator('.mindmap-workspace').first().screenshot({ path: '/tmp/pdfnote-style-outline.png' })
+  }
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'style', before, ink, custom, outline, after }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // STEP=tone：卡片必须按「子树根」分到二十四节气色，而不是一片同色。
 // 配合 ARRANGE_FOREST=1 CARD_COUNT=26 跑（26 张互不相连的卡片 = 26 棵独立子树）。
 if (process.env.STEP === 'tone') {

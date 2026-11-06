@@ -10,6 +10,163 @@
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+/* ---------- 卡片样式主题 ----------
+   与 tone（二十四节气色，表示「哪一簇」）正交：这里管卡面、边框、圆角、密度。
+   data-mm-* 挂在工作区根节点上，节点只继承 CSS 变量——1428 个节点不为此多算一次 JS，
+   低缩放拖拽的重渲染仍然是 0。
+   主题只提供「细节」（边框/阴影/标题栏），surface / radius / density 可被自定义覆盖，
+   所以它们的规则写在主题之后。 */
+.mindmap-workspace {
+  --card-border: #e2e5dc;
+  --card-stripe: 3px;
+  --card-radius: 8px;
+  --card-shadow: 0 1px 2px #34423408, 0 10px 24px #3442340d;
+  --card-shadow-selected: 0 12px 30px #3442341c;
+  --card-ink: #344237;
+  --card-muted: #828c7c;
+  --card-head-pad: 10px 11px 8px;
+  --card-body-pad: 0 11px 8px;
+  --card-title-size: 10px;
+  --card-text-size: 9px;
+  --card-action-size: 7px;
+}
+
+/* 极简：去掉边框与阴影，标题栏透明，只留一条色条。 */
+.mindmap-workspace[data-mm-theme="minimal"] {
+  --card-border: transparent;
+  --card-stripe: 2px;
+  --card-radius: 6px;
+  --card-shadow: 0 1px 2px #3442340a;
+  --card-shadow-selected: 0 0 0 3px var(--tone-ring);
+}
+.mindmap-workspace[data-mm-theme="minimal"] .mindmap-node-header {
+  background: transparent;
+  border-bottom-color: #eef0e9;
+}
+.mindmap-workspace[data-mm-theme="minimal"] .mindmap-node.is-lite { background: #f5f7f1; }
+
+/* 线框：深描边 + 直角 + 无阴影，像工程图。 */
+.mindmap-workspace[data-mm-theme="outline"] {
+  --card-border: #949d8c;
+  --card-radius: 2px;
+  --card-shadow: none;
+  --card-shadow-selected: 0 0 0 0 transparent;
+}
+.mindmap-workspace[data-mm-theme="outline"] .mindmap-node-header {
+  background: #ffffff;
+  border-bottom: 1px solid #dfe3d8;
+}
+.mindmap-workspace[data-mm-theme="outline"] .mindmap-node-index,
+.mindmap-workspace[data-mm-theme="outline"] .mindmap-node-page,
+.mindmap-workspace[data-mm-theme="outline"] .mindmap-collapse { border-radius: 2px; }
+
+/* 淡彩：整卡用节气淡底，大圆角，像彩色便签。 */
+.mindmap-workspace[data-mm-theme="tint"] {
+  --card-radius: 14px;
+  --card-shadow: 0 2px 10px #3442340f;
+  --card-shadow-selected: 0 10px 26px #3442341f;
+}
+.mindmap-workspace[data-mm-theme="tint"] .mindmap-node {
+  background: var(--tone-wash);
+  border-color: transparent;
+}
+.mindmap-workspace[data-mm-theme="tint"] .mindmap-node-header {
+  background: transparent;
+  border-bottom-color: transparent;
+}
+.mindmap-workspace[data-mm-theme="tint"] .mindmap-node-index,
+.mindmap-workspace[data-mm-theme="tint"] .mindmap-node-page { background: #ffffffd0; }
+.mindmap-workspace[data-mm-theme="tint"] .mindmap-node-actions {
+  background: transparent;
+  border-top-color: #00000010;
+}
+
+/* 墨色：深色卡面，长文阅读的夜间选项。 */
+.mindmap-workspace[data-mm-theme="ink"] {
+  --card-border: #3b433b;
+  --card-ink: #e6ebdf;
+  --card-muted: #9aa393;
+  --card-shadow: 0 1px 2px #00000040, 0 10px 24px #00000026;
+  --card-shadow-selected: 0 12px 30px #00000052;
+}
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node { background: #242925; }
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node-header {
+  background: #2c322c;
+  border-bottom-color: #363d36;
+}
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node-index,
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node-page {
+  background: #323a32;
+  border-color: var(--tone-bar);
+  color: var(--tone-bar);
+}
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node-index:hover,
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node-page:hover {
+  background: var(--tone-bar);
+  color: #1a1e1a;
+}
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node-actions {
+  background: #202420;
+  border-top-color: #313831;
+}
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node-actions button { color: var(--card-muted); }
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node-actions button:hover {
+  background: #323a32;
+  color: #e6ebdf;
+}
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-field-text { color: #bcc4b5; }
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-field-label { color: #8a9384; }
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node.is-lite { background: #2c322c; }
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node.is-lite h3 { color: #e6ebdf; }
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-collapse {
+  background: #323a32;
+  border-color: #414a41;
+  color: #a9b2a2;
+}
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-handle {
+  background: #323a32 !important;
+  border-color: var(--tone-bar) !important;
+}
+.mindmap-workspace[data-mm-theme="ink"] .mindmap-node-image {
+  border-color: #3b433b;
+  background: #1c201c;
+}
+
+/* 自定义：卡面 / 圆角 / 密度，写在主题之后以便覆盖预设。 */
+.mindmap-workspace[data-mm-surface="tint"] .mindmap-node {
+  background: var(--tone-wash);
+  border-color: transparent;
+}
+.mindmap-workspace[data-mm-surface="tint"] .mindmap-node-header {
+  background: transparent;
+  border-bottom-color: transparent;
+}
+.mindmap-workspace[data-mm-surface="ink"] .mindmap-node { background: #242925; }
+.mindmap-workspace[data-mm-surface="ink"] .mindmap-node-header {
+  background: #2c322c;
+  border-bottom-color: #363d36;
+}
+.mindmap-workspace[data-mm-surface="ink"] { --card-ink: #e6ebdf; --card-muted: #9aa393; --card-border: #3b433b; }
+
+.mindmap-workspace[data-mm-radius="sharp"] { --card-radius: 2px; }
+.mindmap-workspace[data-mm-radius="soft"] { --card-radius: 8px; }
+.mindmap-workspace[data-mm-radius="round"] { --card-radius: 14px; }
+
+.mindmap-workspace[data-mm-density="compact"] {
+  --card-head-pad: 7px 9px 5px;
+  --card-body-pad: 0 9px 5px;
+  --card-title-size: 9.5px;
+  --card-text-size: 8.5px;
+  --card-action-size: 6.5px;
+}
+.mindmap-workspace[data-mm-density="roomy"] {
+  --card-head-pad: 12px 13px 10px;
+  --card-body-pad: 0 13px 10px;
+  --card-title-size: 10.5px;
+  --card-text-size: 9.5px;
+  --card-action-size: 7.5px;
+}
+
 .mindmap-header {
   display: flex;
   align-items: flex-end;
@@ -145,26 +302,26 @@
   padding: 0;
   overflow: hidden;
   /* 左侧色条是这张卡片的「节气标签」：扫一眼就知道属于哪一簇。 */
-  border: 1px solid #e2e5dc;
-  border-left: 3px solid var(--tone-bar);
-  border-radius: 8px;
+  border: 1px solid var(--card-border);
+  border-left: var(--card-stripe) solid var(--tone-bar);
+  border-radius: var(--card-radius);
   background: #ffffff;
-  box-shadow: 0 1px 2px #34423408, 0 10px 24px #3442340d;
+  box-shadow: var(--card-shadow);
   font-family: Inter, ui-sans-serif, -apple-system, sans-serif;
   transition: border-color .15s, box-shadow .15s;
 }
 .mindmap-node.is-selected {
   border-color: var(--tone-bar);
   border-left-color: var(--tone-bar);
-  box-shadow: 0 0 0 3px var(--tone-ring), 0 12px 30px #3442341c;
+  box-shadow: 0 0 0 3px var(--tone-ring), var(--card-shadow-selected);
 }
 /* 低缩放（zoom < 0.45）：只画标题条。少掉 KaTeX / 图片 / 按钮后，
    上千个节点同时挂载也能保持平移和拖拽流畅。
    颜色保留：缩到 15% 时文字已经不可读，色块本身就是唯一的辨认依据。 */
 .mindmap-node.is-lite {
   padding: 7px 10px;
-  border-radius: 6px;
-  border-left-width: 3px;
+  border-radius: calc(var(--card-radius) - 2px);
+  border-left-width: var(--card-stripe);
   background: var(--tone-wash);
   box-shadow: 0 1px 3px #3442340d;
 }
@@ -180,19 +337,19 @@
 }
 .mindmap-node.is-recall { border-color: var(--tone-bar); }
 .mindmap-node-missing { padding: 14px; color: #9a6b5e; font-size: 9px; }
-.mindmap-node-header { display: flex; align-items: center; gap: 8px; padding: 10px 11px 8px; border-bottom: 1px solid #ffffff; background: var(--tone-wash); }
+.mindmap-node-header { display: flex; align-items: center; gap: 8px; padding: var(--card-head-pad); border-bottom: 1px solid #ffffff; background: var(--tone-wash); }
 .mindmap-node-index { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border: 1px solid var(--tone-bar); border-radius: 4px; color: var(--tone-ink); background: #ffffff; font-family: Georgia, serif; font-size: 10px; line-height: 1; cursor: pointer; }
 /* 点徽标 = 换下一个节气色，hover 给出可点的反馈。 */
 .mindmap-node-index:hover { background: var(--tone-wash); }
 .mindmap-node-index:focus-visible { outline: 2px solid var(--tone-bar); outline-offset: 1px; }
-.mindmap-node-header h3 { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: #344237; font-size: 10px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.mindmap-node-header h3 { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--card-ink); font-size: var(--card-title-size); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 /* 来源页码：点击后左侧 PDF 跳到对应页 */
 .mindmap-node-page { flex: 0 0 auto; padding: 2px 5px; border: 1px solid var(--tone-bar); border-radius: 4px; color: var(--tone-ink); background: #ffffff; font-size: 8px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; cursor: pointer; }
 .mindmap-node-page:hover { background: var(--tone-wash); }
-.mindmap-collapse { display: inline-flex; align-items: center; gap: 2px; padding: 3px 5px; border: 1px solid #e1e6db; border-radius: 4px; color: #6f7a69; background: #ffffffb8; font-size: 8px; cursor: pointer; }
+.mindmap-collapse { display: inline-flex; align-items: center; gap: 2px; padding: 3px 5px; border: 1px solid #e1e6db; border-radius: 4px; color: var(--card-muted); background: #ffffffb8; font-size: 8px; cursor: pointer; }
 .mindmap-collapse:hover { border-color: var(--tone-bar); color: var(--tone-ink); }
 .mindmap-collapse span { font-size: 10px; line-height: 1; }
-.mindmap-node-content { padding: 0 11px 8px; }
+.mindmap-node-content { padding: var(--card-body-pad); }
 .mindmap-node-content > .mindmap-field { margin-top: 7px; }
 .mindmap-node-image { display: block; max-width: 100%; max-height: 110px; margin-top: 5px; border: 1px solid #dde2d6; border-radius: 5px; object-fit: contain; background: #fff; }
 
@@ -222,7 +379,7 @@ button.mindmap-field-label:hover { color: #456c43; }
   display: block;
   margin: 3px 0 0;
   color: #5d6b5a;
-  font-size: 9px;
+  font-size: var(--card-text-size);
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
@@ -274,7 +431,7 @@ button.mindmap-field-label:hover { color: #456c43; }
 .mindmap-rated { display: block; padding: 5px; border-radius: 4px; color: #617b58; background: #eef4e7; font-size: 8px; text-align: center; }
 .mindmap-recall-error { margin: 5px 0 0; color: #9a5042; font-size: 7px; }
 .mindmap-node-actions { display: flex; gap: 2px; padding: 7px 9px; border-top: 1px solid #f0f1ec; background: #fbfbf8; }
-.mindmap-node-actions button { padding: 4px 6px; border: 0; border-radius: 3px; color: #828c7c; background: transparent; font-size: 7px; cursor: pointer; }
+.mindmap-node-actions button { padding: 4px 6px; border: 0; border-radius: 3px; color: var(--card-muted); background: transparent; font-size: var(--card-action-size); cursor: pointer; }
 /* 纯结构节点（Anki 牌组、空卡片）没有可解析内容：按钮保留占位但不可点。 */
 .mindmap-node-actions button:disabled { color: #b8bcb2; cursor: default; }
 .mindmap-node-actions .mindmap-explain-action:disabled { color: #b8bcb2; }
@@ -894,3 +1051,108 @@ button.mindmap-field-label:hover { color: #456c43; }
   pointer-events: none;
 }
 .mindmap-state-actions { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+
+/* ---------- 卡片样式面板 ---------- */
+
+.mindmap-style-panel {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  /* 高于画布坞（23）、切换提示（25），避免被浮层压住点击不到。 */
+  z-index: 26;
+  width: 322px;
+  max-width: calc(100% - 28px);
+  max-height: calc(100% - 28px);
+  padding: 15px 15px 11px;
+  overflow-y: auto;
+  border: 1px solid #dce2d7;
+  border-radius: 10px;
+  background: #fcfdf9;
+  box-shadow: 0 14px 34px #3442341a;
+  font-family: Inter, ui-sans-serif, -apple-system, sans-serif;
+}
+/* 嵌入分栏：浮层分层是「画布坞 12px → 操作 54px → 提示 100px → 回忆 146px」，
+   面板必须排在提示条之下，否则会盖住「整理 / 清空」那排按钮。 */
+.mindmap-workspace.is-embedded .mindmap-style-panel {
+  top: 84px;
+  right: 8px;
+  width: 296px;
+  max-height: calc(100% - 92px);
+}
+
+.mindmap-style-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.mindmap-style-head h2 { margin: 0; color: #344237; font-size: 11px; font-weight: 600; }
+.mindmap-style-head p { margin: 2px 0 0; color: #9aa392; font-size: 8.5px; }
+.mindmap-style-head button {
+  width: 22px; height: 22px; flex: 0 0 auto;
+  border: 1px solid #e3e7dc; border-radius: 5px;
+  background: #ffffff; color: #8b9486;
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.mindmap-style-head button:hover { background: #f2f5ee; }
+
+.mindmap-style-themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 12px 0 2px; }
+.mindmap-style-theme {
+  display: grid; gap: 2px;
+  padding: 6px;
+  border: 1px solid #e3e7dc; border-radius: 7px;
+  background: #ffffff; text-align: left; cursor: pointer;
+}
+.mindmap-style-theme strong { color: #3f4a3a; font-size: 9.5px; font-weight: 600; }
+.mindmap-style-theme small { color: #9aa392; font-size: 7.5px; line-height: 1.3; }
+.mindmap-style-theme:hover { border-color: #cdd7c4; }
+.mindmap-style-theme.is-active { border-color: #6b8360; box-shadow: 0 0 0 2px #6b83601f; }
+
+/* 主题缩略图：用纯 CSS 画出卡面、色条与标题栏，切换前就能看出差别。 */
+.mindmap-style-swatch {
+  position: relative; display: block;
+  height: 32px; margin-bottom: 3px;
+  overflow: hidden;
+  border: 1px solid #e2e5dc;
+  border-left: 3px solid #a9be7b;
+  border-radius: 5px;
+  background: #ffffff;
+}
+.mindmap-style-swatch i { position: absolute; inset: 0 0 auto 0; height: 11px; background: #f4f7ee; }
+.mindmap-style-swatch b { position: absolute; left: 8px; top: 16px; width: 60%; height: 4px; border-radius: 2px; background: #d9ded3; }
+.mindmap-style-swatch[data-theme="minimal"] { border-color: transparent; border-left-color: #a9be7b; }
+.mindmap-style-swatch[data-theme="minimal"] i { background: transparent; border-bottom: 1px solid #eef0e9; }
+.mindmap-style-swatch[data-theme="outline"] { border: 1px solid #949d8c; border-left: 3px solid #cb523e; border-radius: 2px; }
+.mindmap-style-swatch[data-theme="outline"] i { background: #ffffff; border-bottom: 1px solid #dfe3d8; }
+.mindmap-style-swatch[data-theme="tint"] { background: #f3eaeb; border-color: transparent; border-left: 3px solid #a35f65; border-radius: 10px; }
+.mindmap-style-swatch[data-theme="tint"] i { background: transparent; }
+.mindmap-style-swatch[data-theme="ink"] { background: #242925; border-color: #3b433b; border-left-color: #88abda; }
+.mindmap-style-swatch[data-theme="ink"] i { background: #2c322c; }
+.mindmap-style-swatch[data-theme="ink"] b { background: #4a544a; }
+
+.mindmap-style-group { display: grid; gap: 5px; margin-top: 12px; }
+.mindmap-style-label { color: #9aa392; font-size: 8px; letter-spacing: .6px; text-transform: uppercase; }
+.mindmap-style-options { display: flex; flex-wrap: wrap; gap: 4px; }
+.mindmap-style-options button {
+  flex: 1; min-width: 52px;
+  padding: 5px 4px;
+  border: 1px solid #e2e6db; border-radius: 5px;
+  background: #ffffff; color: #6b7565;
+  font-size: 9px; white-space: nowrap; cursor: pointer;
+}
+.mindmap-style-options button:hover { background: #f2f6ec; }
+.mindmap-style-options button.is-active {
+  border-color: #5f7a55;
+  background: #eef4e7;
+  color: #38512f;
+  font-weight: 600;
+}
+
+.mindmap-style-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 14px; padding-top: 10px;
+  border-top: 1px solid #eef0e9;
+}
+.mindmap-style-foot button {
+  padding: 5px 10px;
+  border: 1px solid #dbe0d4; border-radius: 5px;
+  background: #ffffff; color: #5c6a55;
+  font-size: 9px; cursor: pointer;
+}
+.mindmap-style-foot button:hover { background: #f2f5ee; }
+.mindmap-style-foot span { color: #a3ab9d; font-size: 8px; }

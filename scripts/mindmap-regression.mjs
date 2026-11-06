@@ -955,7 +955,30 @@ if (process.env.STEP === 'style') {
   if (ink.bg !== 'rgb(36, 41, 37)') problems.push(`墨色卡面没有生效：${ink.bg}`)
   if (!ink.stored || !ink.stored.includes('ink')) problems.push('样式没有写入本地偏好')
 
-  // 2) 单项自定义：大圆角 + 宽松密度
+  // 2) 二十四节气色板：直接点色块换这张卡的颜色，不必再靠 Q 徽标循环
+  const swatchCount = await page.locator('[data-testid^="style-swatch-"]').count()
+  if (swatchCount !== 24) problems.push(`色板不是 24 色：${swatchCount}`)
+  const readTone = () => page.evaluate(() => {
+    const node = document.querySelector('.mindmap-node')
+    return {
+      bar: getComputedStyle(node).borderLeftColor,
+      stored: localStorage.getItem('pdfnote.mindmap.tone'),
+    }
+  })
+  const toneBefore = await readTone()
+  await page.locator('[data-testid="style-swatch-5"]').click()
+  await page.waitForTimeout(350)
+  const tonePicked = await readTone()
+  if (tonePicked.bar === toneBefore.bar) problems.push('点色块没有改变卡片颜色')
+  if (!tonePicked.stored || !tonePicked.stored.includes('"c1"')) {
+    problems.push(`手动配色没有落盘：${tonePicked.stored}`)
+  }
+  await page.locator('[data-testid="style-tone-auto"]').click()
+  await page.waitForTimeout(350)
+  const toneAuto = await readTone()
+  if (toneAuto.bar === tonePicked.bar) problems.push('点「跟随子树」没有恢复自动配色')
+
+  // 3) 单项自定义：大圆角 + 宽松密度
   await page.locator('[data-testid="style-radius-round"]').click()
   await page.waitForTimeout(250)
   await page.locator('[data-testid="style-density-roomy"]').click()
@@ -964,14 +987,14 @@ if (process.env.STEP === 'style') {
   if (custom.radius !== '14px') problems.push(`圆角没有变成 14px：${custom.radius}`)
   if (custom.titleSize !== '10.5px') problems.push(`密度没有变成宽松：字号 ${custom.titleSize}`)
 
-  // 3) 换主题会清掉自定义覆盖
+  // 4) 换主题会清掉自定义覆盖
   await page.locator('[data-testid="style-theme-outline"]').click()
   await page.waitForTimeout(350)
   const outline = await readCard()
   if (outline.radius !== '2px') problems.push(`线框主题圆角应为 2px：${outline.radius}`)
   if (outline.titleSize !== '10px') problems.push(`换主题没有清掉密度覆盖：${outline.titleSize}`)
 
-  // 4) 重载后仍然生效
+  // 5) 重载后仍然生效
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('.app-shell')
   await page.locator('.document-card').first().click()
@@ -1035,7 +1058,30 @@ if (process.env.STEP === 'style') {
   if (ink.bg !== 'rgb(36, 41, 37)') problems.push(`墨色卡面没有生效：${ink.bg}`)
   if (!ink.stored || !ink.stored.includes('ink')) problems.push('样式没有写入本地偏好')
 
-  // 2) 单项自定义：大圆角 + 宽松密度
+  // 2) 二十四节气色板：直接点色块换这张卡的颜色，不必再靠 Q 徽标循环
+  const swatchCount = await page.locator('[data-testid^="style-swatch-"]').count()
+  if (swatchCount !== 24) problems.push(`色板不是 24 色：${swatchCount}`)
+  const readTone = () => page.evaluate(() => {
+    const node = document.querySelector('.mindmap-node')
+    return {
+      bar: getComputedStyle(node).borderLeftColor,
+      stored: localStorage.getItem('pdfnote.mindmap.tone'),
+    }
+  })
+  const toneBefore = await readTone()
+  await page.locator('[data-testid="style-swatch-5"]').click()
+  await page.waitForTimeout(350)
+  const tonePicked = await readTone()
+  if (tonePicked.bar === toneBefore.bar) problems.push('点色块没有改变卡片颜色')
+  if (!tonePicked.stored || !tonePicked.stored.includes('"c1"')) {
+    problems.push(`手动配色没有落盘：${tonePicked.stored}`)
+  }
+  await page.locator('[data-testid="style-tone-auto"]').click()
+  await page.waitForTimeout(350)
+  const toneAuto = await readTone()
+  if (toneAuto.bar === tonePicked.bar) problems.push('点「跟随子树」没有恢复自动配色')
+
+  // 3) 单项自定义：大圆角 + 宽松密度
   await page.locator('[data-testid="style-radius-round"]').click()
   await page.waitForTimeout(250)
   await page.locator('[data-testid="style-density-roomy"]').click()
@@ -1044,14 +1090,14 @@ if (process.env.STEP === 'style') {
   if (custom.radius !== '14px') problems.push(`圆角没有变成 14px：${custom.radius}`)
   if (custom.titleSize !== '10.5px') problems.push(`密度没有变成宽松：字号 ${custom.titleSize}`)
 
-  // 3) 换主题会清掉自定义覆盖
+  // 4) 换主题会清掉自定义覆盖
   await page.locator('[data-testid="style-theme-outline"]').click()
   await page.waitForTimeout(350)
   const outline = await readCard()
   if (outline.radius !== '2px') problems.push(`线框主题圆角应为 2px：${outline.radius}`)
   if (outline.titleSize !== '10px') problems.push(`换主题没有清掉密度覆盖：${outline.titleSize}`)
 
-  // 4) 重载后仍然生效
+  // 5) 重载后仍然生效
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('.app-shell')
   await page.locator('.document-card').first().click()

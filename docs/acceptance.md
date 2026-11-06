@@ -18,6 +18,7 @@
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
+| 卡片配色面板（0.30.0） | `STEP=style CARD_COUNT=3` | 面板顶部 24 色块；点色块卡片变色并落盘；「跟随子树」恢复自动分配 |
 | 卡片样式主题（0.29.0） | `STEP=style CARD_COUNT=3` | 右键 → 样式面板；墨色卡面 `rgb(36,41,37)`、自定义 14px/宽松、换主题清覆盖、重载保留 |
 | AI 解析覆盖所有卡片（0.28.0） | `NO_QUESTION=1 STEP=explain CARD_COUNT=3` | 3 张卡都有按钮；只有摘录的卡可用并写回笔记（1115 字）；无 question 的提示文案指向摘录；三者全空的卡禁用 |
 | 卡片配色（0.27.0） | `STEP=tone ARRANGE_FOREST=1 CARD_COUNT=26` | 26 张独立卡片 17 种色调、无缺失；点徽标换色并写入 localStorage；低倍 lite 保留 17 种色 |

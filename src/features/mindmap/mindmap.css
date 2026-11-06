@@ -1125,6 +1125,21 @@ button.mindmap-field-label:hover { color: #456c43; }
 .mindmap-style-swatch[data-theme="ink"] i { background: #2c322c; }
 .mindmap-style-swatch[data-theme="ink"] b { background: #4a544a; }
 
+/* 二十四节气色板：点色块直接换这张卡的颜色，不必再靠 Q 徽标一格一格循环。 */
+.mindmap-style-note { margin: 0 0 6px; color: #7c8676; font-size: 8.5px; line-height: 1.4; }
+.mindmap-style-tones { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+.mindmap-style-tone {
+  height: 19px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, .10);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.mindmap-style-tone:hover { transform: scale(1.08); }
+.mindmap-style-tone.is-active {
+  box-shadow: 0 0 0 2px #fcfdf9, 0 0 0 4px #6b8360;
+}
+
 .mindmap-style-group { display: grid; gap: 5px; margin-top: 12px; }
 .mindmap-style-label { color: #9aa392; font-size: 8px; letter-spacing: .6px; text-transform: uppercase; }
 .mindmap-style-options { display: flex; flex-wrap: wrap; gap: 4px; }

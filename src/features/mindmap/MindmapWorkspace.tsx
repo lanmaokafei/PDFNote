@@ -94,7 +94,7 @@ import {
   type MindmapSortMode,
   type Point,
 } from './layout'
-import { saveToneOverride, toneIndexMap, toneOverrides } from './tone'
+import { clearToneOverride, saveToneOverride, toneIndexMap, toneOverrides } from './tone'
 import { MindmapStylePanel } from './MindmapStylePanel'
 import {
   type MindmapCardStyle,
@@ -247,6 +247,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   /** 卡片样式（卡面/边框/圆角/密度），按画布保存在本地，不写数据库。 */
   const [cardStyle, setCardStyle] = useState<MindmapCardStyle>(() => readCardStyle(readCanvasId(documentId)))
   const [styleOpen, setStyleOpen] = useState(false)
+  /** 面板是从哪张卡打开的：配色只作用于这张卡，样式仍是整张画布。 */
+  const [styleTarget, setStyleTarget] = useState<string | null>(null)
   /**
    * 大纲一次只挂载前 OUTLINE_PAGE 行。1483 行 × 两个可展开字段 + KaTeX 会直接把
    * 切换动作卡住几秒；其余行按需追加，成本随用户实际翻到的位置增长。
@@ -1346,7 +1348,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       ] },
       { id: 'appearance', title: '外观', items: [
         // 样式是画布级的（一本书一套风格），不属于单张卡片，所以只留一个入口。
-        { id: 'style', label: '卡片样式…', icon: Palette, hint: currentTheme.name, onSelect: () => { setEditor(null); setStyleOpen(true) } },
+        { id: 'style', label: '卡片样式…', icon: Palette, hint: currentTheme.name, onSelect: () => { setEditor(null); setStyleTarget(cardId); setStyleOpen(true) } },
       ] },
       { id: 'danger', items: [
         { id: 'remove', label: '从脑图移除', icon: LayoutGrid, disabled: busy, onSelect: () => setConfirmation({ kind: 'remove', id: cardId }) },
@@ -1750,6 +1752,15 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
             style={cardStyle}
             onChange={updateCardStyle}
             onClose={() => setStyleOpen(false)}
+            cardId={styleTarget}
+            toneIndex={styleTarget ? (toneByCard.get(styleTarget) ?? 0) : 0}
+            toneIsManual={Boolean(styleTarget && tonePrefs[styleTarget] !== undefined)}
+            onPickTone={(index) => {
+              if (!styleTarget) return
+              setTonePrefs(index === null
+                ? clearToneOverride(styleTarget)
+                : saveToneOverride(styleTarget, index))
+            }}
           />
         )}
         {confirmation && (

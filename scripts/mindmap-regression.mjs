@@ -734,6 +734,129 @@ if (process.env.STEP === 'doc-canvas') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=textlayer：PDF 文字层必须按 run 渲染 —— 字号来自 PDF transform，
+// 基线来自文字项 y；旧的「行高 × 0.86 + 整行拉伸」会让选区压不住字形。
+if (process.env.STEP === 'textlayer') {
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-canvas', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+  await page.getByRole('button', { name: '文字', exact: true }).click()
+  await page.waitForSelector('.pdf-text-run', { timeout: 60000 })
+  await page.waitForTimeout(700)
+
+  const info = await page.evaluate(() => {
+    const layer = document.querySelector('.pdf-text-layer')
+    const runs = [...document.querySelectorAll('.pdf-text-run')]
+    const lines = [...document.querySelectorAll('.pdf-text-line')]
+    return {
+      layerHeight: layer ? layer.getBoundingClientRect().height : 0,
+      runs: runs.length,
+      lines: lines.length,
+      linesWithoutRuns: lines.filter((line) => !line.querySelector('.pdf-text-run')).length,
+      fontSizes: runs.slice(0, 4).map((run) => parseFloat(getComputedStyle(run).fontSize)),
+      firstRunText: runs[0]?.textContent ?? '',
+    }
+  })
+
+  // 测试 PDF 的正文是 12pt / 页高 792pt，渲染字号应精确等于这个比例（±2%）。
+  const expectedRatio = 12 / 792
+  const ratio = info.layerHeight > 0 ? info.fontSizes[0] / info.layerHeight : 0
+  if (Math.abs(ratio - expectedRatio) > expectedRatio * 0.02) {
+    problems.push(`文字层字号比例不符：${ratio.toFixed(5)}，期望 ${expectedRatio.toFixed(5)}`)
+  }
+  if (info.runs === 0 || info.linesWithoutRuns > 0) {
+    problems.push(`文字层没有按 run 渲染：runs=${info.runs} 无 run 行=${info.linesWithoutRuns}`)
+  }
+  if (!info.firstRunText.includes('PDFNote')) {
+    problems.push(`第一个 run 文本异常：${info.firstRunText}`)
+  }
+
+  const selection = await page.evaluate(() => {
+    const run = document.querySelector('.pdf-text-run')
+    const node = run?.querySelector('span')?.firstChild
+    if (!node) return null
+    const range = document.createRange()
+    range.setStart(node, 0)
+    range.setEnd(node, Math.min(4, (node.textContent ?? '').length))
+    const current = window.getSelection()
+    current?.removeAllRanges()
+    current?.addRange(range)
+    const rect = range.getBoundingClientRect()
+    return { text: current?.toString() ?? '', height: rect.height, width: rect.width }
+  })
+  if (!selection || selection.text !== 'PDFN') {
+    problems.push(`文字层选区异常：${JSON.stringify(selection)}`)
+  } else if (selection.height < info.fontSizes[0] * 0.75 || selection.height > info.fontSizes[0] * 1.7) {
+    // 选区框是行盒高度（略大于字号），只要覆盖字形即可，不要求等于字号。
+    problems.push(`选区高度 ${selection.height.toFixed(1)} 与字号 ${info.fontSizes[0].toFixed(1)} 不匹配`)
+  }
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'textlayer', ratio, ...info, selection }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=textlayer：PDF 文字层必须按 run 渲染 —— 字号来自 PDF transform，
+// 基线来自文字项 y；旧的「行高 × 0.86 + 整行拉伸」会让选区压不住字形。
+if (process.env.STEP === 'textlayer') {
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-canvas', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+  await page.getByRole('button', { name: '文字', exact: true }).click()
+  await page.waitForSelector('.pdf-text-run', { timeout: 60000 })
+  await page.waitForTimeout(700)
+
+  const info = await page.evaluate(() => {
+    const layer = document.querySelector('.pdf-text-layer')
+    const runs = [...document.querySelectorAll('.pdf-text-run')]
+    const lines = [...document.querySelectorAll('.pdf-text-line')]
+    return {
+      layerHeight: layer ? layer.getBoundingClientRect().height : 0,
+      runs: runs.length,
+      lines: lines.length,
+      linesWithoutRuns: lines.filter((line) => !line.querySelector('.pdf-text-run')).length,
+      fontSizes: runs.slice(0, 4).map((run) => parseFloat(getComputedStyle(run).fontSize)),
+      firstRunText: runs[0]?.textContent ?? '',
+    }
+  })
+
+  // 测试 PDF 的正文是 12pt / 页高 792pt，渲染字号应精确等于这个比例（±2%）。
+  const expectedRatio = 12 / 792
+  const ratio = info.layerHeight > 0 ? info.fontSizes[0] / info.layerHeight : 0
+  if (Math.abs(ratio - expectedRatio) > expectedRatio * 0.02) {
+    problems.push(`文字层字号比例不符：${ratio.toFixed(5)}，期望 ${expectedRatio.toFixed(5)}`)
+  }
+  if (info.runs === 0 || info.linesWithoutRuns > 0) {
+    problems.push(`文字层没有按 run 渲染：runs=${info.runs} 无 run 行=${info.linesWithoutRuns}`)
+  }
+  if (!info.firstRunText.includes('PDFNote')) {
+    problems.push(`第一个 run 文本异常：${info.firstRunText}`)
+  }
+
+  const selection = await page.evaluate(() => {
+    const run = document.querySelector('.pdf-text-run')
+    const node = run?.querySelector('span')?.firstChild
+    if (!node) return null
+    const range = document.createRange()
+    range.setStart(node, 0)
+    range.setEnd(node, Math.min(4, (node.textContent ?? '').length))
+    const current = window.getSelection()
+    current?.removeAllRanges()
+    current?.addRange(range)
+    const rect = range.getBoundingClientRect()
+    return { text: current?.toString() ?? '', height: rect.height, width: rect.width }
+  })
+  if (!selection || selection.text !== 'PDFN') {
+    problems.push(`文字层选区异常：${JSON.stringify(selection)}`)
+  } else if (Math.abs(selection.height - info.fontSizes[0]) > Math.max(2, info.fontSizes[0] * 0.2)) {
+    problems.push(`选区高度 ${selection.height.toFixed(1)} 与字号 ${info.fontSizes[0].toFixed(1)} 不匹配`)
+  }
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'textlayer', ratio, ...info, selection }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // 打开资料库里的文档 → 左 PDF 右脑图
 const card = page.locator('.document-card').first()
 if (await card.count()) {

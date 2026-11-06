@@ -29,6 +29,22 @@ const desktopOnly = () => {
 }
 
 /** One Vision line with a normalized (0..1, top-left origin) bounding box. */
+/**
+ * PDF 文字层里的一个文本 run（PDF.js 的 text item）。
+ * 有真实文字层的页面按 run 定位，字号、基线、字宽都直接来自 PDF，
+ * 不依赖「行高 × 系数」估算，因此任何字号都能对得上。
+ */
+export interface OcrRun {
+  text: string
+  /** 归一化页面坐标（左上原点）。 */
+  x: number
+  width: number
+  /** 基线到页顶的距离（归一化）。 */
+  baselineTop: number
+  /** 字号（归一化到页高）。 */
+  fontSize: number
+}
+
 export interface OcrLine {
   text: string
   x: number
@@ -36,6 +52,8 @@ export interface OcrLine {
   width: number
   height: number
   confidence: number
+  /** PDF 文字层才有的精确 run；OCR 行没有，退回按行估算。 */
+  runs?: OcrRun[]
 }
 
 export interface PageOcrRecord {

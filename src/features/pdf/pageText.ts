@@ -5,6 +5,7 @@ import {
   recognizePageLines,
   savePageOcr,
   type OcrLine,
+  type OcrRun,
 } from '../../services/pdfnote'
 import type { PageViewBox } from './geometry'
 
@@ -159,64 +160,88 @@ export async function ensurePageLines(
  * from exact PDF glyph positions instead.
  */
 export function linesFromTextContent(content: TextContent, view: PageViewBox): OcrLine[] {
-  type Item = { text: string; x: number; y: number; width: number; height: number }
-  const items: Item[] = []
+  type Run = OcrRun & { right: number }
+  const runs: Run[] = []
   for (const item of content.items) {
     if (!('str' in item) || !item.str.trim()) continue
-    const tx = item.transform[4] ?? 0
-    const ty = item.transform[5] ?? 0
+    const [, , c, d, e, f] = item.transform
+    // PDF 的真实字号在 transform 的 c/d 里；item.height 在部分文档里会被放大/缩小，
+    // 不能当作字号用，否则大字号的书整层都会偏。
+    const fontSize = Math.max(Math.hypot(c, d), 1)
     const width = Math.max(Math.abs(item.width), 1)
-    const height = Math.max(
-      Math.abs(item.height),
-      Math.hypot(item.transform[2] ?? 0, item.transform[3] ?? 0),
-      1,
-    )
-    const bottomPdf = ty - view.y
-    const topPdf = bottomPdf + height
-    items.push({
+    runs.push({
       text: item.str,
-      x: (tx - view.x) / view.width,
-      y: 1 - topPdf / view.height,
+      x: (e - view.x) / view.width,
       width: width / view.width,
-      height: height / view.height,
+      baselineTop: 1 - (f - view.y) / view.height,
+      fontSize: fontSize / view.height,
+      right: (e - view.x + width) / view.width,
     })
   }
-  if (items.length === 0) return []
+  if (runs.length === 0) return []
 
-  items.sort((a, b) => a.y - b.y || a.x - b.x)
-  const rows: Item[][] = []
-  for (const item of items) {
+  runs.sort((a, b) => a.baselineTop - b.baselineTop || a.x - b.x)
+  const rows: Run[][] = []
+  for (const run of runs) {
     const row = rows[rows.length - 1]
-    const tolerance = row ? Math.max(row[0].height, item.height) * 0.6 : 0
-    if (row && Math.abs(row[0].y - item.y) <= tolerance) row.push(item)
-    else rows.push([item])
+    // 用基线而不是包围盒顶部聚类：同一行的不同字号（内联加粗、上标）基线一致。
+    const tolerance = row ? Math.max(...row.map((entry) => entry.fontSize)) * 0.6 : 0
+    if (row && Math.abs(row[0].baselineTop - run.baselineTop) <= tolerance) row.push(run)
+    else rows.push([run])
   }
 
   return normalizeLines(rows.map((row) => {
     row.sort((a, b) => a.x - b.x)
     let text = ''
     let previousRight = 0
-    for (const item of row) {
+    for (const run of row) {
       // CJK glyph spacing must not become a space; only insert one between
       // latin words when PDF.js reports a real gap.
-      const latinBoundary = /[A-Za-z0-9]/.test(text.slice(-1)) && /^[A-Za-z0-9]/.test(item.text)
-      if (text && latinBoundary && item.x - previousRight > item.height * 0.35) text += ' '
-      text += item.text
-      previousRight = item.x + item.width
+      const latinBoundary = /[A-Za-z0-9]/.test(text.slice(-1)) && /^[A-Za-z0-9]/.test(run.text)
+      if (text && latinBoundary && run.x - previousRight > run.fontSize * 0.35) text += ' '
+      text += run.text
+      previousRight = run.x + run.width
     }
-    const x = Math.min(...row.map((item) => item.x))
-    const y = Math.min(...row.map((item) => item.y))
-    const right = Math.max(...row.map((item) => item.x + item.width))
-    const bottom = Math.max(...row.map((item) => item.y + item.height))
+    const fontSize = Math.max(...row.map((run) => run.fontSize))
+    const baselineTop = row.reduce(
+      (best, run) => (run.fontSize > best.fontSize ? run : best),
+      row[0],
+    ).baselineTop
+    const x = Math.min(...row.map((run) => run.x))
+    const right = Math.max(...row.map((run) => run.right))
     return {
       text,
       x,
-      y,
+      // 顶部按「基线 − 0.8 倍字号」折算成包围盒，供不认 runs 的旧逻辑使用。
+      y: baselineTop - fontSize * 0.8,
       width: right - x,
-      height: bottom - y,
+      height: fontSize,
       confidence: 1,
+      runs: row.map(({ right: _right, ...run }) => run),
     }
   })).filter((line) => line.text.trim().length > 0)
+}
+
+/**
+ * 一页的「文字覆盖面积」：把每行包围盒面积加起来（不重叠时近似）。
+ * 正常正文页约 0.2–0.5；只有页码/图注的页接近 0。
+ */
+export function textLayerCoverage(lines: OcrLine[]): number {
+  return lines.reduce(
+    (total, line) => total + Math.min(1, Math.max(0, line.width)) * Math.min(1, Math.max(0, line.height)),
+    0,
+  )
+}
+
+/**
+ * 文字层太稀疏时改用整页 OCR：
+ * 只有页码、或扫描页只带一行隐藏文字的文档，纯 PDF 文字层会让整页无法选择。
+ */
+export function isSparseTextLayer(lines: OcrLine[]): boolean {
+  if (!lines.length) return true
+  const chars = lines.reduce((total, line) => total + line.text.replace(/\s/g, '').length, 0)
+  if (chars < 40) return true
+  return textLayerCoverage(lines) < 0.04
 }
 
 /** Build an excerpt from cached lines instead of running OCR for every drag. */

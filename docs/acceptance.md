@@ -18,6 +18,7 @@
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
+| 文字层几何（0.26.0） | `STEP=textlayer CARD_COUNT=3` | 字号比例 = 12/792（±2%）、全部行按 run 渲染、选区覆盖字形；真实《弱传播》第 7 页逐行重合 |
 | 每本书自带画布（0.25.0） | `EMPTY_DOC_CANVAS=1 STEP=doc-canvas` | 无专属画布时补建并以书名命名、自动选中、写入偏好，重开文档复用同一张 |
 | 新卡落点（0.24.0） | `STEP=insert-center CARD_COUNT=3 node scripts/mindmap-regression.mjs` | 平移后新建两张卡：第一张 = 视口中心 − 127/95（±3px），第二张右移 36px；无固定坐标 |
 | 低缩放拖拽（0.23.0） | `STEP=zoom-drag DENSE=1 CARD_COUNT=1483 node scripts/mindmap-regression.mjs` | 338 节点同屏，重渲染 0 次（原 7,887）、最长帧 47ms（原 247ms）、长任务 0（原 6）、DOM 1,310（原 26,709） |

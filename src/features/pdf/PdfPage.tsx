@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { PDFPageProxy, RenderTask } from 'pdfjs-dist'
+import { OPS, type PDFPageProxy, type RenderTask } from 'pdfjs-dist'
 import type { Annotation, AnnotationGeometry, NormalizedBBox, PageInk, PageNote } from '../../domain/card'
 import type { OcrLine } from '../../services/pdfnote'
 import {
@@ -19,6 +19,7 @@ import {
   ensurePageLines,
   extractTextFromLines,
   getCachedLines,
+  isSparseTextLayer,
   linesFromTextContent,
 } from './pageText'
 import {
@@ -119,6 +120,22 @@ interface PdfPageProps {
   onNoteSave: (id: string, content: string) => void
   onNoteToggle: (id: string, collapsed: boolean) => void
   onNoteDelete: (id: string) => void
+}
+
+/**
+ * 扫描页通常整页是一张大图；只有页码/图注的矢量页没有。
+ * 「文字层很稀疏」时用它区分：有整页图才值得跑 Vision，否则保留精确的 PDF 文字层。
+ */
+async function pageHasImages(page: PDFPageProxy): Promise<boolean> {
+  try {
+    const operators = await page.getOperatorList()
+    return operators.fnArray.some((fn) =>
+      fn === OPS.paintImageXObject
+      || fn === OPS.paintInlineImageXObject
+      || fn === OPS.paintImageMaskXObject)
+  } catch {
+    return false
+  }
 }
 
 export function PdfPage({
@@ -276,9 +293,12 @@ export function PdfPage({
         content = null
       }
       if (!active) return
+      let fromPdf: ReturnType<typeof linesFromTextContent> = []
       if (content) {
-        const fromPdf = linesFromTextContent(content, view)
-        if (fromPdf.length > 0) {
+        fromPdf = linesFromTextContent(content, view)
+        // 有些扫描件只带一行隐藏文字（或只有页码），按 PDF 文字层铺出来会让整页无法选择；
+        // 但纯矢量页（封面、扉页）文字少是正常的，不能因此跑 OCR 覆盖精确坐标。
+        if (fromPdf.length > 0 && !(isSparseTextLayer(fromPdf) && await pageHasImages(page))) {
           cachePageLines(documentId, pageNumber, fromPdf)
           setLines(fromPdf)
           setTextStatus('ready')
@@ -287,7 +307,14 @@ export function PdfPage({
       }
       const image = renderPageImage()
       if (!image) {
-        if (active) setTextStatus('error')
+        // 拿不到整页图像时退回 PDF 文字层，哪怕它很稀疏，总比没有强。
+        if (active && fromPdf.length > 0) {
+          cachePageLines(documentId, pageNumber, fromPdf)
+          setLines(fromPdf)
+          setTextStatus('ready')
+        } else if (active) {
+          setTextStatus('error')
+        }
         return
       }
       if (active) {
@@ -297,9 +324,21 @@ export function PdfPage({
       try {
         const recognized = await ensurePageLines(documentId, pageNumber, image)
         if (!active) return
-        setLines(recognized)
-        setTextStatus(recognized.length > 0 ? 'ready' : 'error')
-        if (recognized.length === 0) setTextError('此页未识别到文字')
+        if (recognized.length > 0) {
+          setLines(recognized)
+          setTextStatus('ready')
+          return
+        }
+        // OCR 没识别出来时仍退回 PDF 文字层，不要直接报错。
+        if (fromPdf.length > 0) {
+          cachePageLines(documentId, pageNumber, fromPdf)
+          setLines(fromPdf)
+          setTextStatus('ready')
+          return
+        }
+        setLines([])
+        setTextStatus('error')
+        setTextError('此页未识别到文字')
       } catch (reason) {
         if (!active) return
         setTextStatus('error')

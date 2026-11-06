@@ -1061,6 +1061,27 @@
   vertical-align: top;
   transform-origin: left top;
 }
+
+/* PDF 文字层按 run 渲染：多个 run 共用一条基线，横向按各自字宽拉伸。 */
+.pdf-text-line > .pdf-text-run {
+  display: inline-block;
+  white-space: pre;
+  line-height: 1;
+  color: transparent;
+  vertical-align: baseline;
+}
+.pdf-text-run > span {
+  display: inline-block;
+  white-space: pre;
+  transform-origin: left top;
+}
+.pdf-text-layer.is-active ::selection {
+  /* 按 run 渲染时选区落在 .pdf-text-run 的内层 span 上，用通配选择器统一处理。 */
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: transparent;
+  background: rgba(86, 156, 204, .32);
+}
 .pdf-text-layer.is-active .pdf-text-line::selection,
 .pdf-text-layer.is-active .pdf-text-line > span::selection {
   /* 文字必须保持透明：这里的 DOM 字形经过 scaleX 拉伸，

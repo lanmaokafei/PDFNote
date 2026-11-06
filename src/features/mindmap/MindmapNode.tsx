@@ -54,6 +54,10 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
 
   // 子节点数由工作区预算好：节点内部不再扫全表（否则 1000+ 卡时是 O(n²)）。
   const childCount = context.childCounts.get(card.id) ?? 0
+  // 与后端 build_explain_prompt 同一判定顺序：问题 → 摘录 → 笔记，任一非空即可解析。
+  const hasContent = Boolean(
+    card.question.trim() || card.excerpt.trim() || card.user_note.trim(),
+  )
 
   // 摘录能排版成公式时不再显示选区截图：两者内容重复，图片还会把公式挤出卡片。
   const excerptHasMath = hasMathContent(card.excerpt)
@@ -170,15 +174,22 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
       )}
 
       <footer className="mindmap-node-actions">
-        {card.question.trim() && (
-          <button
-            className="nodrag mindmap-explain-action"
-            type="button"
-            disabled={context.busy}
-            title="让 AI 解析这个问题，结果写入卡片笔记"
-            onClick={() => context.onExplain(card.id)}
-          >AI 解析</button>
-        )}
+        {/**
+         * AI 解析对所有有内容的卡片开放：PDF 划重点建的卡没有 question、只有摘录，
+         * 以前这里用 `card.question.trim() &&` 把它整条入口滤掉了。
+         * 只有纯结构节点（Anki 牌组、空卡片）三者皆空时才禁用。
+         */}
+        <button
+          className="nodrag mindmap-explain-action"
+          type="button"
+          disabled={context.busy || !hasContent}
+          title={hasContent
+            ? (card.question.trim()
+              ? '让 AI 解析这个问题，结果写入卡片笔记'
+              : '让 AI 解析这段摘录，结果写入卡片笔记')
+            : '这张卡片还没有内容，先填写问题或摘录'}
+          onClick={() => context.onExplain(card.id)}
+        >AI 解析</button>
         <button className="nodrag" type="button" disabled={context.busy} onClick={() => context.onEdit(card.id)}>编辑</button>
         <button className="nodrag" type="button" disabled={context.busy} onClick={() => context.onRemove(card.id)}>从脑图移除</button>
         <button className="mindmap-delete-action nodrag" type="button" disabled={context.busy} onClick={() => context.onDelete(card.id)}>彻底删除</button>

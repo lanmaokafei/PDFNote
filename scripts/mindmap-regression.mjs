@@ -48,7 +48,11 @@ const THUMB = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
 const cards = Array.from({ length: CARD_COUNT }, (_, index) => ({
   ...baseCard,
   id: `c${index + 1}`,
-  question: `概念卡片 ${index + 1}：心肌梗死与再灌注策略`,
+  // NO_QUESTION=1 模拟 PDF 划重点建的卡（有摘录、没有 question）；
+  // 同时让第 3 张三者全空，用来验证「纯结构节点禁用 AI」这一支。
+  question: process.env.NO_QUESTION === '1' && (index === 0 || index === 2)
+    ? ''
+    : `概念卡片 ${index + 1}：心肌梗死与再灌注策略`,
   excerpt: index === 0
     ? 'H = -\\sum_{i=1}^{n} P(x_i) \\log_2 P(x_i)'
     : index === 1
@@ -854,6 +858,54 @@ if (process.env.STEP === 'textlayer') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'textlayer', ratio, ...info, selection }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=explain：AI 解析必须对每张有内容的卡片开放。
+// 以前用 `card.question.trim() &&` 条件渲染，PDF 划重点建的卡（只有摘录）整条入口被滤掉。
+if (process.env.STEP === 'explain') {
+  await page.locator('.document-card').first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(1500)
+
+  const buttons = await page.evaluate(() => [...document.querySelectorAll('.mindmap-node')].map((node) => {
+    const button = node.querySelector('.mindmap-explain-action')
+    return {
+      hasButton: Boolean(button),
+      disabled: button ? button.disabled : null,
+      title: button ? button.getAttribute('title') : null,
+    }
+  }))
+
+  if (buttons.length < 3) problems.push(`卡片数量异常：${buttons.length}`)
+  const missing = buttons.filter((item) => !item.hasButton).length
+  if (missing) problems.push(`${missing} 张卡片没有 AI 解析入口`)
+  // 第 1 张：无 question、有公式摘录 → 可解析，且提示文案指向摘录。
+  if (buttons[0]?.disabled !== false) problems.push('只有摘录的卡片 AI 解析被禁用')
+  if (!String(buttons[0]?.title ?? '').includes('摘录')) {
+    problems.push(`无 question 的卡片提示文案没改：${buttons[0]?.title}`)
+  }
+  // 第 3 张：三者全空 → 按钮保留但禁用。
+  if (buttons[2]?.disabled !== true) problems.push('空卡片的 AI 解析仍可点击')
+  if (!String(buttons[2]?.title ?? '').includes('还没有内容')) {
+    problems.push(`空卡片提示文案不对：${buttons[2]?.title}`)
+  }
+
+  const first = page.locator('.mindmap-node').first()
+  await first.locator('.mindmap-explain-action').click()
+  await page.waitForTimeout(1600)
+  const note = await first.locator('.mindmap-field[data-field="note"] .mindmap-field-text').innerText()
+  if (!note.includes('AI 解析')) {
+    problems.push(`无 question 的卡片没有写回解析结果：${note.slice(0, 40)}`)
+  }
+  const errorNode = page.locator('.mindmap-error')
+  if ((await errorNode.count()) > 0) {
+    problems.push(`AI 解析报错：${await errorNode.first().innerText()}`)
+  }
+
+  if (process.env.SHOT) await first.screenshot({ path: '/tmp/pdfnote-explain.png' })
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'explain', buttons, noteChars: note.length }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

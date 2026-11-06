@@ -275,6 +275,9 @@ button.mindmap-field-label:hover { color: #456c43; }
 .mindmap-recall-error { margin: 5px 0 0; color: #9a5042; font-size: 7px; }
 .mindmap-node-actions { display: flex; gap: 2px; padding: 7px 9px; border-top: 1px solid #f0f1ec; background: #fbfbf8; }
 .mindmap-node-actions button { padding: 4px 6px; border: 0; border-radius: 3px; color: #828c7c; background: transparent; font-size: 7px; cursor: pointer; }
+/* 纯结构节点（Anki 牌组、空卡片）没有可解析内容：按钮保留占位但不可点。 */
+.mindmap-node-actions button:disabled { color: #b8bcb2; cursor: default; }
+.mindmap-node-actions .mindmap-explain-action:disabled { color: #b8bcb2; }
 .mindmap-node-actions button:hover { color: #3f4a3a; background: var(--tone-wash); }
 .mindmap-node-actions .mindmap-delete-action:hover { color: #985447; background: #f8eae5; }
 .mindmap-node-actions .mindmap-explain-action { color: var(--tone-ink); font-weight: 600; }

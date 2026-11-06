@@ -441,7 +441,48 @@ pub async fn recognize_selection(
     Ok(cleaned)
 }
 
-/// 让模型解析一张卡片的问题，返回可直接写进笔记的纯文本。
+/// 组装「AI 解析」的提示词。
+///
+/// 脑图卡片有三种来源，内容分布不一样：
+/// - 复习卡 / Anki 卡：有 question，摘录可能为空；
+/// - PDF 划重点建的卡：**没有 question**，只有摘录（这是之前没有 AI 入口的那批）；
+/// - 纯结构分组节点：三者都空，没有可解析的内容。
+///
+/// 所以按「问题 → 摘录 → 笔记」的顺序取第一个非空项当解析对象，
+/// 三者全空才判为不可解析。前端用同一个顺序判断按钮是否可用。
+pub fn build_explain_prompt(
+    question: &str,
+    excerpt: &str,
+    note: &str,
+) -> Result<(String, String), String> {
+    let question = question.trim();
+    let excerpt = excerpt.trim();
+    let note = note.trim();
+    if question.is_empty() && excerpt.is_empty() && note.is_empty() {
+        return Err("这张卡片还没有内容，先填写问题或摘录，再让 AI 解析".into());
+    }
+    let system = r#"你是学习教练，用简洁的中文解释一个知识点。只输出纯文本，不要 Markdown 标题符号，不要代码围栏。
+如果给的是问题，就直接回答；如果给的是原文摘录，就解释其中的关键知识点、术语和逻辑关系。
+按四段组织，每段一到三句，段首用「是什么：」「为什么：」「怎么用：」「易错点：」：
+是什么：一句话给出定义或结论。
+为什么：背后的机制、推导或原因。
+怎么用：一个具体例子或应用场景。
+易错点：常见误解、边界条件或容易混淆的概念。
+不要重复原文，不要写客套话。"#;
+    let user = if !question.is_empty() {
+        format!("问题：{question}\n\n原文摘录：{excerpt}\n\n已有笔记：{note}")
+    } else if !excerpt.is_empty() {
+        // 摘录本身就是主题，不要再作为「已有笔记」重复一遍。
+        format!("待解析的内容：{excerpt}\n\n已有笔记：{note}")
+    } else {
+        format!("待解析的内容：{note}")
+    };
+    Ok((system.to_string(), user))
+}
+
+/// 让模型解析一张卡片，返回可直接写进笔记的纯文本。
+///
+/// 没有 question 的卡片（PDF 划重点）用摘录当主题，保证每张有内容的卡片都能解析。
 pub async fn explain_card(state: &AppState, card_id: String) -> Result<String, String> {
     let (question, excerpt, note): (String, String, String) = {
         let connection = state.db()?;
@@ -453,27 +494,8 @@ pub async fn explain_card(state: &AppState, card_id: String) -> Result<String, S
             )
             .map_err(|error| format!("读取卡片失败: {error}"))?
     };
-    if question.trim().is_empty() {
-        return Err("这张卡片没有填写问题，无法解析".into());
-    }
-    let system = r#"你是学习教练，用简洁的中文解释一个知识点。只输出纯文本，不要 Markdown 标题符号，不要代码围栏。
-按四段组织，每段一到三句，段首用「是什么：」「为什么：」「怎么用：」「易错点：」：
-是什么：一句话给出定义或结论。
-为什么：背后的机制、推导或原因。
-怎么用：一个具体例子或应用场景。
-易错点：常见误解、边界条件或容易混淆的概念。
-不要重复问题原文，不要写客套话。"#;
-    let user = format!(
-        "问题：{}
-
-原文摘录：{}
-
-已有笔记：{}",
-        question.trim(),
-        excerpt.trim(),
-        note.trim()
-    );
-    complete_text(state, system, &user, 900).await
+    let (system, user) = build_explain_prompt(&question, &excerpt, &note)?;
+    complete_text(state, &system, &user, 900).await
 }
 
 /// 纯文本补全（拆书用）：只发 system + user 文本，不携带图片。
@@ -883,6 +905,37 @@ pub async fn fetch_task_result(state: &AppState, task_no: String) -> Result<Stri
 mod tests {
     use super::*;
     use crate::state::test_state;
+
+    #[test]
+    fn explain_prompt_prefers_question_when_present() {
+        let (system, user) = build_explain_prompt("熵是什么？", "H = -Σ p log p", "").unwrap();
+        assert!(system.contains("如果给的是问题，就直接回答"));
+        assert!(user.starts_with("问题：熵是什么？"));
+        assert!(user.contains("原文摘录：H = -Σ p log p"));
+    }
+
+    #[test]
+    fn explain_prompt_falls_back_to_excerpt_for_pdf_cards() {
+        // PDF 划重点建的卡没有 question，只有摘录：以前这种情况直接被拒绝。
+        let (_, user) = build_explain_prompt("  ", "典型胸痛 + ST 段改变，需尽快再灌注。", "  ").unwrap();
+        assert!(user.starts_with("待解析的内容："), "实际：{user}");
+        assert!(!user.contains("问题："));
+        // 摘录是主题，不能在「已有笔记」里再重复一次。
+        assert_eq!(user.matches("典型胸痛").count(), 1);
+    }
+
+    #[test]
+    fn explain_prompt_uses_note_when_only_note_exists() {
+        let (_, user) = build_explain_prompt("", "", "我的读书笔记").unwrap();
+        assert_eq!(user, "待解析的内容：我的读书笔记");
+    }
+
+    #[test]
+    fn explain_prompt_rejects_cards_without_content() {
+        // Anki 牌组这类纯结构节点没有正文，不能假装能解析。
+        let error = build_explain_prompt("   ", "\n", "").unwrap_err();
+        assert!(error.contains("还没有内容"), "实际：{error}");
+    }
 
     #[test]
     fn settings_roundtrip_and_defaults() {

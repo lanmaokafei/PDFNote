@@ -354,8 +354,10 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   const explainCard = useCallback(async (cardId: string) => {
     const card = cardsById[cardId]
     if (!card || busy) return
-    if (!card.question.trim()) {
-      setError('这张卡片没有填写问题，先补一个 Q 再让 AI 解析。')
+    // 与后端一致：问题 / 摘录 / 笔记任一非空就能解析。PDF 划重点的卡没有 question，
+    // 之前这里直接拒绝，等于把大部分卡片挡在 AI 之外。
+    if (!card.question.trim() && !card.excerpt.trim() && !card.user_note.trim()) {
+      setError('这张卡片还没有内容，先填写问题或摘录再让 AI 解析。')
       return
     }
     setBusy(true)

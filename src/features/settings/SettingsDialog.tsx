@@ -272,7 +272,7 @@ export function SettingsDialog({ onClose, onSaved, onCheckUpdate }: SettingsDial
             <span>
               耗时 {testResult.latencyMs}ms · 探测方式 {testResult.via === 'models' ? 'GET /models' : '最小对话请求'}
             </span>
-            {!testResult.modelFound && (
+            {(testResult.models.length > 0 || !testResult.modelFound) && (
               <span className="settings-test-models">
                 可用模型：{testResult.models.slice(0, 8).join('、') || '未返回'}{testResult.models.length > 8 ? ' …' : ''}
               </span>

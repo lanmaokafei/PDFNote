@@ -41,6 +41,12 @@ await page.addInitScript((availableInfo) => {
     auto_backup: () => null,
     get_ai_settings: () => ({ baseUrl: '', model: '', apiKey: '', timeoutSecs: 120 }),
     get_app_version: () => '0.31.0',
+    test_ai_connection: () => ({
+      latencyMs: 69,
+      models: ['qwen2.5vl:7b', 'llava:13b', 'minicpm-v'],
+      modelFound: true,
+      via: 'models',
+    }),
     check_for_update: () => {
       if (mode.value === 'fail') return Promise.reject(new Error('模拟网络失败：无法连接 GitHub Releases'))
       if (mode.value === 'upToDate') {
@@ -183,6 +189,22 @@ await page.waitForSelector('.update-dialog')
 }
 await page.locator('.update-dialog button', { hasText: '关闭' }).click()
 await page.waitForSelector('.update-dialog', { state: 'detached', timeout: 3000 })
+
+// ── 阶段 4.5：设置页细节——按钮规格一致；测试连接命中模型后仍显示模型列表 ────
+{
+  const height = await page.locator('[data-testid="settings-check-update"]')
+    .evaluate((el) => getComputedStyle(el).height)
+  if (height !== '32px') problems.push(`检查更新按钮高度与其他按钮不一致：${height}`)
+  await page.fill('input[placeholder="http://127.0.0.1:11434/v1"]', 'http://127.0.0.1:11434/v1')
+  await page.fill('input[placeholder="qwen2.5vl:7b"]', 'qwen2.5vl:7b')
+  await page.locator('.settings-dialog footer .settings-test-button').first().click()
+  await page.waitForTimeout(500)
+  const text = await page.locator('.settings-dialog').innerText()
+  if (!text.includes('✓ 服务可用')) problems.push(`测试连接成功状态缺失：${text.slice(0, 120)}`)
+  if (!text.includes('耗时 69ms')) problems.push('测试连接耗时信息缺失')
+  if (!text.includes('可用模型：')) problems.push('模型命中时未显示可用模型列表')
+  if (!text.includes('llava:13b')) problems.push(`模型列表内容缺失：${text.slice(0, 160)}`)
+}
 await context.close()
 
 // ── 阶段 5：浏览器（非 Tauri）环境 → 明确报错而不是崩溃 ────────────────────

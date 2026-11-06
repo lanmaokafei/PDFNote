@@ -171,7 +171,8 @@
   border-top: 1px solid #eef1ea;
 }
 
-.settings-dialog footer button {
+.settings-dialog footer button,
+.settings-update-row button {
   height: 32px;
   padding: 0 14px;
   border: 1px solid #e0e5de;
@@ -188,7 +189,8 @@
   background: #3f6a85;
 }
 
-.settings-dialog footer button:disabled {
+.settings-dialog footer button:disabled,
+.settings-update-row button:disabled {
   cursor: default;
   opacity: .5;
 }

@@ -94,7 +94,7 @@ import {
   type MindmapSortMode,
   type Point,
 } from './layout'
-import { clearToneOverride, saveToneOverride, toneIndexMap, toneOverrides } from './tone'
+import { clearToneOverride, saveToneOverride, toneAt, toneIndexMap, toneOverrides } from './tone'
 import { MindmapStylePanel } from './MindmapStylePanel'
 import {
   type MindmapCardStyle,
@@ -115,6 +115,12 @@ const COMPACT_NODE_WIDTH = 228
 const NODE_ESTIMATED_HEIGHT = 172
 // 超过这个规模就关掉 MiniMap：它每次节点变化都要为全部节点算一遍缩略矩形。
 const MINIMAP_NODE_LIMIT = 400
+// 微缩导航图的色块跟随卡片的节气色调（data.tone）：主色填充、深色同族描边，
+// 整幅缩略图才能看出簇群分布。模块级纯函数保证引用稳定（React #185）。
+const minimapNodeColor = (node: { data?: unknown }) =>
+  toneAt(((node.data ?? {}) as { tone?: number }).tone ?? 0).bar
+const minimapNodeStrokeColor = (node: { data?: unknown }) =>
+  toneAt(((node.data ?? {}) as { tone?: number }).tone ?? 0).ink
 // 超过这个规模不再自动 fitView：1483 个节点铺满屏幕时缩放会被压到下限，什么也看不清。
 const AUTO_FIT_NODE_LIMIT = 400
 // 大图的「适应视图」只框住前若干个节点，保证缩放后文字仍然可读。
@@ -1651,8 +1657,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
                 position="bottom-right"
                 pannable
                 zoomable
-                nodeColor="#c8d5cc"
-                nodeStrokeColor="#8da092"
+                nodeColor={minimapNodeColor}
+                nodeStrokeColor={minimapNodeStrokeColor}
                 maskColor="rgba(244, 247, 244, .78)"
               />
             )}

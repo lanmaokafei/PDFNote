@@ -1311,8 +1311,40 @@ if (process.env.STEP === 'tone') {
     await page.locator('.mindmap-workspace').first().screenshot({ path: '/tmp/tone-lite.png' })
   }
 
+  // 微缩导航图（独立视图才有 MiniMap）：色块必须跟随节气色调，不能一片同色。
+  await page.locator('.app-segment', { hasText: '资料库' }).click()
+  await page.waitForTimeout(400)
+  await page.locator('.app-segment', { hasText: '脑图' }).click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForSelector('.react-flow__minimap-node', { timeout: 10000 }).catch(() => null)
+  await page.waitForTimeout(800)
+  const minimap = await page.evaluate(() => {
+    // MiniMap 的 rect 用 style.fill 上色，computed style 归一成 rgb()，与 --tone-bar 的 hex 对齐。
+    const toRgb = (hex) => {
+      const value = hex.trim().replace('#', '')
+      if (value.length !== 6) return ''
+      const number = parseInt(value, 16)
+      return `rgb(${(number >> 16) & 255}, ${(number >> 8) & 255}, ${number & 255})`
+    }
+    const bars = new Set(
+      [...document.querySelectorAll('.mindmap-node')]
+        .map((node) => toRgb(getComputedStyle(node).getPropertyValue('--tone-bar')))
+        .filter(Boolean),
+    )
+    const rects = [...document.querySelectorAll('.react-flow__minimap-node')]
+    const fills = rects.map((rect) => getComputedStyle(rect).fill)
+    return {
+      rectCount: rects.length,
+      distinctFills: new Set(fills).size,
+      offTone: fills.filter((fill) => !bars.has(fill)).length,
+    }
+  })
+  if (minimap.rectCount === 0) problems.push('独立视图未渲染微缩导航图')
+  if (minimap.distinctFills < 3) problems.push(`微缩图颜色单调：${minimap.distinctFills} 种`)
+  if (minimap.offTone > 0) problems.push(`微缩图有 ${minimap.offTone} 个色块不跟随节点色调`)
+
   await browser.close()
-  console.log(JSON.stringify({ problems, step: 'tone', ...info, before, after, stored, lite }, null, 2))
+  console.log(JSON.stringify({ problems, step: 'tone', ...info, before, after, stored, lite, minimap }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

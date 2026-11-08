@@ -1,4 +1,13 @@
-import type { CardDensity, CardRadius, CardSurface, MindmapCardStyle } from './style'
+import type {
+  CardBorder,
+  CardDensity,
+  CardEdgeStyle,
+  CardHeader,
+  CardLink,
+  CardRadius,
+  CardSurface,
+  MindmapCardStyle,
+} from './style'
 import { DEFAULT_CARD_STYLE, MINDMAP_THEMES, applyTheme } from './style'
 import { SOLAR_TONES, toneAt } from './tone'
 
@@ -35,6 +44,33 @@ const DENSITIES: Array<{ value: CardDensity | null; label: string }> = [
   { value: 'compact', label: '紧凑' },
   { value: 'normal', label: '标准' },
   { value: 'roomy', label: '宽松' },
+]
+
+const HEADERS: Array<{ value: CardHeader | null; label: string }> = [
+  { value: null, label: '跟随主题' },
+  { value: 'tint', label: '淡底' },
+  { value: 'solid', label: '实心' },
+  { value: 'plain', label: '纯白' },
+]
+
+const EDGES: Array<{ value: CardEdgeStyle | null; label: string }> = [
+  { value: null, label: '跟随主题' },
+  { value: 'hairline', label: '发丝' },
+  { value: 'ink', label: '深墨' },
+  { value: 'tone', label: '子树色' },
+]
+
+const BORDERS: Array<{ value: CardBorder | null; label: string }> = [
+  { value: null, label: '跟随主题' },
+  { value: 'normal', label: '常规' },
+  { value: 'hairline', label: '发丝' },
+  { value: 'none', label: '无边框' },
+]
+
+const LINKS: Array<{ value: CardLink | null; label: string }> = [
+  { value: null, label: '跟随主题' },
+  { value: 'neutral', label: '蓝灰' },
+  { value: 'tone', label: '子树色' },
 ]
 
 /**
@@ -142,6 +178,57 @@ export function MindmapStylePanel({
         value={style.density}
         onPick={(density) => onChange({ ...style, density })}
       />
+      <Group
+        label="标题栏"
+        field="header"
+        options={HEADERS}
+        value={style.header}
+        onPick={(header) => onChange({ ...style, header })}
+      />
+      <Group
+        label="连线"
+        field="edge"
+        options={EDGES}
+        value={style.edge}
+        onPick={(edge) => onChange({ ...style, edge })}
+      />
+      <Group
+        label="边框"
+        field="border"
+        options={BORDERS}
+        value={style.border}
+        onPick={(border) => onChange({ ...style, border })}
+      />
+      <Group
+        label="关联链接"
+        field="link"
+        options={LINKS}
+        value={style.link}
+        onPick={(link) => onChange({ ...style, link })}
+      />
+      <div className="mindmap-style-group">
+        <span className="mindmap-style-label">链接标签</span>
+        <div className="mindmap-style-options">
+          <button
+            type="button"
+            data-testid="style-link-labels-auto"
+            className={style.linkLabels === null ? 'is-active' : ''}
+            onClick={() => onChange({ ...style, linkLabels: null })}
+          >跟随主题</button>
+          <button
+            type="button"
+            data-testid="style-link-labels-on"
+            className={style.linkLabels === true ? 'is-active' : ''}
+            onClick={() => onChange({ ...style, linkLabels: true })}
+          >显示</button>
+          <button
+            type="button"
+            data-testid="style-link-labels-off"
+            className={style.linkLabels === false ? 'is-active' : ''}
+            onClick={() => onChange({ ...style, linkLabels: false })}
+          >隐藏</button>
+        </div>
+      </div>
 
       <footer className="mindmap-style-foot">
         <button

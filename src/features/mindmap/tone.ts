@@ -21,6 +21,8 @@ export interface SolarTone {
   wash: string
   /** 深色同族色：淡底上的文字。 */
   ink: string
+  /** 实心标题栏上的字色：深色相用白字，浅色相压深同族色，对比度 ≥4.5:1。 */
+  onBar: string
   /** 主色 22% 透明度：选中光晕。 */
   ring: string
 }
@@ -144,6 +146,50 @@ function ringOf(rgb: Rgb, alpha = 0.22): string {
   return `rgba(${Math.round(rgb.r)}, ${Math.round(rgb.g)}, ${Math.round(rgb.b)}, ${alpha})`
 }
 
+/** WCAG 相对亮度（0–1）。 */
+function relativeLuminance({ r, g, b }: Rgb): number {
+  const channel = (value: number) => {
+    const srgb = value / 255
+    return srgb <= 0.03928 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+/** 两色对比度（1–21）。 */
+function contrastRatio(a: Rgb, b: Rgb): number {
+  const [light, dark] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x)
+  return (light + 0.05) / (dark + 0.05)
+}
+
+/** 向黑色混合：amount 是黑色占比，色相保持不变。 */
+function mixBlack(rgb: Rgb, amount: number): Rgb {
+  return {
+    r: rgb.r * (1 - amount),
+    g: rgb.g * (1 - amount),
+    b: rgb.b * (1 - amount),
+  }
+}
+
+/**
+ * 实心标题栏上的字色：优先白色（深色相），浅色相（缃叶、井天）白字对比度不够，
+ * 二分找到刚好把主色压到 ≥4.5:1 的深色同族色。纯黑不优雅，保留色相更协调。
+ *
+ * 搜索阈值取 4.55 而不是 4.5：hex 量化会把边界值压到 4.499，单测与观感都不接受。
+ */
+function onBarOf(rgb: Rgb): string {
+  const target = 4.55
+  const white: Rgb = { r: 255, g: 255, b: 255 }
+  if (contrastRatio(rgb, white) >= target) return '#ffffff'
+  let low = 0
+  let high = 0.96
+  for (let step = 0; step < 24; step += 1) {
+    const mid = (low + high) / 2
+    if (contrastRatio(rgb, mixBlack(rgb, mid)) >= target) high = mid
+    else low = mid
+  }
+  return toHex(mixBlack(rgb, high))
+}
+
 export const SOLAR_TONES: SolarTone[] = SEEDS.map(([term, color, bar]) => {
   const rgb = parseHex(bar)
   return {
@@ -152,6 +198,7 @@ export const SOLAR_TONES: SolarTone[] = SEEDS.map(([term, color, bar]) => {
     bar: toHex(rgb),
     wash: toHex(tint(rgb, 0.87)),
     ink: toHex(deepen(rgb)),
+    onBar: onBarOf(rgb),
     ring: ringOf(rgb),
   }
 })

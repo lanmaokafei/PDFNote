@@ -14,6 +14,7 @@
 | 微缩导航图配色（0.32.1） | `STEP=tone ARRANGE_FOREST=1 CARD_COUNT=26` | 独立视图 26 个缩略色块 17 种色调、0 偏色，色块跟随节点节气色 |
 | 安装器后自动退出（0.32.2） | `node scripts/update-smoke.mjs` | 打开安装器后提示「应用将自动退出」，约 2 秒 `quit_app` 调用 1 次 |
 | 安装包启动清理（0.32.2） | `cargo test --lib update::` | 已装版本 DMG 与 `.sha256`/`.part` 删除、更新版本保留、无关文件不误删 |
+| 色块主题与画布设置（0.33.0） | `STEP=style CARD_COUNT=3 STYLE_LINK=1` | 实心头背景 = 主色、字色对比度 ≥4.5、无左侧色条；深墨连线无箭头带圆点；链接虚线跟随色调、标签可隐藏；单项覆盖与重载保留 |
 | 文字层冒烟 | `node scripts/textlayer-smoke.mjs` | 通过：透明 DOM 文字可原生拖选「信息系统项目管」，选区 bbox 换算正确 |
 | 右键菜单冒烟 | `node scripts/contextmenu-smoke.mjs` | 通过：原生 Reload 菜单被接管、菜单项执行动作、右下角翻转、键盘导航、输入框保留系统菜单、选区读取与跨层判定 |
 | TypeScript + 打包 | `npm run build` | 通过 |

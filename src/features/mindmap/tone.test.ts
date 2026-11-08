@@ -73,6 +73,17 @@ describe('二十四节气色板', () => {
     }
   })
 
+  it('实心标题栏的字色对比度同样至少 4.5:1', () => {
+    for (const tone of SOLAR_TONES) {
+      expect(tone.onBar).toMatch(/^#[0-9a-f]{6}$/)
+      const ratio = contrast(tone.onBar, tone.bar)
+      expect(ratio, `${tone.term}·${tone.color} 实心头对比度 ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(4.5)
+    }
+    // 深色相用白字，浅色相用压深的同族色——不能一律白字。
+    expect(SOLAR_TONES[18].onBar).toBe('#ffffff')
+    expect(SOLAR_TONES[0].onBar).not.toBe('#ffffff')
+  })
+
   it('色相覆盖春黄、夏红、秋蓝、冬紫四个象限', () => {
     const hueOf = (index: number) => {
       const hex = SOLAR_TONES[index].bar.replace('#', '')

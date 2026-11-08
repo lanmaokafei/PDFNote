@@ -66,6 +66,7 @@ import {
 import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
+import { InkEdge } from './MindmapEdge'
 import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown } from './outline'
 import { ExpandableField } from './ExpandableField'
 import { CanvasSwitcher } from './CanvasSwitcher'
@@ -141,10 +142,16 @@ const COMPACT_VIEWPORT = { x: 30, y: 96, zoom: 0.9 }
 // React Flow 的 memo 比较会全部失效，整层边线都会重渲染。
 const HIERARCHY_MARKER = { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#a8b2aa' }
 const HIERARCHY_EDGE_STYLE = { stroke: '#a8b2aa', strokeWidth: 1.4 }
+// 深墨连线：深灰、无箭头、圆角折线，目标端由 InkEdge 画小圆点。
+const INK_EDGE_STYLE = { stroke: '#2f3a33', strokeWidth: 1.6 }
 const LINK_MARKER = { type: MarkerType.ArrowClosed, width: 14, height: 14, color: '#7d9dab' }
 const LINK_EDGE_STYLE = { stroke: '#7d9dab', strokeWidth: 1.2, strokeDasharray: '5 4' }
 const LINK_LABEL_STYLE = { fill: '#6d8794', fontSize: 8 }
 const LINK_LABEL_BG_STYLE = { fill: '#f4f7f4', fillOpacity: 0.9 }
+// 自定义边类型表必须模块级常量：每次渲染新建会让 React Flow 认为边类型变了。
+const EDGE_TYPES = { ink: InkEdge }
+// 超过这个规模就不用自定义边（每条边一个组件，上千条会拖慢缩放/拖拽），退回内置折线。
+const CUSTOM_EDGE_LIMIT = 400
 
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
@@ -524,32 +531,69 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     return next
   }, [compact, measuredSizes, nodeCache, nodeData, orderedVisibleCards, positions, selectedIds])
   const edges = useMemo<Edge[]>(() => {
+    const edgeStyle = resolvedStyle.edge
+    // 自定义边（圆点）只为小画布启用；大图退回内置折线，避免上千个边组件。
+    const dotted = edgeStyle !== 'hairline' && orderedVisibleCards.length <= CUSTOM_EDGE_LIMIT
     const hierarchy = orderedVisibleCards.flatMap((card) => {
       if (!card.parent_id || !visibleIds.has(card.parent_id)) return []
-      return [{
+      const base = {
         id: `${card.parent_id}->${card.id}`,
         source: card.parent_id,
         target: card.id,
-        type: 'smoothstep' as const,
-        markerEnd: HIERARCHY_MARKER,
-        style: HIERARCHY_EDGE_STYLE,
+      }
+      if (edgeStyle === 'hairline') {
+        return [{
+          ...base,
+          type: 'smoothstep' as const,
+          markerEnd: HIERARCHY_MARKER,
+          style: HIERARCHY_EDGE_STYLE,
+        }]
+      }
+      // 深墨 / 跟随子树：带圆点、无箭头；跟随子树取子卡片的主色。
+      const tone = toneByCard.get(card.id) ?? 0
+      return [{
+        ...base,
+        type: (dotted ? 'ink' : 'smoothstep') as 'ink' | 'smoothstep',
+        style: edgeStyle === 'tone'
+          ? { stroke: toneAt(tone).bar, strokeWidth: 1.5 }
+          : INK_EDGE_STYLE,
       }]
     })
     const references = links
       .filter((link) => visibleIds.has(link.source_card_id) && visibleIds.has(link.target_card_id))
-      .map((link) => ({
-        id: `link-${link.id}`,
-        source: link.source_card_id,
-        target: link.target_card_id,
-        type: 'straight' as const,
-        label: '链接',
-        labelStyle: LINK_LABEL_STYLE,
-        labelBgStyle: LINK_LABEL_BG_STYLE,
-        markerEnd: LINK_MARKER,
-        style: LINK_EDGE_STYLE,
-      }))
+      .map((link) => {
+        const edge: Edge = {
+          id: `link-${link.id}`,
+          source: link.source_card_id,
+          target: link.target_card_id,
+          type: 'straight' as const,
+          markerEnd: LINK_MARKER,
+          style: resolvedStyle.link === 'tone'
+            ? {
+                stroke: toneAt(toneByCard.get(link.source_card_id) ?? 0).bar,
+                strokeWidth: 1.2,
+                strokeDasharray: '5 4',
+              }
+            : LINK_EDGE_STYLE,
+        }
+        // 标签默认跟随主题：「色块」主题不画「链接」小字，参考图里也不标。
+        if (resolvedStyle.linkLabels) {
+          edge.label = '链接'
+          edge.labelStyle = LINK_LABEL_STYLE
+          edge.labelBgStyle = LINK_LABEL_BG_STYLE
+        }
+        return edge
+      })
     return [...hierarchy, ...references]
-  }, [links, orderedVisibleCards, visibleIds])
+  }, [
+    links,
+    orderedVisibleCards,
+    resolvedStyle.edge,
+    resolvedStyle.link,
+    resolvedStyle.linkLabels,
+    toneByCard,
+    visibleIds,
+  ])
 
   const refresh = useCallback(async (): Promise<string[]> => {
     const perfStart = performance.now()
@@ -1478,6 +1522,11 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       data-mm-surface={resolvedStyle.surface}
       data-mm-radius={resolvedStyle.radius}
       data-mm-density={resolvedStyle.density}
+      // 只有偏离主题预设时才写这四个属性，老主题的 CSS 保持原样、观感不变。
+      data-mm-header={resolvedStyle.header === currentTheme.header ? undefined : resolvedStyle.header}
+      data-mm-edge={resolvedStyle.edge === currentTheme.edge ? undefined : resolvedStyle.edge}
+      data-mm-border={resolvedStyle.border === currentTheme.border ? undefined : resolvedStyle.border}
+      data-mm-link={resolvedStyle.link === currentTheme.link ? undefined : resolvedStyle.link}
       aria-label="知识脑图工作区"
     >
       {!compact && (
@@ -1616,6 +1665,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
             nodes={nodes}
             edges={lite ? NO_EDGES : edges}
             nodeTypes={nodeTypes}
+            edgeTypes={EDGE_TYPES}
             onNodesChange={handleNodesChange}
             onNodeDragStart={beginInteraction}
             onNodeDragStop={handleNodeDragStop}

@@ -152,6 +152,81 @@
 .mindmap-workspace[data-mm-radius="soft"] { --card-radius: 8px; }
 .mindmap-workspace[data-mm-radius="round"] { --card-radius: 14px; }
 
+/* 色块（0.33.0）：实心主色标题栏 + 去色条 + 发丝边，接近 MarginNote 式画布。
+   连线与链接在 JS 里按 resolvedStyle.edge/link 生成，这里只管卡面。 */
+.mindmap-workspace[data-mm-theme="block"] {
+  --card-border: #edf0e8;
+  --card-stripe: 0px;
+  --card-shadow: 0 1px 2px #3442340f, 0 8px 18px #34423412;
+  --card-shadow-selected: 0 0 0 3px var(--tone-ring), 0 10px 24px #3442341c;
+}
+.mindmap-workspace[data-mm-theme="block"] .mindmap-node { border-left-width: 0; }
+.mindmap-workspace[data-mm-theme="block"] .mindmap-node-header {
+  background: var(--tone-bar);
+  border-bottom-color: transparent;
+}
+.mindmap-workspace[data-mm-theme="block"] .mindmap-node-header h3 { color: var(--tone-on-bar); }
+.mindmap-workspace[data-mm-theme="block"] .mindmap-node-index,
+.mindmap-workspace[data-mm-theme="block"] .mindmap-node-page {
+  border-color: transparent;
+  color: var(--tone-ink);
+  background: #ffffffd9;
+}
+.mindmap-workspace[data-mm-theme="block"] .mindmap-collapse {
+  border-color: transparent;
+  color: var(--tone-ink);
+  background: #ffffffd9;
+}
+.mindmap-workspace[data-mm-theme="block"] .mindmap-node.is-lite { background: var(--tone-bar); }
+.mindmap-workspace[data-mm-theme="block"] .mindmap-node.is-lite h3 { color: var(--tone-on-bar); }
+
+/* ---------- 标题栏 / 边框（0.33.0） ----------
+   默认跟着主题（宣纸是淡底头、线框是白底头），用户单独改时才写 data-mm-header/border。
+   实心头 = 主色实底 + --tone-on-bar 字色（由 tone.ts 按对比度 ≥4.5:1 派生）。 */
+.mindmap-workspace[data-mm-header="tint"] .mindmap-node-header {
+  background: var(--tone-wash);
+  border-bottom-color: #ffffff;
+}
+.mindmap-workspace[data-mm-header="tint"] .mindmap-node-header h3 { color: var(--card-ink); }
+
+.mindmap-workspace[data-mm-header="plain"] .mindmap-node-header {
+  background: #ffffff;
+  border-bottom: 1px solid #e8ebe2;
+}
+
+.mindmap-workspace[data-mm-header="solid"] .mindmap-node-header {
+  background: var(--tone-bar);
+  border-bottom-color: transparent;
+}
+.mindmap-workspace[data-mm-header="solid"] .mindmap-node-header h3 { color: var(--tone-on-bar); }
+.mindmap-workspace[data-mm-header="solid"] .mindmap-node { border-left-width: 0; }
+.mindmap-workspace[data-mm-header="solid"] .mindmap-node-index,
+.mindmap-workspace[data-mm-header="solid"] .mindmap-node-page {
+  border-color: transparent;
+  color: var(--tone-ink);
+  background: #ffffffd9;
+}
+.mindmap-workspace[data-mm-header="solid"] .mindmap-collapse {
+  border-color: transparent;
+  color: var(--tone-ink);
+  background: #ffffffd9;
+}
+.mindmap-workspace[data-mm-header="solid"] .mindmap-node.is-lite { background: var(--tone-bar); }
+.mindmap-workspace[data-mm-header="solid"] .mindmap-node.is-lite h3 { color: var(--tone-on-bar); }
+
+.mindmap-workspace[data-mm-border="normal"] .mindmap-node {
+  border-color: var(--card-border);
+  border-left-width: 3px;
+}
+.mindmap-workspace[data-mm-border="hairline"] .mindmap-node {
+  border-color: #edf0e8;
+  border-left-width: 2px;
+}
+.mindmap-workspace[data-mm-border="none"] .mindmap-node {
+  border-color: transparent;
+  border-left-width: 0;
+}
+
 .mindmap-workspace[data-mm-density="compact"] {
   --card-head-pad: 7px 9px 5px;
   --card-body-pad: 0 9px 5px;
@@ -272,30 +347,30 @@
   --tone-ring: rgba(139, 161, 127, .22);
 }
 
-.mindmap-tone-0 { --tone-bar: #ecd452; --tone-wash: #fdf9e9; --tone-ink: #847215; --tone-ring: rgba(236, 212, 82, 0.22); } /* 立春·缃叶 */
-.mindmap-tone-1 { --tone-bar: #a9be7b; --tone-wash: #f4f7ee; --tone-ink: #566732; --tone-ring: rgba(169, 190, 123, 0.22); } /* 雨水·春辰 */
-.mindmap-tone-2 { --tone-bar: #f091a0; --tone-wash: #fdf1f3; --tone-ink: #841527; --tone-ring: rgba(240, 145, 160, 0.22); } /* 惊蛰·杨妃 */
-.mindmap-tone-3 { --tone-bar: #bc836b; --tone-wash: #f6efec; --tone-ink: #694130; --tone-ring: rgba(188, 131, 107, 0.22); } /* 春分·紫磨金 */
-.mindmap-tone-4 { --tone-bar: #9b8ea9; --tone-wash: #f2f0f4; --tone-ink: #4c4257; --tone-ring: rgba(155, 142, 169, 0.22); } /* 清明·紫菂 */
-.mindmap-tone-5 { --tone-bar: #68945c; --tone-wash: #ebf1ea; --tone-ink: #405b39; --tone-ring: rgba(104, 148, 92, 0.22); } /* 谷雨·庭芜绿 */
-.mindmap-tone-6 { --tone-bar: #84a729; --tone-wash: #eff4e3; --tone-ink: #4a5d17; --tone-ring: rgba(132, 167, 41, 0.22); } /* 立夏·水龙吟 */
-.mindmap-tone-7 { --tone-bar: #2a6e3f; --tone-wash: #e3ece6; --tone-ink: #14341e; --tone-ring: rgba(42, 110, 63, 0.22); } /* 小满·官绿 */
-.mindmap-tone-8 { --tone-bar: #b4884d; --tone-wash: #f5f0e8; --tone-ink: #6c512d; --tone-ring: rgba(180, 136, 77, 0.22); } /* 芒种·雌黄 */
-.mindmap-tone-9 { --tone-bar: #cb523e; --tone-wash: #f8e9e6; --tone-ink: #792d20; --tone-ring: rgba(203, 82, 62, 0.22); } /* 夏至·赩炽 */
-.mindmap-tone-10 { --tone-bar: #106898; --tone-wash: #e0ebf2; --tone-ink: #0b2e42; --tone-ring: rgba(16, 104, 152, 0.22); } /* 小暑·柔蓝 */
-.mindmap-tone-11 { --tone-bar: #a35f65; --tone-wash: #f3eaeb; --tone-ink: #61383c; --tone-ring: rgba(163, 95, 101, 0.22); } /* 大暑·茹藘 */
-.mindmap-tone-12 { --tone-bar: #88abda; --tone-wash: #f0f4fa; --tone-ink: #244775; --tone-ring: rgba(136, 171, 218, 0.22); } /* 立秋·窃蓝 */
-.mindmap-tone-13 { --tone-bar: #5aa4ae; --tone-wash: #eaf3f4; --tone-ink: #326067; --tone-ring: rgba(90, 164, 174, 0.22); } /* 处暑·天水碧 */
-.mindmap-tone-14 { --tone-bar: #6b7d73; --tone-wash: #eceeed; --tone-ink: #414c45; --tone-ring: rgba(107, 125, 115, 0.22); } /* 白露·千山翠 */
-.mindmap-tone-15 { --tone-bar: #c0ad5e; --tone-wash: #f7f4ea; --tone-ink: #6e612b; --tone-ring: rgba(192, 173, 94, 0.22); } /* 秋分·栾华 */
-.mindmap-tone-16 { --tone-bar: #da9233; --tone-wash: #faf1e4; --tone-ink: #825417; --tone-ring: rgba(218, 146, 51, 0.22); } /* 寒露·杏子 */
-.mindmap-tone-17 { --tone-bar: #b15a43; --tone-wash: #f5eae7; --tone-ink: #6e382a; --tone-ring: rgba(177, 90, 67, 0.22); } /* 霜降·棠梨 */
-.mindmap-tone-18 { --tone-bar: #206864; --tone-wash: #e2ebeb; --tone-ink: #113735; --tone-ring: rgba(32, 104, 100, 0.22); } /* 立冬·石绿 */
-.mindmap-tone-19 { --tone-bar: #b95a89; --tone-wash: #f6eaf0; --tone-ink: #6b2e4c; --tone-ring: rgba(185, 90, 137, 0.22); } /* 小雪·胭脂水 */
-.mindmap-tone-20 { --tone-bar: #a4abd6; --tone-wash: #f3f4fa; --tone-ink: #303869; --tone-ring: rgba(164, 171, 214, 0.22); } /* 大雪·暮山紫 */
-.mindmap-tone-21 { --tone-bar: #b04552; --tone-wash: #f5e7e9; --tone-ink: #6e2b33; --tone-ring: rgba(176, 69, 82, 0.22); } /* 冬至·鞓红 */
-.mindmap-tone-22 { --tone-bar: #a4c9cc; --tone-wash: #f3f8f8; --tone-ink: #375f62; --tone-ring: rgba(164, 201, 204, 0.22); } /* 小寒·井天 */
-.mindmap-tone-23 { --tone-bar: #995d7f; --tone-wash: #f2eaee; --tone-ink: #5f3a4f; --tone-ring: rgba(153, 93, 127, 0.22); } /* 大寒·紫府 */
+.mindmap-tone-0 { --tone-bar: #ecd452; --tone-wash: #fdf9e9; --tone-ink: #847215; --tone-on-bar: #665b23; --tone-ring: rgba(236, 212, 82, 0.22); } /* 立春·缃叶 */
+.mindmap-tone-1 { --tone-bar: #a9be7b; --tone-wash: #f4f7ee; --tone-ink: #566732; --tone-on-bar: #424b30; --tone-ring: rgba(169, 190, 123, 0.22); } /* 雨水·春辰 */
+.mindmap-tone-2 { --tone-bar: #f091a0; --tone-wash: #fdf1f3; --tone-ink: #841527; --tone-on-bar: #5a363c; --tone-ring: rgba(240, 145, 160, 0.22); } /* 惊蛰·杨妃 */
+.mindmap-tone-3 { --tone-bar: #bc836b; --tone-wash: #f6efec; --tone-ink: #694130; --tone-on-bar: #36261f; --tone-ring: rgba(188, 131, 107, 0.22); } /* 春分·紫磨金 */
+.mindmap-tone-4 { --tone-bar: #9b8ea9; --tone-wash: #f2f0f4; --tone-ink: #4c4257; --tone-on-bar: #2e2a33; --tone-ring: rgba(155, 142, 169, 0.22); } /* 清明·紫菂 */
+.mindmap-tone-5 { --tone-bar: #68945c; --tone-wash: #ebf1ea; --tone-ink: #405b39; --tone-on-bar: #1a2517; --tone-ring: rgba(104, 148, 92, 0.22); } /* 谷雨·庭芜绿 */
+.mindmap-tone-6 { --tone-bar: #84a729; --tone-wash: #eff4e3; --tone-ink: #4a5d17; --tone-on-bar: #2b370e; --tone-ring: rgba(132, 167, 41, 0.22); } /* 立夏·水龙吟 */
+.mindmap-tone-7 { --tone-bar: #2a6e3f; --tone-wash: #e3ece6; --tone-ink: #14341e; --tone-on-bar: #ffffff; --tone-ring: rgba(42, 110, 63, 0.22); } /* 小满·官绿 */
+.mindmap-tone-8 { --tone-bar: #b4884d; --tone-wash: #f5f0e8; --tone-ink: #6c512d; --tone-on-bar: #332716; --tone-ring: rgba(180, 136, 77, 0.22); } /* 芒种·雌黄 */
+.mindmap-tone-9 { --tone-bar: #cb523e; --tone-wash: #f8e9e6; --tone-ink: #792d20; --tone-on-bar: #120705; --tone-ring: rgba(203, 82, 62, 0.22); } /* 夏至·赩炽 */
+.mindmap-tone-10 { --tone-bar: #106898; --tone-wash: #e0ebf2; --tone-ink: #0b2e42; --tone-on-bar: #ffffff; --tone-ring: rgba(16, 104, 152, 0.22); } /* 小暑·柔蓝 */
+.mindmap-tone-11 { --tone-bar: #a35f65; --tone-wash: #f3eaeb; --tone-ink: #61383c; --tone-on-bar: #ffffff; --tone-ring: rgba(163, 95, 101, 0.22); } /* 大暑·茹藘 */
+.mindmap-tone-12 { --tone-bar: #88abda; --tone-wash: #f0f4fa; --tone-ink: #244775; --tone-on-bar: #323f50; --tone-ring: rgba(136, 171, 218, 0.22); } /* 立秋·窃蓝 */
+.mindmap-tone-13 { --tone-bar: #5aa4ae; --tone-wash: #eaf3f4; --tone-ink: #326067; --tone-on-bar: #1d3538; --tone-ring: rgba(90, 164, 174, 0.22); } /* 处暑·天水碧 */
+.mindmap-tone-14 { --tone-bar: #6b7d73; --tone-wash: #eceeed; --tone-ink: #414c45; --tone-on-bar: #080a09; --tone-ring: rgba(107, 125, 115, 0.22); } /* 白露·千山翠 */
+.mindmap-tone-15 { --tone-bar: #c0ad5e; --tone-wash: #f7f4ea; --tone-ink: #6e612b; --tone-on-bar: #484123; --tone-ring: rgba(192, 173, 94, 0.22); } /* 秋分·栾华 */
+.mindmap-tone-16 { --tone-bar: #da9233; --tone-wash: #faf1e4; --tone-ink: #825417; --tone-on-bar: #4c3312; --tone-ring: rgba(218, 146, 51, 0.22); } /* 寒露·杏子 */
+.mindmap-tone-17 { --tone-bar: #b15a43; --tone-wash: #f5eae7; --tone-ink: #6e382a; --tone-on-bar: #ffffff; --tone-ring: rgba(177, 90, 67, 0.22); } /* 霜降·棠梨 */
+.mindmap-tone-18 { --tone-bar: #206864; --tone-wash: #e2ebeb; --tone-ink: #113735; --tone-on-bar: #ffffff; --tone-ring: rgba(32, 104, 100, 0.22); } /* 立冬·石绿 */
+.mindmap-tone-19 { --tone-bar: #b95a89; --tone-wash: #f6eaf0; --tone-ink: #6b2e4c; --tone-on-bar: #13090e; --tone-ring: rgba(185, 90, 137, 0.22); } /* 小雪·胭脂水 */
+.mindmap-tone-20 { --tone-bar: #a4abd6; --tone-wash: #f3f4fa; --tone-ink: #303869; --tone-on-bar: #3e4050; --tone-ring: rgba(164, 171, 214, 0.22); } /* 大雪·暮山紫 */
+.mindmap-tone-21 { --tone-bar: #b04552; --tone-wash: #f5e7e9; --tone-ink: #6e2b33; --tone-on-bar: #ffffff; --tone-ring: rgba(176, 69, 82, 0.22); } /* 冬至·鞓红 */
+.mindmap-tone-22 { --tone-bar: #a4c9cc; --tone-wash: #f3f8f8; --tone-ink: #375f62; --tone-on-bar: #435354; --tone-ring: rgba(164, 201, 204, 0.22); } /* 小寒·井天 */
+.mindmap-tone-23 { --tone-bar: #995d7f; --tone-wash: #f2eaee; --tone-ink: #5f3a4f; --tone-on-bar: #ffffff; --tone-ring: rgba(153, 93, 127, 0.22); } /* 大寒·紫府 */
 
 .mindmap-node {
   width: 254px;
@@ -1124,6 +1199,9 @@ button.mindmap-field-label:hover { color: #456c43; }
 .mindmap-style-swatch[data-theme="ink"] { background: #242925; border-color: #3b433b; border-left-color: #88abda; }
 .mindmap-style-swatch[data-theme="ink"] i { background: #2c322c; }
 .mindmap-style-swatch[data-theme="ink"] b { background: #4a544a; }
+.mindmap-style-swatch[data-theme="block"] { border-color: #edf0e8; border-left-width: 0; }
+.mindmap-style-swatch[data-theme="block"] i { background: #cb523e; }
+.mindmap-style-swatch[data-theme="block"] b { background: #cfd6cb; }
 
 /* 二十四节气色板：点色块直接换这张卡的颜色，不必再靠 Q 徽标一格一格循环。 */
 .mindmap-style-note { margin: 0 0 6px; color: #7c8676; font-size: 8.5px; line-height: 1.4; }

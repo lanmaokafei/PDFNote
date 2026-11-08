@@ -8,6 +8,7 @@ mod commands;
 mod db;
 mod documents;
 mod models;
+mod notebooks;
 mod notes;
 mod ocr;
 mod page_text;
@@ -95,6 +96,17 @@ pub fn run() {
             commands::download_update,
             commands::open_update_installer,
             commands::quit_app,
+            commands::list_notebooks,
+            commands::create_notebook,
+            commands::update_notebook,
+            commands::delete_notebook,
+            commands::list_layers,
+            commands::create_layer,
+            commands::update_layer,
+            commands::delete_layer,
+            commands::list_notebook_inks,
+            commands::create_notebook_ink,
+            commands::delete_notebook_ink,
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;

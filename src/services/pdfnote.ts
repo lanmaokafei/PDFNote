@@ -19,6 +19,12 @@ import type {
   PageNote,
   CreatePageNoteInput,
   UpdatePageNoteInput,
+  Notebook,
+  NotebookInk,
+  CreateNotebookInkInput,
+  Layer,
+  PaperStyle,
+  LayerScope,
   ReviewInput,
   ReviewStats,
   UpdateCardContentInput,
@@ -311,4 +317,62 @@ export async function updatePageNote(input: UpdatePageNoteInput): Promise<PageNo
 
 export async function deletePageNote(id: string): Promise<void> {
   return invoke('delete_page_note', { id })
+}
+
+export async function listNotebooks(): Promise<Notebook[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_notebooks')
+}
+
+export async function createNotebook(title: string, paper: PaperStyle): Promise<Notebook> {
+  desktopOnly()
+  return invoke('create_notebook', { input: { title, paper } })
+}
+
+export async function updateNotebook(id: string, title: string, paper: PaperStyle): Promise<Notebook> {
+  desktopOnly()
+  return invoke('update_notebook', { input: { id, title, paper } })
+}
+
+export async function deleteNotebook(id: string): Promise<void> {
+  desktopOnly()
+  return invoke('delete_notebook', { id })
+}
+
+export async function listLayers(scope: LayerScope, ownerId: string): Promise<Layer[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_layers', { scope, ownerId })
+}
+
+export async function createLayer(scope: LayerScope, ownerId: string, name = ''): Promise<Layer> {
+  desktopOnly()
+  return invoke('create_layer', { input: { scope, owner_id: ownerId, name } })
+}
+
+export async function updateLayer(
+  id: string,
+  changes: { name?: string; visible?: boolean; locked?: boolean },
+): Promise<Layer> {
+  desktopOnly()
+  return invoke('update_layer', { input: { id, ...changes } })
+}
+
+export async function deleteLayer(id: string): Promise<void> {
+  desktopOnly()
+  return invoke('delete_layer', { id })
+}
+
+export async function listNotebookInks(notebookId: string): Promise<NotebookInk[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_notebook_inks', { notebookId })
+}
+
+export async function createNotebookInk(input: CreateNotebookInkInput): Promise<NotebookInk> {
+  desktopOnly()
+  return invoke('create_notebook_ink', { input })
+}
+
+export async function deleteNotebookInk(id: string): Promise<void> {
+  desktopOnly()
+  return invoke('delete_notebook_ink', { id })
 }

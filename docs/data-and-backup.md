@@ -87,6 +87,14 @@ PDFNote-backup-YYYYMMDD-HHMMSS.zip
 - 翻页停止 700ms 后写入，关闭文档时再补一次；不更新 `updated_at`，避免资料库排序与备份新鲜度被翻页触发。
 - 备份导入时按清单 `schema_version` 选择列：schema v1 旧包没有 `last_page`，导入后为 1；schema v2 包会一并恢复。
 
+## 手写笔记本与图层（schema v10）
+
+- `notebooks(id, title, paper, created_at, updated_at)`：独立于 PDF 的手写本；`paper` 只能是 `blank / lined / grid / dot`。
+- `layers(id, scope, owner_id, name, visible, locked, sort_order, created_at)`：通用图层。`scope` 预留 `notebook / canvas / mindmap`，本版只落 `notebook`；`owner_id` 没有外键，删除本子时必须显式清掉对应图层（`delete_notebook` 已同事务处理）。
+- `notebook_inks(id, notebook_id, page, layer_id, bbox_*, style_json, …)`：一笔一行，`bbox_*` 是 0–1 归一化坐标（含 `page_inks` 同款 CHECK），`style_json` 存 `{color, width, points}`，`points` 也是归一化坐标。
+- 备份：三张表都加入 overwrite 的 DELETE 列表（`notebook_inks → layers → notebooks`）与 `copy_table_if_present`；merge 按 id 去重——本子没有天然唯一键，**同名不同 id 视为两本**，宁可多一本也不覆盖用户内容。图层只导入「本子已存在（notebook scope）或其它 scope」的行，墨迹要求本子与图层都存在。
+- **旧备份兼容**：schema < 10 的包没有这三张表，`import_has_table` 直接跳过，迁移 010 用 `CREATE TABLE IF NOT EXISTS` 建空表。
+
 ## 多画布与 AnkiDroid 导入（schema v9）
 
 - `mindmap_canvases(id, document_id, name, created_at, updated_at)` 随整库备份往返，已加入 overwrite 的 DELETE 列表、`copy_table_if_present` 与 merge 的复制表清单。

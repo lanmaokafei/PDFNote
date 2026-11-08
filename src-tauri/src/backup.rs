@@ -376,6 +376,9 @@ fn import_overwrite(
         .transaction()
         .map_err(|error| error.to_string())?;
     for table in [
+        "notebook_inks",
+        "layers",
+        "notebooks",
         "mindmap_canvases",
         "book_outline",
         "book_analysis",
@@ -415,6 +418,10 @@ fn import_overwrite(
         }
         // page_ocr 是纯派生缓存：旧备份没有该表时跳过，页面首次打开会自动重建。
         for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr", "book_analysis", "book_outline", "mindmap_canvases"] {
+            copy_table_if_present(&transaction, table)?;
+        }
+        // 0.36.0 图层与手写本：父表在前，避免外键失败。
+        for table in ["notebooks", "layers", "notebook_inks"] {
             copy_table_if_present(&transaction, table)?;
         }
         // v9 之前的备份没有画布表（main 刚被 DELETE 清掉），或布局里出现了未登记的画布 id。
@@ -618,6 +625,52 @@ fn import_merge(
                      FROM import_src.page_notes s
                      WHERE NOT EXISTS (SELECT 1 FROM page_notes p WHERE p.id = s.id)
                        AND EXISTS (SELECT 1 FROM documents d WHERE d.id = s.document_id)",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+
+        // 手写本没有天然唯一键：按 id 去重合并，同名不同 id 视为两个本子（宁可多一本，不覆盖用户内容）。
+        if import_has_table(&transaction, "notebooks")? {
+            transaction
+                .execute(
+                    "INSERT INTO notebooks (id, title, paper, created_at, updated_at)
+                     SELECT s.id, s.title, s.paper, s.created_at, s.updated_at
+                     FROM import_src.notebooks s
+                     WHERE NOT EXISTS (SELECT 1 FROM notebooks n WHERE n.id = s.id)",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        if import_has_table(&transaction, "layers")? {
+            transaction
+                .execute(
+                    "INSERT INTO layers (id, scope, owner_id, name, visible, locked, sort_order, created_at)
+                     SELECT s.id, s.scope, s.owner_id, s.name, s.visible, s.locked, s.sort_order, s.created_at
+                     FROM import_src.layers s
+                     WHERE NOT EXISTS (SELECT 1 FROM layers l WHERE l.id = s.id)
+                       AND (s.scope <> 'notebook' OR EXISTS (
+                           SELECT 1 FROM notebooks n WHERE n.id = s.owner_id
+                       ))",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        if import_has_table(&transaction, "notebook_inks")? {
+            transaction
+                .execute(
+                    "INSERT INTO notebook_inks (
+                        id, notebook_id, page, layer_id,
+                        bbox_x, bbox_y, bbox_width, bbox_height,
+                        style_json, created_at, updated_at
+                     )
+                     SELECT s.id, s.notebook_id, s.page, s.layer_id,
+                            s.bbox_x, s.bbox_y, s.bbox_width, s.bbox_height,
+                            s.style_json, s.created_at, s.updated_at
+                     FROM import_src.notebook_inks s
+                     WHERE NOT EXISTS (SELECT 1 FROM notebook_inks i WHERE i.id = s.id)
+                       AND EXISTS (SELECT 1 FROM notebooks n WHERE n.id = s.notebook_id)
+                       AND EXISTS (SELECT 1 FROM layers l WHERE l.id = s.layer_id)",
                     [],
                 )
                 .map_err(|error| error.to_string())?;

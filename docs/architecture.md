@@ -155,7 +155,7 @@ app-data/               运行时生成，不随安装包写入
 
 ## 8. 界面结构
 
-- 顶部悬浮分段栏：资料库、卡片盒、复习、当前文档、脑图；搜索与备份入口。
+- 顶部悬浮分段栏：资料库、卡片盒、笔记本、复习、当前文档、脑图；搜索与备份入口。
 - 打开文档后进入 `StudyWorkspace`：左 PDF（embedded）、右脑图（compact），中间可拖动分隔条。
 - PDF 工具坞固定在窗口底部，脑图操作在其右上角浮动。
 - 两个视图都只读取 `cardsById`，任何写操作经 Rust command 后刷新同一 store。
@@ -163,9 +163,10 @@ app-data/               运行时生成，不随安装包写入
 - 大纲在 0.35.0 变成可编辑：行内改标题、回车建行、Tab 缩进、拖拽调层级，最终都由前端纯函数算出整层 `parent_id + sort_order`，交给新命令 `apply_card_order` 单事务落库（逐条递归 CTE 防环，失败整批回滚）。画布与大纲继续共享同一份卡片数据，不引入第三份结构副本。
 - schema v3 新增 `card_tags`、`card_links`、`page_inks`：标签与链接是卡片级关系，墨迹是页面级标记（不建卡片、不进复习）。schema v9 新增 `mindmap_canvases`，并让 `surface_mindmap` 退化为派生开关。
 - 卡片盒（0.34.0）是 `cards` 的第四种投影：只读 `list_cards` 的全量结果，在内存里按标签 / 书目 / 复习状态分桶，唯一的写操作是拖拽后的 `set_card_tags`。它不新增表、不参与备份，也不改变三视图的数据流；列内按 40 张分页，避免上千张卡时一次性挂满 DOM。详见 [卡片盒看板](card-box.md)。
+- schema v10（0.36.0）新增 `notebooks`、`layers`、`notebook_inks`：手写本与 PDF 完全解耦，墨迹按 0–1 归一化坐标存、一笔一行；`layers.scope` 是多态字段（notebook / canvas / mindmap），本版只写 notebook，`owner_id` 无数据库外键，删除本子时同事务清理图层。详见 [手写笔记本与图层](notebooks.md)。
 
 ## 9. 当前落地范围
 
-已实现：完整资料库与 PDF 工作区、三视图共享 Card、卡片盒看板、脑图与主动回忆、FSRS 复习、ZIP 备份恢复、崩溃边界、在线检测升级（GitHub Releases 检查 → 下载进度 → SHA-256 校验 → 打开 DMG 安装器），macOS Release 安装包。
+已实现：完整资料库与 PDF 工作区、三视图共享 Card、卡片盒看板、可编辑结构大纲、手写笔记本与图层、脑图与主动回忆、FSRS 复习、ZIP 备份恢复、崩溃边界、在线检测升级（GitHub Releases 检查 → 下载进度 → SHA-256 校验 → 打开 DMG 安装器），macOS Release 安装包。
 
 大数据文件策略：PDF 不再经 asset 协议整本读取，而是由 Rust `read_pdf_chunk` 提供受控 Range 分块，PDF.js 使用 `PDFDataRangeTransport` 按需拉取；页面代理使用 16 项 LRU 上限。备份与文件哈希等重任务在 Tauri 线程池执行。

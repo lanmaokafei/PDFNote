@@ -5,6 +5,7 @@ import {
   FileText,
   LayoutGrid,
   Network,
+  NotebookPen,
   Search,
   Settings,
   ShieldCheck,
@@ -28,6 +29,9 @@ const ReviewWorkspace = lazy(() =>
 const BoardWorkspace = lazy(() =>
   import('./features/board/BoardWorkspace').then((module) => ({ default: module.BoardWorkspace })),
 )
+const NotebookWorkspace = lazy(() =>
+  import('./features/notebook/NotebookWorkspace').then((module) => ({ default: module.NotebookWorkspace })),
+)
 const BackupWorkspace = lazy(() =>
   import('./features/backup/BackupWorkspace').then((module) => ({ default: module.BackupWorkspace })),
 )
@@ -48,7 +52,7 @@ import { autoCheckUpdate } from './services/update'
 import type { UpdateInfo } from './services/update'
 import { useCardStore } from './store/cardStore'
 
-type View = 'library' | 'board' | 'mindmap' | 'review' | 'backup'
+type View = 'library' | 'board' | 'notebook' | 'mindmap' | 'review' | 'backup'
 
 function App() {
   const [view, setView] = useState<View>('library')
@@ -175,6 +179,14 @@ function App() {
       onClick: () => goTo('board'),
     },
     {
+      key: 'notebook' as const,
+      icon: NotebookPen,
+      label: '笔记本',
+      hint: '无限纸张',
+      active: !documentOpen && view === 'notebook',
+      onClick: () => goTo('notebook'),
+    },
+    {
       key: 'review' as const,
       icon: Sparkles,
       label: '复习',
@@ -231,6 +243,7 @@ function App() {
         { id: 'navigate', title: '切换工作区', items: [
           { id: 'library', label: '资料库', icon: BookOpen, checked: !documentOpen && view === 'library', onSelect: () => goTo('library') },
           { id: 'board', label: '卡片盒', icon: LayoutGrid, checked: !documentOpen && view === 'board', onSelect: () => goTo('board') },
+          { id: 'notebook', label: '笔记本', icon: NotebookPen, checked: !documentOpen && view === 'notebook', onSelect: () => goTo('notebook') },
           { id: 'mindmap', label: '知识脑图', icon: Network, checked: !documentOpen && view === 'mindmap', onSelect: () => goTo('mindmap') },
           { id: 'review', label: '复习', icon: Sparkles, checked: !documentOpen && view === 'review', onSelect: () => goTo('review') },
           { id: 'backup', label: '备份与恢复', icon: ShieldCheck, checked: !documentOpen && view === 'backup', onSelect: () => goTo('backup') },
@@ -294,13 +307,18 @@ function App() {
                 <button type="button" onClick={() => { setFatalError(''); void refreshStatus() }}>重试</button>
               </div>
             )}
-            <div className={`app-view${view === 'library' ? ' is-library' : ''}${view === 'mindmap' || view === 'board' ? ' is-full' : ''}`}>
+            <div className={`app-view${view === 'library' ? ' is-library' : ''}${view === 'mindmap' || view === 'board' || view === 'notebook' ? ' is-full' : ''}`}>
               {view === 'library' && (
                 <LibraryWorkspace
                   onOpenDocument={(document) => { setFatalError(''); setActiveDocument(document) }}
                   onChanged={() => void refreshStatus()}
                   focusSearchToken={searchToken}
                 />
+              )}
+              {view === 'notebook' && (
+                <Suspense fallback={<ViewLoading label="正在打开笔记本…" />}>
+                  <NotebookWorkspace />
+                </Suspense>
               )}
               {view === 'board' && (
                 <Suspense fallback={<ViewLoading label="正在整理卡片盒…" />}>

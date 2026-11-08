@@ -355,6 +355,133 @@ pub fn ink_from_row(row: &Row<'_>) -> Result<PageInk, Error> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Notebook {
+    pub id: String,
+    pub title: String,
+    pub paper: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub const NOTEBOOK_COLUMNS: &str = "id, title, paper, created_at, updated_at";
+
+pub fn notebook_from_row(row: &Row<'_>) -> Result<Notebook, Error> {
+    Ok(Notebook {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        paper: row.get(2)?,
+        created_at: row.get(3)?,
+        updated_at: row.get(4)?,
+    })
+}
+
+/// 通用图层：本版只落 notebook scope，canvas / mindmap 后续复用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Layer {
+    pub id: String,
+    pub scope: String,
+    pub owner_id: String,
+    pub name: String,
+    pub visible: bool,
+    pub locked: bool,
+    pub sort_order: i64,
+    pub created_at: String,
+}
+
+pub const LAYER_COLUMNS: &str = "id, scope, owner_id, name, visible, locked, sort_order, created_at";
+
+pub fn layer_from_row(row: &Row<'_>) -> Result<Layer, Error> {
+    Ok(Layer {
+        id: row.get(0)?,
+        scope: row.get(1)?,
+        owner_id: row.get(2)?,
+        name: row.get(3)?,
+        visible: row.get(4)?,
+        locked: row.get(5)?,
+        sort_order: row.get(6)?,
+        created_at: row.get(7)?,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotebookInk {
+    pub id: String,
+    pub notebook_id: String,
+    pub page: u32,
+    pub layer_id: String,
+    pub bbox: NormalizedBBox,
+    pub style: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub const NOTEBOOK_INK_COLUMNS: &str =
+    "id, notebook_id, page, layer_id, bbox_x, bbox_y, bbox_width, bbox_height, style_json, created_at, updated_at";
+
+pub fn notebook_ink_from_row(row: &Row<'_>) -> Result<NotebookInk, Error> {
+    Ok(NotebookInk {
+        id: row.get(0)?,
+        notebook_id: row.get(1)?,
+        page: row.get(2)?,
+        layer_id: row.get(3)?,
+        bbox: NormalizedBBox {
+            x: row.get(4)?,
+            y: row.get(5)?,
+            width: row.get(6)?,
+            height: row.get(7)?,
+        },
+        style: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or(serde_json::json!({})),
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateNotebookInput {
+    pub title: String,
+    #[serde(default = "default_paper")]
+    pub paper: String,
+}
+
+fn default_paper() -> String {
+    "lined".into()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateNotebookInput {
+    pub id: String,
+    pub title: String,
+    pub paper: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateLayerInput {
+    pub scope: String,
+    pub owner_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateLayerInput {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub visible: Option<bool>,
+    #[serde(default)]
+    pub locked: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateNotebookInkInput {
+    pub notebook_id: String,
+    pub page: u32,
+    pub layer_id: String,
+    pub bbox: NormalizedBBox,
+    pub style: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MindmapLayout {
     pub card_id: String,
     pub canvas_id: String,

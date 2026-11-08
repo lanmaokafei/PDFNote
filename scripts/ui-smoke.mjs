@@ -19,6 +19,7 @@ await page.screenshot({ path: `${output}/library.png`, fullPage: true })
 const views = [
   ['脑图', 'mindmap'],
   ['复习', 'review'],
+  ['笔记本', 'notebook'],
   ['资料库', 'library'],
 ]
 

@@ -115,6 +115,13 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
   window.__layoutState = layoutState
   const inkState = []
   window.__inkState = inkState
+  // 0.36.0：笔记本、图层、笔记本墨迹
+  const notebookState = []
+  const layerState = []
+  const notebookInkState = []
+  window.__notebookState = notebookState
+  window.__layerState = layerState
+  window.__notebookInkState = notebookInkState
   // RECALL_SEED=1：预置一条手写与一条留白，验证文档回忆会把它们一起藏起来。
   if (recallSeed) {
     inkState.push({
@@ -228,6 +235,112 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     },
     clear_book_analysis: () => null,
     list_page_notes: (args) => noteState.filter((note) => note.document_id === args?.documentId),
+    // 0.36.0 手写本：内存里维护 notebooks / layers / notebook_inks。
+    list_notebooks: () => notebookState.map((item) => ({ ...item })),
+    create_notebook: (args) => {
+      const input = args?.input ?? {}
+      const timestamp = '2026-11-08T00:00:00.000Z'
+      const notebook = {
+        id: `notebook-${notebookState.length + 1}`,
+        title: input.title ?? '未命名',
+        paper: input.paper ?? 'lined',
+        created_at: timestamp,
+        updated_at: timestamp,
+      }
+      notebookState.push(notebook)
+      layerState.push({
+        id: `layer-${layerState.length + 1}`,
+        scope: 'notebook',
+        owner_id: notebook.id,
+        name: '图层 1',
+        visible: true,
+        locked: false,
+        sort_order: 0,
+        created_at: timestamp,
+      })
+      return { ...notebook }
+    },
+    update_notebook: (args) => {
+      const input = args?.input ?? {}
+      const notebook = notebookState.find((item) => item.id === input.id)
+      if (!notebook) throw new Error('notebook not found')
+      notebook.title = input.title ?? notebook.title
+      notebook.paper = input.paper ?? notebook.paper
+      notebook.updated_at = '2026-11-08T00:00:01.000Z'
+      return { ...notebook }
+    },
+    delete_notebook: (args) => {
+      const id = args?.id
+      const index = notebookState.findIndex((item) => item.id === id)
+      if (index >= 0) notebookState.splice(index, 1)
+      for (let i = layerState.length - 1; i >= 0; i -= 1) {
+        if (layerState[i].owner_id === id) layerState.splice(i, 1)
+      }
+      for (let i = notebookInkState.length - 1; i >= 0; i -= 1) {
+        if (notebookInkState[i].notebook_id === id) notebookInkState.splice(i, 1)
+      }
+      return null
+    },
+    list_layers: (args) => layerState
+      .filter((item) => item.scope === args?.scope && item.owner_id === args?.ownerId)
+      .map((item) => ({ ...item })),
+    create_layer: (args) => {
+      const input = args?.input ?? {}
+      const order = layerState.filter((item) => item.owner_id === input.owner_id).length
+      const layer = {
+        id: `layer-${layerState.length + 1}`,
+        scope: input.scope ?? 'notebook',
+        owner_id: input.owner_id,
+        name: input.name || `图层 ${order + 1}`,
+        visible: true,
+        locked: false,
+        sort_order: order,
+        created_at: '2026-11-08T00:00:00.000Z',
+      }
+      layerState.push(layer)
+      return { ...layer }
+    },
+    update_layer: (args) => {
+      const input = args?.input ?? {}
+      const layer = layerState.find((item) => item.id === input.id)
+      if (!layer) throw new Error('layer not found')
+      if (input.name !== undefined && input.name.trim()) layer.name = input.name.trim()
+      if (input.visible !== undefined) layer.visible = input.visible
+      if (input.locked !== undefined) layer.locked = input.locked
+      return { ...layer }
+    },
+    delete_layer: (args) => {
+      const id = args?.id
+      const index = layerState.findIndex((item) => item.id === id)
+      if (index >= 0) layerState.splice(index, 1)
+      for (let i = notebookInkState.length - 1; i >= 0; i -= 1) {
+        if (notebookInkState[i].layer_id === id) notebookInkState.splice(i, 1)
+      }
+      return null
+    },
+    list_notebook_inks: (args) => notebookInkState
+      .filter((item) => item.notebook_id === args?.notebookId)
+      .map((item) => ({ ...item })),
+    create_notebook_ink: (args) => {
+      const input = args?.input ?? {}
+      const ink = {
+        id: `nink-${notebookInkState.length + 1}`,
+        notebook_id: input.notebook_id,
+        page: input.page ?? 1,
+        layer_id: input.layer_id,
+        bbox: input.bbox,
+        style: input.style,
+        created_at: '2026-11-08T00:00:00.000Z',
+        updated_at: '2026-11-08T00:00:00.000Z',
+      }
+      notebookInkState.push(ink)
+      return { ...ink }
+    },
+    delete_notebook_ink: (args) => {
+      const index = notebookInkState.findIndex((item) => item.id === args?.id)
+      if (index >= 0) notebookInkState.splice(index, 1)
+      return null
+    },
     create_page_note: (args) => {
       const input = args?.input ?? {}
       const note = {
@@ -1510,6 +1623,118 @@ if (process.env.STEP === 'recall') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'recall', before, during, after }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=notebook：手写本创建、无限页、多图层、隐藏、橡皮、纸样切换、删除。
+if (process.env.STEP === 'notebook') {
+  await page.locator('.app-segment', { hasText: '笔记本' }).click()
+  await page.waitForSelector('.notebook-shelf', { timeout: 10000 })
+
+  await page.locator('.notebook-primary').click()
+  await page.locator('[data-testid="notebook-title"]').fill('回归演草本')
+  await page.locator('[data-testid="notebook-create"]').click()
+  await page.waitForSelector('.notebook-editor', { timeout: 10000 })
+  await page.waitForSelector('.notebook-page', { timeout: 10000 })
+  await page.waitForTimeout(500)
+
+  const drawStroke = async (offsetY) => {
+    const box = await page.locator('.notebook-page').first().boundingBox()
+    if (!box) return false
+    const startX = box.x + box.width * 0.3
+    const startY = box.y + box.height * offsetY
+    await page.mouse.move(startX, startY)
+    await page.mouse.down()
+    for (let step = 1; step <= 10; step += 1) {
+      await page.mouse.move(startX + step * 14, startY + step * 4, { steps: 1 })
+    }
+    await page.mouse.up()
+    await page.waitForTimeout(400)
+    return true
+  }
+
+  const pageCount = await page.locator('.notebook-page').count()
+  if (pageCount !== 4) problems.push(`初始页数应为 4：${pageCount}`)
+
+  if (!(await drawStroke(0.25))) problems.push('没有找到第一页')
+  const afterFirst = await page.evaluate(() => window.__notebookInkState.length)
+  if (afterFirst !== 1) problems.push(`第一笔没有落库：${afterFirst}`)
+  if ((await page.locator('.notebook-page').first().locator('path').count()) < 1) problems.push('第一笔没有渲染')
+
+  // 新图层 → 第二笔画进新层
+  await page.locator('.notebook-layers header button').click()
+  await page.waitForTimeout(350)
+  if ((await page.locator('.notebook-layer').count()) !== 2) problems.push('没有新增图层')
+  const secondLayerId = await page.locator('.notebook-layer').nth(1).getAttribute('data-layer-id')
+  if (!(await drawStroke(0.42))) problems.push('第二笔没有画布')
+  const afterSecond = await page.evaluate(() => window.__notebookInkState.map((ink) => ink.layer_id))
+  if (afterSecond[1] !== secondLayerId) problems.push(`第二笔没有写进新图层：${afterSecond[1]} vs ${secondLayerId}`)
+
+  // 隐藏第二层：只剩一条可见笔迹
+  await page.locator('.notebook-layer').nth(1).locator('button[title="隐藏图层"]').click()
+  await page.waitForTimeout(400)
+  if ((await page.locator('.notebook-page').first().locator('path').count()) !== 1) {
+    problems.push('隐藏图层后笔迹没有减少')
+  }
+  await page.locator('.notebook-layer').nth(1).locator('button[title="显示图层"]').click()
+  await page.waitForTimeout(400)
+
+  // 橡皮擦掉第一笔（第一层）
+  await page.locator('.notebook-tool-group button[title="橡皮"]').click()
+  await page.locator('.notebook-tool-group button', { hasText: '大' }).click()
+  {
+    const box = await page.locator('.notebook-page').first().boundingBox()
+    if (box) {
+      const x = box.x + box.width * 0.34
+      await page.mouse.move(x, box.y + box.height * 0.22)
+      await page.mouse.down()
+      for (let step = 1; step <= 8; step += 1) {
+        await page.mouse.move(x + step * 3, box.y + box.height * 0.22 + step * 8, { steps: 1 })
+      }
+      await page.mouse.up()
+      await page.waitForTimeout(600)
+    }
+  }
+  const afterErase = await page.evaluate(() => window.__notebookInkState.length)
+  if (afterErase !== 1) problems.push(`橡皮后应剩 1 笔：${afterErase}`)
+
+  // 纸样切换
+  await page.locator('.notebook-paper select').selectOption('grid')
+  await page.waitForTimeout(400)
+  if (!(await page.locator('.notebook-page.is-grid').count())) problems.push('切换纸样后页面没有变网格')
+  const paperSaved = await page.evaluate(() => window.__notebookState[0]?.paper)
+  if (paperSaved !== 'grid') problems.push(`纸样没有写回：${paperSaved}`)
+
+  // 无限纸张：滚到底部自动加页
+  const beforeScroll = await page.locator('.notebook-page').count()
+  await page.evaluate(() => {
+    const scroller = document.querySelector('.notebook-scroll')
+    if (scroller) scroller.scrollTop = scroller.scrollHeight
+  })
+  await page.waitForTimeout(800)
+  const afterScroll = await page.locator('.notebook-page').count()
+  if (afterScroll <= beforeScroll) problems.push(`滚到底部没有加纸：${beforeScroll} → ${afterScroll}`)
+
+  if (process.env.SHOT) {
+    await page.evaluate(() => {
+      const scroller = document.querySelector('.notebook-scroll')
+      if (scroller) scroller.scrollTop = 0
+    })
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: '/tmp/pdfnote-notebook.png' })
+  }
+
+  // 返回书架并删除
+  await page.locator('.notebook-back').click()
+  await page.waitForSelector('.notebook-shelf', { timeout: 5000 })
+  if (!(await page.locator('.notebook-card').count())) problems.push('返回后没有笔记本卡片')
+  await page.locator('.notebook-card .notebook-actions button', { hasText: '删除' }).first().click()
+  await page.locator('[data-testid="notebook-delete-confirm"]').click()
+  await page.waitForTimeout(400)
+  if (await page.locator('.notebook-card').count()) problems.push('删除后仍显示笔记本卡片')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'notebook', pageCount, afterFirst, afterSecond, afterErase, paperSaved, beforeScroll, afterScroll }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

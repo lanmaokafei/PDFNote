@@ -238,3 +238,46 @@ export interface UpdatePageNoteInput {
   collapsed?: boolean
   color?: string
 }
+
+/** 手写本纸样：空白 / 横线 / 网格 / 点阵。 */
+export type PaperStyle = 'blank' | 'lined' | 'grid' | 'dot'
+
+export interface Notebook {
+  id: string
+  title: string
+  paper: PaperStyle
+  created_at: string
+  updated_at: string
+}
+
+export type LayerScope = 'notebook' | 'canvas' | 'mindmap'
+
+export interface Layer {
+  id: string
+  scope: LayerScope
+  owner_id: string
+  name: string
+  visible: boolean
+  locked: boolean
+  sort_order: number
+  created_at: string
+}
+
+export interface NotebookInk {
+  id: string
+  notebook_id: string
+  page: number
+  layer_id: string
+  bbox: NormalizedBBox
+  style: InkStyle
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateNotebookInkInput {
+  notebook_id: string
+  page: number
+  layer_id: string
+  bbox: NormalizedBBox
+  style: InkStyle
+}

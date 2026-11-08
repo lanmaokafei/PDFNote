@@ -1,4 +1,7 @@
-use crate::{ai, anki, backup, book, canvases, cards, documents, models, review, state::AppState, update};
+use crate::{
+    ai, anki, backup, book, canvases, cards, documents, models, notebooks, review,
+    state::AppState, update,
+};
 use tauri::{ipc::Response, State};
 
 /// 可选的视觉模型设置。未配置时应用不发任何网络请求。
@@ -622,6 +625,83 @@ pub fn open_update_installer(path: String) -> Result<(), String> {
 #[tauri::command(async)]
 pub fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command]
+pub fn list_notebooks(state: State<'_, AppState>) -> Result<Vec<models::Notebook>, String> {
+    notebooks::list_notebooks(&state)
+}
+
+#[tauri::command]
+pub fn create_notebook(
+    state: State<'_, AppState>,
+    input: models::CreateNotebookInput,
+) -> Result<models::Notebook, String> {
+    notebooks::create_notebook(&state, input)
+}
+
+#[tauri::command]
+pub fn update_notebook(
+    state: State<'_, AppState>,
+    input: models::UpdateNotebookInput,
+) -> Result<models::Notebook, String> {
+    notebooks::update_notebook(&state, input)
+}
+
+#[tauri::command]
+pub fn delete_notebook(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    notebooks::delete_notebook(&state, id)
+}
+
+#[tauri::command]
+pub fn list_layers(
+    state: State<'_, AppState>,
+    scope: String,
+    owner_id: String,
+) -> Result<Vec<models::Layer>, String> {
+    notebooks::list_layers(&state, scope, owner_id)
+}
+
+#[tauri::command]
+pub fn create_layer(
+    state: State<'_, AppState>,
+    input: models::CreateLayerInput,
+) -> Result<models::Layer, String> {
+    notebooks::create_layer(&state, input)
+}
+
+#[tauri::command]
+pub fn update_layer(
+    state: State<'_, AppState>,
+    input: models::UpdateLayerInput,
+) -> Result<models::Layer, String> {
+    notebooks::update_layer(&state, input)
+}
+
+#[tauri::command]
+pub fn delete_layer(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    notebooks::delete_layer(&state, id)
+}
+
+#[tauri::command]
+pub fn list_notebook_inks(
+    state: State<'_, AppState>,
+    notebook_id: String,
+) -> Result<Vec<models::NotebookInk>, String> {
+    notebooks::list_notebook_inks(&state, notebook_id)
+}
+
+#[tauri::command]
+pub fn create_notebook_ink(
+    state: State<'_, AppState>,
+    input: models::CreateNotebookInkInput,
+) -> Result<models::NotebookInk, String> {
+    notebooks::create_notebook_ink(&state, input)
+}
+
+#[tauri::command]
+pub fn delete_notebook_ink(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    notebooks::delete_notebook_ink(&state, id)
 }
 
 #[cfg(test)]

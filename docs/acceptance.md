@@ -16,6 +16,7 @@
 | 安装包启动清理（0.32.2） | `cargo test --lib update::` | 已装版本 DMG 与 `.sha256`/`.part` 删除、更新版本保留、无关文件不误删 |
 | 色块主题与画布设置（0.33.0） | `STEP=style CARD_COUNT=3 STYLE_LINK=1` | 实心头背景 = 主色、字色对比度 ≥4.5、无左侧色条；深墨连线无箭头带圆点；链接虚线跟随色调、标签可隐藏；单项覆盖与重载保留 |
 | 卡片盒看板（0.34.0） | `STEP=board BOARD=1 CARD_COUNT=8` | 标签/书目/状态三种分栏，空标签列保留；8 卡 10 落位、未分组 2；过滤与搜索正确；拖 c1 到空标签列后 `set_card_tags` 收到 `[空标签]`；点卡片回到原文 |
+| 可编辑结构大纲（0.35.0） | `STEP=outline-edit CARD_COUNT=3` | 行内改标题写回显示字段；回车建同级并进入编辑；Tab / Shift+Tab 改父级与深度；拖 c3 到 c2 中间成为子级；同级 sort_order 无重复 |
 | 文档回忆藏手写与留白（0.34.0） | `STEP=recall RECALL_SEED=1 CARD_COUNT=3` | 回忆态墨迹 1→0、留白 1→0、遮挡块 1；退出后恢复 1/1 |
 | 文字层冒烟 | `node scripts/textlayer-smoke.mjs` | 通过：透明 DOM 文字可原生拖选「信息系统项目管」，选区 bbox 换算正确 |
 | 右键菜单冒烟 | `node scripts/contextmenu-smoke.mjs` | 通过：原生 Reload 菜单被接管、菜单项执行动作、右下角翻转、键盘导航、输入框保留系统菜单、选区读取与跨层判定 |

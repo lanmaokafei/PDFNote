@@ -336,6 +336,14 @@ pub fn move_card(
 }
 
 #[tauri::command]
+pub fn apply_card_order(
+    state: State<'_, AppState>,
+    updates: Vec<models::CardOrderUpdate>,
+) -> Result<(), String> {
+    cards::apply_card_order(&state, updates)
+}
+
+#[tauri::command]
 pub fn set_card_collapsed(
     state: State<'_, AppState>,
     id: String,

@@ -63,6 +63,7 @@ pub fn run() {
             commands::list_mindmap_layout,
             commands::save_mindmap_layout,
             commands::move_card,
+            commands::apply_card_order,
             commands::set_card_collapsed,
             commands::set_card_tags,
             commands::list_tags,

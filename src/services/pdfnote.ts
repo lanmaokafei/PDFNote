@@ -7,6 +7,7 @@ import type {
   Card,
   CreateCardInput,
   CardLink,
+  CardOrderUpdate,
   Document,
   InkStyle,
   CreateMindmapCanvasInput,
@@ -256,6 +257,12 @@ export async function saveMindmapLayout(layouts: MindmapLayoutInput[]): Promise<
 export async function moveCard(id: string, parentId: string | null, sortOrder: number): Promise<Card> {
   desktopOnly()
   return invoke('move_card', { id, parentId, sortOrder })
+}
+/** 大纲编辑：一次事务提交整层「父节点 + 顺序」，后端逐条防环、失败整批回滚。 */
+export async function applyCardOrder(updates: CardOrderUpdate[]): Promise<void> {
+  if (!updates.length) return
+  desktopOnly()
+  return invoke('apply_card_order', { updates })
 }
 export async function setCardCollapsed(id: string, collapsed: boolean): Promise<Card> {
   desktopOnly()

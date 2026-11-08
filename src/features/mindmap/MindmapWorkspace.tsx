@@ -41,6 +41,7 @@ import type { Card, CardLink, MindmapCanvas, MindmapLayoutInput, Rating } from '
 import { ContextMenu } from '../../ui/ContextMenu'
 import { useContextMenu, type ContextMenuSection } from '../../ui/contextMenuCore'
 import {
+  applyCardOrder,
   clearMindmapCards,
   createMindmapCanvas,
   exportMarkdownFile,
@@ -68,6 +69,17 @@ import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
 import { InkEdge } from './MindmapEdge'
 import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown } from './outline'
+import {
+  buildChildMap,
+  collectDescendants,
+  dropPlan,
+  indentPlan,
+  insertAfterPlan,
+  insertChildPlan,
+  outdentPlan,
+  outlineEditField,
+  type DropPosition,
+} from './outlineEdit'
 import { ExpandableField } from './ExpandableField'
 import { CanvasSwitcher } from './CanvasSwitcher'
 import { AnkiImportDialog } from '../book/AnkiImportDialog'
@@ -267,6 +279,16 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
    * 切换动作卡住几秒；其余行按需追加，成本随用户实际翻到的位置增长。
    */
   const [outlineLimit, setOutlineLimit] = useState(OUTLINE_PAGE)
+  /** 大纲行内编辑：同一时刻只有一行在改；ref 与 state 同步，防止 blur 与回车重复提交。 */
+  const [outlineEditing, setOutlineEditing] = useState<string | null>(null)
+  const [outlineDraft, setOutlineDraft] = useState('')
+  const [outlineDrag, setOutlineDrag] = useState<string | null>(null)
+  const [outlineDrop, setOutlineDrop] = useState<{ id: string; position: DropPosition } | null>(null)
+  const [outlineFocusTick, setOutlineFocusTick] = useState(0)
+  const outlineEditingRef = useRef<string | null>(null)
+  const outlineDragRef = useRef<string | null>(null)
+  const outlineDragDescendants = useRef<Set<string>>(new Set())
+  const outlineInputRef = useRef<HTMLInputElement | null>(null)
   /**
    * 低缩放（<0.45）时节点只画标题条。用滞后阈值（退出要回到 0.55）避免
    * 用户停在临界点附近时反复切换，反而更卡。
@@ -1285,6 +1307,214 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     })
   }, [busy, runTask, syncCards])
 
+  const beginOutlineEdit = useCallback((card: Card) => {
+    if (busy) return
+    outlineEditingRef.current = card.id
+    setOutlineEditing(card.id)
+    // 行里显示的是「问题 → 摘录 → 笔记」第一个非空字段，编辑也改同一处。
+    setOutlineDraft(card[outlineEditField(card)])
+    setOutlineFocusTick((value) => value + 1)
+  }, [busy])
+
+  const cancelOutlineEdit = useCallback(() => {
+    outlineEditingRef.current = null
+    setOutlineEditing(null)
+    setOutlineDraft('')
+  }, [])
+
+  /**
+   * 提交行内编辑。`discardEmpty` 只给 blur 用：新建的空行没填内容就离开时删掉，
+   * 避免留下一堆「未命名卡片」。回车/缩进主动提交时不删，防止刚建的行被顺手带走。
+   */
+  const saveOutlineEdit = useCallback(async (discardEmpty: boolean) => {
+    const id = outlineEditingRef.current
+    if (!id) return
+    outlineEditingRef.current = null
+    setOutlineEditing(null)
+    // 直接读 DOM 值：快速输入后立刻按 Tab/回车时，state 可能还没提交到这次回调。
+    const draft = (outlineInputRef.current?.value ?? outlineDraft).trim()
+    setOutlineDraft('')
+    const card = useCardStore.getState().cardsById[id]
+    if (!card) return
+    const field = outlineEditField(card)
+    const current = card[field].trim()
+    if (draft === current) return
+    try {
+      if (!draft && discardEmpty && !card.question.trim() && !card.excerpt.trim() && !card.user_note.trim()) {
+        await deleteCard(id)
+        await syncCards()
+        setNotice('已移除空行。')
+        return
+      }
+      const content = {
+        id,
+        question: card.question,
+        excerpt: card.excerpt,
+        user_note: card.user_note,
+      }
+      content[field] = draft
+      await updateCardContent({
+        ...content,
+        link_aliases: card.link_aliases,
+      })
+      await syncCards()
+    } catch (reason) {
+      setError(`标题保存失败：${errorMessage(reason)}`)
+    }
+  }, [deleteCard, outlineDraft, syncCards])
+
+  /** 回车新建：同级插到当前行后面，⌘/Ctrl+回车挂到当前行下面。 */
+  const createOutlineCard = useCallback(async (baseId: string, mode: 'sibling' | 'child') => {
+    if (busy) return
+    const base = useCardStore.getState().cardsById[baseId]
+    if (!base) return
+    const parentId = mode === 'child' ? base.id : base.parent_id
+    const anchor = (parentId ? positions[parentId] : undefined)
+      ?? positions[base.id]
+      ?? readMindmapViewportCenter()
+    const point = anchor ? { x: anchor.x + TREE_X_GAP, y: anchor.y + TREE_Y_GAP } : undefined
+    try {
+      const created = await createCardInStore({
+        question: '',
+        parent_id: parentId ?? undefined,
+        sort_order: 0,
+        canvas_id: canvasId,
+        x: point?.x,
+        y: point?.y,
+      })
+      const plan = mode === 'child'
+        ? insertChildPlan(cards, base.id, created.id)
+        : insertAfterPlan(cards, base.id, created.id)
+      if (plan) await applyCardOrder(plan)
+      setLayoutCardIds((current) => new Set(current).add(created.id))
+      if (point) setPositions((current) => ({ ...current, [created.id]: point }))
+      await syncCards()
+      outlineEditingRef.current = created.id
+      setOutlineEditing(created.id)
+      setOutlineDraft('')
+      setOutlineFocusTick((value) => value + 1)
+      setNotice(mode === 'child' ? '已新建子级，继续输入标题。' : '已新建同级卡片，继续输入标题。')
+    } catch (reason) {
+      setError(`新建卡片失败：${errorMessage(reason)}`)
+    }
+  }, [busy, canvasId, cards, createCardInStore, positions, syncCards])
+
+  const moveOutlineCard = useCallback(async (id: string, kind: 'indent' | 'outdent') => {
+    const plan = kind === 'indent' ? indentPlan(cards, id) : outdentPlan(cards, id)
+    if (!plan) {
+      setNotice(kind === 'indent' ? '已经是第一个子节点，无法再缩进。' : '已经是顶层，无法再提升。')
+      return
+    }
+    await runTask(async () => {
+      await applyCardOrder(plan)
+      await syncCards()
+      setNotice(kind === 'indent' ? '已缩进为上一项的子级。' : '已提升一级。')
+    })
+  }, [cards, runTask, syncCards])
+
+  const handleOutlineKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    // 中文输入法用回车确认候选词时不能建行。
+    if (event.nativeEvent.isComposing) return
+    const id = outlineEditingRef.current
+    if (!id) return
+
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      const mode = event.metaKey || event.ctrlKey ? 'child' : 'sibling'
+      const card = useCardStore.getState().cardsById[id]
+      const draft = (outlineInputRef.current?.value ?? outlineDraft).trim()
+      // 空行再回车没有意义：留在原地，避免连出空卡片。
+      if (!draft && card && !card.question.trim() && !card.excerpt.trim() && !card.user_note.trim()) return
+      void (async () => {
+        await saveOutlineEdit(false)
+        await createOutlineCard(id, mode)
+      })()
+      return
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      cancelOutlineEdit()
+      return
+    }
+
+    if (event.key === 'Tab') {
+      event.preventDefault()
+      const direction = event.shiftKey ? 'outdent' : 'indent'
+      const draft = outlineInputRef.current?.value ?? outlineDraft
+      void (async () => {
+        await saveOutlineEdit(false)
+        await moveOutlineCard(id, direction)
+        // 缩进后行会换位置，重新挂载输入框并把文本带回去。
+        outlineEditingRef.current = id
+        setOutlineDraft(draft)
+        setOutlineEditing(id)
+        setOutlineFocusTick((value) => value + 1)
+      })()
+    }
+  }, [cancelOutlineEdit, createOutlineCard, moveOutlineCard, outlineDraft, saveOutlineEdit])
+
+  const handleOutlineDragStart = useCallback((event: React.DragEvent<HTMLDivElement>, card: Card) => {
+    if (busy || outlineEditing) return
+    outlineDragRef.current = card.id
+    // 后代集合只在开始拖时算一次；dragover 高频触发，不能每次扫全表。
+    outlineDragDescendants.current = collectDescendants(buildChildMap(cards), card.id)
+    setOutlineDrag(card.id)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', card.id)
+  }, [busy, cards, outlineEditing])
+
+  const handleOutlineDragOver = useCallback((event: React.DragEvent<HTMLDivElement>, card: Card) => {
+    const dragId = outlineDragRef.current
+    if (!dragId || dragId === card.id || outlineDragDescendants.current.has(card.id)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    const rect = event.currentTarget.getBoundingClientRect()
+    const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
+    const position: DropPosition = ratio < 0.28 ? 'before' : ratio > 0.72 ? 'after' : 'inside'
+    if (outlineDrop?.id !== card.id || outlineDrop.position !== position) {
+      setOutlineDrop({ id: card.id, position })
+    }
+  }, [outlineDrop])
+
+  const handleOutlineDrop = useCallback((event: React.DragEvent<HTMLDivElement>, card: Card) => {
+    event.preventDefault()
+    const dragId = outlineDragRef.current
+    const position = outlineDrop?.id === card.id ? outlineDrop.position : 'after'
+    outlineDragRef.current = null
+    setOutlineDrag(null)
+    setOutlineDrop(null)
+    if (!dragId || dragId === card.id) return
+    const plan = dropPlan(cards, dragId, card.id, position)
+    if (!plan) {
+      setNotice('不能把卡片移动到它自己的子级下面。')
+      return
+    }
+    void runTask(async () => {
+      await applyCardOrder(plan)
+      await syncCards()
+      setNotice('已调整大纲结构。')
+    })
+  }, [cards, outlineDrop, runTask, syncCards])
+
+  const endOutlineDrag = useCallback(() => {
+    outlineDragRef.current = null
+    setOutlineDrag(null)
+    setOutlineDrop(null)
+  }, [])
+
+  // 新建 / 缩进后重新聚焦输入框（行在列表里换了位置，DOM 会被移动）。
+  useEffect(() => {
+    if (!outlineEditing) return
+    const frame = window.requestAnimationFrame(() => {
+      const input = outlineInputRef.current
+      if (!input) return
+      input.focus()
+      input.scrollIntoView({ block: 'nearest' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [outlineEditing, outlineFocusTick])
+
   const handleExportMarkdown = useCallback(async () => {
     if (exporting) return
     setExporting(true)
@@ -1717,10 +1947,10 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
             {viewMode === 'outline' && (
             <div className="mindmap-outline" onContextMenu={handleOutlinePaneContextMenu}>
               <div className="mindmap-outline-head">
-                <div>
-                  <strong>大纲视图</strong>
-                  <span>{cards.length} 张卡片 · 点击标题可编辑，折叠状态与脑图同步</span>
-                </div>
+                  <div>
+                    <strong>大纲视图</strong>
+                    <span>{cards.length} 张卡片 · 点击标题直接改；回车建同级、⌘↩ 建子级、Tab 缩进、拖拽调层级</span>
+                  </div>
                 <div className="mindmap-outline-actions">
                   {compact && (
                     <button type="button" onClick={() => setViewMode('canvas')}>返回画布</button>
@@ -1736,9 +1966,16 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
                   const collapsed = outlineCollapsedIds.has(card.id)
                   return (
                     <div
-                      className={`mindmap-outline-row mindmap-tone-${toneByCard.get(card.id) ?? 0}`}
+                      className={`mindmap-outline-row mindmap-tone-${toneByCard.get(card.id) ?? 0}${outlineDrag === card.id ? ' is-dragging' : ''}${outlineDrop?.id === card.id ? ` is-drop-${outlineDrop.position}` : ''}`}
                       key={card.id}
+                      data-card-id={card.id}
+                      data-depth={depth}
+                      draggable={!busy && outlineEditing !== card.id}
                       style={{ paddingLeft: `${12 + depth * 22}px` }}
+                      onDragStart={(event) => handleOutlineDragStart(event, card)}
+                      onDragOver={(event) => handleOutlineDragOver(event, card)}
+                      onDrop={(event) => handleOutlineDrop(event, card)}
+                      onDragEnd={endOutlineDrag}
                       onContextMenu={(event) => handleOutlineContextMenu(event, card)}
                     >
                       <button
@@ -1752,9 +1989,28 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
                       </button>
                       <span className="mindmap-outline-badge" aria-hidden="true">Q</span>
                       <div className="mindmap-outline-body">
-                        <button type="button" className="mindmap-outline-title" onClick={() => setEditor(card.id)}>
-                          {outlineTitle(card)}
-                        </button>
+                        {outlineEditing === card.id ? (
+                          <input
+                            ref={outlineInputRef}
+                            className="mindmap-outline-input"
+                            data-testid="outline-input"
+                            defaultValue={outlineDraft}
+                            autoFocus
+                            spellCheck={false}
+                            placeholder="输入标题；回车建下一行，⌘↩ 建子级"
+                            onBlur={() => void saveOutlineEdit(true)}
+                            onKeyDown={handleOutlineKeyDown}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className="mindmap-outline-title"
+                            title="点击直接改标题"
+                            onClick={() => beginOutlineEdit(card)}
+                          >
+                            {outlineTitle(card)}
+                          </button>
+                        )}
                         {card.excerpt.trim() && (
                           <ExpandableField
                             field="excerpt"

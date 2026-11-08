@@ -284,7 +284,7 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
         question: input.question ?? '',
         excerpt: input.excerpt ?? '',
         user_note: input.user_note ?? '',
-        parent_id: null,
+        parent_id: input.parent_id ?? null,
         sort_order: input.sort_order ?? 0,
         source_ref: input.source_ref ?? null,
         excerpt_image: null,
@@ -458,6 +458,19 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       card.updated_at = new Date().toISOString()
       window.__cardState = cardState
       return { ...card }
+    },
+    // 大纲编辑：一次提交整层结构；mock 只按 updates 改父子与顺序。
+    apply_card_order: (args) => {
+      const updates = args?.updates ?? []
+      window.__orderCalls = (window.__orderCalls ?? 0) + 1
+      window.__lastOrder = updates
+      for (const update of updates) {
+        const card = cardState.find((item) => item.id === update.id)
+        if (!card) throw new Error(`卡片不存在：${update.id}`)
+        card.parent_id = update.parent_id ?? null
+        card.sort_order = update.sort_order
+      }
+      return null
     },
     list_page_inks: () => inkState.slice(),
     create_page_ink: (args) => {
@@ -1497,6 +1510,91 @@ if (process.env.STEP === 'recall') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'recall', before, during, after }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=outline-edit：大纲行内改标题、回车建同级、Tab/Shift+Tab 缩进、拖拽成子级。
+if (process.env.STEP === 'outline-edit') {
+  await page.locator('.document-card').first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(900)
+  await page.getByRole('button', { name: /大纲/ }).first().click()
+  await page.waitForSelector('.mindmap-outline-list', { timeout: 10000 })
+  await page.waitForTimeout(300)
+
+  const readCards = () => page.evaluate(() => window.__cardState.map((card) => ({
+    id: card.id,
+    parent_id: card.parent_id,
+    sort_order: card.sort_order,
+    question: card.question,
+  })))
+
+  // 1) 行内改标题 → 回车建同级
+  await page.locator('.mindmap-outline-title').first().click()
+  await page.locator('[data-testid="outline-input"]').waitFor()
+  await page.locator('[data-testid="outline-input"]').fill('改过的一级标题')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(900)
+
+  const afterEnter = await readCards()
+  const renamed = afterEnter.find((card) => card.id === 'c1')
+  if (renamed?.question !== '改过的一级标题') problems.push(`行内标题没有写回问题字段：${renamed?.question}`)
+  const created = afterEnter.find((card) => card.id.startsWith('new-card-'))
+  if (!created) problems.push('回车没有新建卡片')
+  const orderAfterEnter = await page.evaluate(() => window.__lastOrder ?? [])
+  if (!orderAfterEnter.some((item) => item.id === created?.id && item.parent_id === null && item.sort_order === 1)) {
+    problems.push(`回车后新卡没有排到同级第二位：${JSON.stringify(orderAfterEnter)}`)
+  }
+  if (!(await page.locator('[data-testid="outline-input"]').count())) problems.push('新建后没有进入编辑态')
+
+  // 2) Tab 缩进为上一项（c1）的子级
+  await page.locator('[data-testid="outline-input"]').fill('子项标题')
+  const draftBeforeTab = await page.locator('[data-testid="outline-input"]').inputValue()
+  if (draftBeforeTab !== '子项标题') problems.push(`Tab 前输入框内容异常：${draftBeforeTab}`)
+  await page.keyboard.press('Tab')
+  await page.waitForTimeout(900)
+  const afterIndent = await readCards()
+  const indented = afterIndent.find((card) => card.id === created?.id)
+  if (indented?.parent_id !== 'c1') problems.push(`Tab 后父级应为 c1：${indented?.parent_id}`)
+  if (indented?.question !== '子项标题') problems.push(`Tab 前没有保存标题：${indented?.question}`)
+  const depthOfCreated = await page
+    .locator(`.mindmap-outline-row[data-card-id="${created?.id}"]`)
+    .getAttribute('data-depth')
+  if (depthOfCreated !== '1') problems.push(`Tab 后大纲深度应为 1：${depthOfCreated}`)
+  if (process.env.SHOT) {
+    await page.locator('.mindmap-outline').screenshot({ path: '/tmp/pdfnote-outline-edit.png' })
+  }
+
+  // 3) Shift+Tab 提升回顶层，排在原父节点后面
+  await page.keyboard.press('Shift+Tab')
+  await page.waitForTimeout(900)
+  const afterOutdent = await readCards()
+  const outdented = afterOutdent.find((card) => card.id === created?.id)
+  if (outdented?.parent_id !== null) problems.push(`Shift+Tab 后父级应为空：${outdented?.parent_id}`)
+  if (outdented?.sort_order !== 1) problems.push(`提升后应排第 2：${outdented?.sort_order}`)
+
+  // 4) 拖到另一行中间：成为它的子级
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  await page.locator('.mindmap-outline-row[data-card-id="c3"]')
+    .dragTo(page.locator('.mindmap-outline-row[data-card-id="c2"]'))
+  await page.waitForTimeout(900)
+  const afterDrag = await readCards()
+  const dragged = afterDrag.find((card) => card.id === 'c3')
+  if (dragged?.parent_id !== 'c2') problems.push(`拖拽后 c3 的父级应为 c2：${dragged?.parent_id}`)
+
+  // 5) 同级 sort_order 不能重复
+  const orderMap = afterDrag.reduce((acc, item) => {
+    const key = item.parent_id ?? 'root'
+    acc[key] = [...(acc[key] ?? []), item.sort_order]
+    return acc
+  }, {})
+  const duplicated = Object.entries(orderMap)
+    .filter(([, orders]) => new Set(orders).size !== orders.length)
+  if (duplicated.length) problems.push(`同级出现重复 sort_order：${JSON.stringify(duplicated)}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'outline-edit', draftBeforeTab, afterEnter, afterIndent, afterOutdent, afterDrag }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

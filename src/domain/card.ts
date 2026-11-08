@@ -162,6 +162,13 @@ export interface MindmapLayoutInput {
   y: number
 }
 
+/** 大纲编辑 / 拖拽一次提交的整层结构变更：谁是父、排第几。 */
+export interface CardOrderUpdate {
+  id: string
+  parent_id: string | null
+  sort_order: number
+}
+
 export interface ReviewInput {
   card_id: string
   client_event_id: string

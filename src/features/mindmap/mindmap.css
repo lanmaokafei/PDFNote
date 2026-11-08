@@ -738,6 +738,7 @@ button.mindmap-field-label:hover { color: #456c43; }
 }
 
 .mindmap-outline-row {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -748,6 +749,43 @@ button.mindmap-field-label:hover { color: #456c43; }
 }
 
 .mindmap-outline-row:hover { background: var(--tone-wash); }
+
+/* 拖拽：上 / 下细线表示插到前后，整行高亮表示挂成子级。 */
+.mindmap-outline-row.is-dragging { opacity: .45; }
+.mindmap-outline-row.is-drop-before::before,
+.mindmap-outline-row.is-drop-after::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: #6f8a63;
+}
+.mindmap-outline-row.is-drop-before::before { top: -1px; }
+.mindmap-outline-row.is-drop-after::after { bottom: -1px; }
+.mindmap-outline-row.is-drop-inside {
+  background: #edf3e5;
+  box-shadow: inset 3px 0 0 var(--tone-bar), inset 0 0 0 1px #a8b99a;
+}
+
+.mindmap-outline-input {
+  width: 100%;
+  padding: 2px 6px;
+  border: 1px solid #a8b99a;
+  border-radius: 4px;
+  color: #2f3c32;
+  background: #ffffff;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.5;
+  outline: none;
+}
+.mindmap-outline-input:focus {
+  border-color: #6f8a63;
+  box-shadow: 0 0 0 2px #6f8a6320;
+}
+.mindmap-outline-input::placeholder { color: #a6b09f; }
 
 /* 上千行时首屏只挂 200 行，剩下的按需追加，避免切换大纲卡住几秒。 */
 .mindmap-outline-more { padding: 16px 18px 24px; text-align: center; }

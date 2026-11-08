@@ -160,6 +160,7 @@ app-data/               运行时生成，不随安装包写入
 - PDF 工具坞固定在窗口底部，脑图操作在其右上角浮动。
 - 两个视图都只读取 `cardsById`，任何写操作经 Rust command 后刷新同一 store。
 - 脑图可选「画布 / 大纲」投影；大纲按同一 `parent_id + sort_order` 生成，导出 Markdown 由 Rust 命令落盘。0.20.0 起脑图工具坞多一行「画布选择器 + 导入 Anki」，嵌入视图的画布坞、操作按钮、回忆状态依次下移避免遮挡。
+- 大纲在 0.35.0 变成可编辑：行内改标题、回车建行、Tab 缩进、拖拽调层级，最终都由前端纯函数算出整层 `parent_id + sort_order`，交给新命令 `apply_card_order` 单事务落库（逐条递归 CTE 防环，失败整批回滚）。画布与大纲继续共享同一份卡片数据，不引入第三份结构副本。
 - schema v3 新增 `card_tags`、`card_links`、`page_inks`：标签与链接是卡片级关系，墨迹是页面级标记（不建卡片、不进复习）。schema v9 新增 `mindmap_canvases`，并让 `surface_mindmap` 退化为派生开关。
 - 卡片盒（0.34.0）是 `cards` 的第四种投影：只读 `list_cards` 的全量结果，在内存里按标签 / 书目 / 复习状态分桶，唯一的写操作是拖拽后的 `set_card_tags`。它不新增表、不参与备份，也不改变三视图的数据流；列内按 40 张分页，避免上千张卡时一次性挂满 DOM。详见 [卡片盒看板](card-box.md)。
 

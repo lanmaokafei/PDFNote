@@ -363,6 +363,15 @@ pub struct MindmapLayout {
     pub updated_at: String,
 }
 
+/// 大纲编辑 / 拖拽一次提交的整层结构变更：谁是父、排第几。
+/// 顺序敏感——同一批里先写入的变更会影响后一条的防环判定。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CardOrderUpdate {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub sort_order: i64,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct MindmapLayoutInput {
     pub card_id: String,

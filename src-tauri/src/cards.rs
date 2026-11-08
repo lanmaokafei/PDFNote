@@ -2,9 +2,10 @@ use crate::{
     canvases,
     models::{
         annotation_from_row, attach_tags, card_from_row, ink_from_row, link_from_row, now,
-        Annotation, AnnotationGeometry, AnnotationInput, Card, CardLink, CreateCardInput,
-        MindmapLayout, MindmapLayoutInput, NormalizedBBox, PageInk, UpdateCardContentInput,
-        ANNOTATION_COLUMNS, CARD_COLUMNS, CARD_LINK_COLUMNS, PAGE_INK_COLUMNS,
+        Annotation, AnnotationGeometry, AnnotationInput, Card, CardLink, CardOrderUpdate,
+        CreateCardInput, MindmapLayout, MindmapLayoutInput, NormalizedBBox, PageInk,
+        UpdateCardContentInput, ANNOTATION_COLUMNS, CARD_COLUMNS, CARD_LINK_COLUMNS,
+        PAGE_INK_COLUMNS,
     },
     state::AppState,
 };
@@ -380,6 +381,51 @@ pub fn move_card(
     let card = get_card(&transaction, &id)?;
     transaction.commit().map_err(|error| error.to_string())?;
     Ok(card)
+}
+
+/// 大纲编辑 / 拖拽：一次事务提交整层「父节点 + 顺序」变更。
+/// 逐条复用 move_card 的防环检查，同一批里先写入的移动会立刻影响后一条的判定；
+/// 任何一条失败都整批回滚，避免出现「一半移走一半没移」的树。
+pub fn apply_card_order(
+    state: &AppState,
+    updates: Vec<CardOrderUpdate>,
+) -> Result<(), String> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+    if updates.len() > 5_000 {
+        return Err("too many card order updates".into());
+    }
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let timestamp = now();
+    for update in &updates {
+        get_card(&transaction, &update.id)?;
+        if let Some(parent_id) = &update.parent_id {
+            get_card(&transaction, parent_id)?;
+            let creates_cycle: bool = transaction
+                .query_row(
+                    "WITH RECURSIVE subtree(id) AS (
+                        SELECT id FROM cards WHERE id = ?1
+                        UNION ALL
+                        SELECT c.id FROM cards AS c JOIN subtree AS s ON c.parent_id = s.id
+                     ) SELECT EXISTS(SELECT 1 FROM subtree WHERE id = ?2)",
+                    params![update.id, parent_id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            if creates_cycle {
+                return Err("moving a card below its descendant would create a cycle".into());
+            }
+        }
+        transaction
+            .execute(
+                "UPDATE cards SET parent_id = ?1, sort_order = ?2, updated_at = ?3 WHERE id = ?4",
+                params![update.parent_id, update.sort_order, timestamp, update.id],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 pub fn set_card_collapsed(state: &AppState, id: String, collapsed: bool) -> Result<Card, String> {
@@ -1291,6 +1337,51 @@ mod tests {
         assert_eq!(annotations[0].card_id, first.id);
         assert!(merge_cards(&state, vec![first.id.clone()]).is_err());
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn apply_card_order_moves_and_renumbers_in_one_batch() {
+        let (_directory, state) = test_state();
+        let a = create_card(&state, input("a", None)).unwrap();
+        let b = create_card(&state, input("b", None)).unwrap();
+        let c = create_card(&state, input("c", None)).unwrap();
+        apply_card_order(
+            &state,
+            vec![
+                CardOrderUpdate { id: c.id.clone(), parent_id: Some(a.id.clone()), sort_order: 0 },
+                CardOrderUpdate { id: b.id.clone(), parent_id: None, sort_order: 0 },
+                CardOrderUpdate { id: a.id.clone(), parent_id: None, sort_order: 1 },
+            ],
+        )
+        .unwrap();
+        let moved = get_card(&state.db().unwrap(), &c.id).unwrap();
+        assert_eq!(moved.parent_id.as_deref(), Some(a.id.as_str()));
+        assert_eq!(moved.sort_order, 0);
+        let first = get_card(&state.db().unwrap(), &a.id).unwrap();
+        assert_eq!(first.sort_order, 1);
+        let second = get_card(&state.db().unwrap(), &b.id).unwrap();
+        assert_eq!(second.sort_order, 0);
+    }
+
+    #[test]
+    fn apply_card_order_rejects_cycle_and_rolls_back_batch() {
+        let (_directory, state) = test_state();
+        let parent = create_card(&state, input("parent", None)).unwrap();
+        let child = create_card(&state, input("child", Some(parent.id.clone()))).unwrap();
+        let other = create_card(&state, input("other", None)).unwrap();
+        let error = apply_card_order(
+            &state,
+            vec![
+                // 第一条本身合法；第二条把父节点挂到自己的子节点下面，形成环。
+                CardOrderUpdate { id: other.id.clone(), parent_id: None, sort_order: 7 },
+                CardOrderUpdate { id: parent.id.clone(), parent_id: Some(child.id.clone()), sort_order: 0 },
+            ],
+        )
+        .unwrap_err();
+        assert!(error.contains("cycle"));
+        // 整批回滚：第一条也不该落库。
+        let untouched = get_card(&state.db().unwrap(), &other.id).unwrap();
+        assert_ne!(untouched.sort_order, 7);
     }
 
     #[test]

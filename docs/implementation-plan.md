@@ -75,6 +75,7 @@
 - Rust 37 项测试通过（含 v6 迁移、标题链接别名、页面文字缓存、旧备份兼容与 2 项 Vision 真机）、前端 35 项测试、TypeScript 构建、Oxlint 0 warning 全部通过；视觉模型通道含本地 mock 端到端测试。
 - Tauri release `.app` / DMG 已生成并通过 `hdiutil verify`；首次启动建库且 `quick_check=ok`。
 - 阶段 6：macOS 交付闭环已完成（0.32.0，含扫描页可选文字层、全视图元素右键菜单、标题链接、可选 AI 公式识别、可设层级的 AI 拆书、卡片正文展开阅读、多画布脑图与 AnkiDroid txt 导入、复习工作区的主动回忆输入与本地答案对比反馈、大画布视口裁剪，以及在线检测升级；schema v9，0.21.0–0.24.0 均不改数据库结构）。剩余为签名/公证、系统强退恢复演练与性能采样；Windows/Linux 不在交付范围内。
+- 0.34.0 新增卡片盒看板：不建表，读取 `list_cards`（上限 1 万）后在内存按标签 / 书目 / 复习状态分桶，二级分组与关键词 / 书目 / 标签 / 状态 / 到期过滤都在前端完成；唯一写操作是拖拽后 `set_card_tags`（去来源标签、加目标标签，拒绝拖回「未分组」）。每列 40 张分页，`STEP=board BOARD=1 CARD_COUNT=8` 覆盖分栏、过滤与拖拽。文档回忆同时补上「隐藏手写墨迹与页边留白」，`STEP=recall RECALL_SEED=1` 覆盖进出回忆的 DOM 数量变化。详见 `docs/card-box.md`。
 - 0.32.0 新增在线检测升级：Rust 侧 `update.rs` 检查 GitHub Releases `latest`、版本数值比较、流式下载 + `update-download-progress` 进度事件 + SHA-256 校验（`.part` 落盘）、`open` 挂载 DMG；前端 `UpdatePrompt` 走「提示 → 下载进度 → 点击升级」，设置页提供手动检查入口。网络请求不进前端（CSP 不放开），浏览器预览明确报错。`node scripts/update-smoke.mjs` 覆盖全链路。
 - 0.25.0 起导入 PDF 时同事务创建专属画布；打开时按「用户偏好 → 本书最新画布 → 补建 → 全局 main」解析，画布解析完成前不加载成员。`STEP=doc-canvas` 覆盖补建、命名、偏好与重开复用。
 - 0.24.0 起新卡落点由右栏画布视口中心决定：`viewport.ts` 共享中心点，`nextMindmapInsertPoint()` 换算左上角并做 3×3 环错开，坐标随 `create_card.x/y` 一次写库；`(0,0)` 视为未定位，由刷新补到中心。`STEP=insert-center` 覆盖。

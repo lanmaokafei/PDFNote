@@ -61,7 +61,8 @@ CREATE INDEX idx_page_notes_document_page ON page_notes (document_id, page, anch
 
 - 留白**不进复习队列**，也不是脑图节点。想让它参与复习：复制内容新建一张独立卡片。
 - 手写仍然走 `page_inks`（墨迹），与留白互不影响。
-- 文档回忆（遮挡）只处理卡片标注，不遮挡留白。
+- 文档回忆（0.34.0 起）会把手写墨迹与页边留白一起隐藏：先回忆自己的标注与笔迹，再点遮挡块揭示；
+  退出回忆立即恢复。挖空填空（cloze）仍未实现。
 
 ## 限制
 
@@ -79,3 +80,6 @@ STEP=notes CARD_COUNT=12 node scripts/mindmap-regression.mjs
 冒烟覆盖：右键添加 → 便签出现 → 输入并失焦保存（校验 mock 收到的内容）→ 折叠 →
 展开 → 删除后消失。Rust 侧另有 3 项测试（增删改查往返、非法输入、文档级联删除）与
 1 项 v6→v7 迁移测试。
+
+回忆态联验证：`STEP=recall RECALL_SEED=1 CARD_COUNT=3` 预置一条墨迹与一条留白，
+断言进入回忆后两者都不在 DOM、遮挡块存在，退出后数量恢复。

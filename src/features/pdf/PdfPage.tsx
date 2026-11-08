@@ -861,7 +861,8 @@ export function PdfPage({
             onPointerCancel={() => setInteraction(null)}
           >
             <g className="pdf-ink-layer">
-              {inks.map((ink) => {
+              {/* 回忆态连手写一起藏：先回忆自己的笔迹与标注，再点遮挡块揭示。 */}
+              {!recallMode && inks.map((ink) => {
                 const points = ink.style.points ?? []
                 const path = points
                   .map((point, index) => {
@@ -1003,7 +1004,7 @@ export function PdfPage({
               ))}
             </div>
           )}
-          {notes.length > 0 && (
+          {!recallMode && notes.length > 0 && (
             <div className="pdf-note-layer">
               {notes.map((note) => (
                 <article

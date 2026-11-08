@@ -1067,7 +1067,7 @@ export function PdfWorkspace({
     setRevealedCardIds(new Set())
     setRatedCardIds(new Set())
     setReviewedCards({})
-    setNotice('回忆会话已开始；点击遮挡块揭示内容。')
+    setNotice('回忆会话已开始；手写墨迹与留白已隐藏，点击遮挡块揭示内容。')
   }
 
   const allAnnotations = useMemo(() => Object.values(annotationsByPage).flat(), [annotationsByPage])

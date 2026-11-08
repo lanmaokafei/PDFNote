@@ -69,6 +69,19 @@ const cards = Array.from({ length: CARD_COUNT }, (_, index) => ({
     ? null
     : index === 0 ? null : `c${Math.max(1, Math.floor(index / 3) + 1)}`,
   sort_order: index,
+  // BOARD=1：给卡片分配标签与复习状态，验证卡片盒的分栏、过滤与拖拽改标签。
+  tags: process.env.BOARD === '1'
+    ? (index % 4 === 0
+      ? ['心内']
+      : index % 4 === 1
+        ? ['心内', '药理']
+        : index % 4 === 2
+          ? ['药理']
+          : [])
+    : [],
+  review_state: process.env.BOARD === '1'
+    ? (index % 3 === 0 ? 'review' : index % 3 === 1 ? 'learning' : 'new')
+    : 'new',
 }))
 
 const pdfBytes = readFileSync(new URL('../test-fixtures/mini.pdf', import.meta.url))
@@ -88,7 +101,7 @@ const document = {
   updated_at: '2026-11-03T00:00:00.000Z',
 }
 
-await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, emptyDocCanvas, styleLink }) => {
+await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, emptyDocCanvas, styleLink, board, recallSeed }) => {
   const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0))
   const cardState = cards.map((card) => ({ ...card }))
   const noteState = []
@@ -102,6 +115,29 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
   window.__layoutState = layoutState
   const inkState = []
   window.__inkState = inkState
+  // RECALL_SEED=1：预置一条手写与一条留白，验证文档回忆会把它们一起藏起来。
+  if (recallSeed) {
+    inkState.push({
+      id: 'ink-seed',
+      document_id: 'doc1',
+      page: 1,
+      bbox: { x: 0.2, y: 0.2, width: 0.2, height: 0.2 },
+      style: { color: '#d94f3d', width: 0.004, points: [[0.2, 0.2], [0.35, 0.3]] },
+      created_at: '2026-11-04T00:00:00.000Z',
+      updated_at: '2026-11-04T00:00:00.000Z',
+    })
+    noteState.push({
+      id: 'note-seed',
+      document_id: 'doc1',
+      page: 1,
+      anchor_y: 0.3,
+      content: '页边草稿：回忆时应该一起隐藏。',
+      collapsed: false,
+      color: 'amber',
+      created_at: '2026-11-04T00:00:00.000Z',
+      updated_at: '2026-11-04T00:00:00.000Z',
+    })
+  }
   // 0.20.0 多画布：每张画布有自己的 mindmap_layout 成员；main 装全部种子卡片。
   const canvasState = [
     { id: 'main', document_id: null, name: '默认画布', created_at: '2026-11-03T00:00:00.000Z', updated_at: '2026-11-03T00:00:00.000Z' },
@@ -398,7 +434,7 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     list_card_links: () => (styleLink
       ? [{ id: 'link-1', source_card_id: 'c1', target_card_id: 'c2', label: '', created_at: '2026-11-03T00:00:00.000Z' }]
       : []),
-    list_tags: () => [],
+    list_tags: () => (board ? ['心内', '药理', '空标签'] : []),
     get_ai_settings: () => ({ baseUrl: '', model: '', apiKey: '' }),
     explain_card: () => explainText,
     update_card_content: (args) => {
@@ -413,6 +449,15 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       if (input.user_note !== undefined) next.user_note = input.user_note
       cardState[index] = next
       return { ...next }
+    },
+    // 卡片盒拖拽：改写标签后返回新对象（换引用，避免 zustand 跳过重渲染）。
+    set_card_tags: (args) => {
+      const card = cardState.find((item) => item.id === args?.cardId)
+      if (!card) throw new Error('卡片不存在')
+      card.tags = [...(args?.tags ?? [])]
+      card.updated_at = new Date().toISOString()
+      window.__cardState = cardState
+      return { ...card }
     },
     list_page_inks: () => inkState.slice(),
     create_page_ink: (args) => {
@@ -463,7 +508,7 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     },
     transformCallback: (callback) => callback,
   }
-}, { cards, document, pdfBase64, dense: process.env.DENSE === '1', canvasPref: process.env.CANVAS_PREF ?? 'main', emptyDocCanvas: process.env.EMPTY_DOC_CANVAS === '1', styleLink: process.env.STYLE_LINK === '1' })
+    }, { cards, document, pdfBase64, dense: process.env.DENSE === '1', canvasPref: process.env.CANVAS_PREF ?? 'main', emptyDocCanvas: process.env.EMPTY_DOC_CANVAS === '1', styleLink: process.env.STYLE_LINK === '1', board: process.env.BOARD === '1', recallSeed: process.env.RECALL_SEED === '1' })
 
 await page.goto('http://127.0.0.1:1420/', { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.app-shell')
@@ -1331,6 +1376,130 @@ if (process.env.STEP === 'tone') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=board：卡片盒按标签分栏、过滤、拖拽改标签。配合 BOARD=1 CARD_COUNT=8 跑。
+if (process.env.STEP === 'board') {
+  await page.locator('.app-segment', { hasText: '卡片盒' }).click()
+  await page.waitForSelector('.board-columns', { timeout: 10000 })
+  await page.waitForTimeout(300)
+
+  const readBoard = () => page.evaluate(() => {
+    const columns = [...document.querySelectorAll('.board-column')]
+    return {
+      labels: columns.map((column) => column.dataset.columnLabel),
+      counts: Object.fromEntries(columns.map((column) => [
+        column.dataset.columnId,
+        column.querySelectorAll('.board-card').length,
+      ])),
+      total: document.querySelectorAll('.board-card').length,
+    }
+  })
+
+  const initial = await readBoard()
+  for (const label of ['#心内', '#药理', '未分组']) {
+    if (!initial.labels.includes(label)) problems.push(`缺少分栏 ${label}：${initial.labels.join(',')}`)
+  }
+  if (!initial.labels.includes('#空标签')) problems.push('空标签列没有保留（拖拽需要落点）')
+  if (initial.counts.__untagged__ !== 2) problems.push(`未分组应为 2 张：${initial.counts.__untagged__}`)
+  // 多标签卡片会同时出现在两列：8 张卡共 10 个落位。
+  if (initial.total !== 10) problems.push(`标签列卡片总数应为 10：${initial.total}`)
+
+  // 标签过滤
+  await page.locator('[data-testid="board-tag"]').selectOption('药理')
+  await page.waitForTimeout(250)
+  const byTag = await readBoard()
+  if (byTag.counts['心内'] !== 2) problems.push(`按药理过滤后心内应为 2 张：${byTag.counts['心内']}`)
+  if (byTag.counts.__untagged__ !== 0) problems.push(`按药理过滤后未分组应为 0：${byTag.counts.__untagged__}`)
+
+  // 关键词过滤（先清标签筛选）
+  await page.locator('[data-testid="board-tag"]').selectOption('')
+  await page.locator('[data-testid="board-search"]').fill('概念卡片 2')
+  await page.waitForTimeout(250)
+  // 多标签卡片会同时出现在两列，命中数要按卡号去重，不能数 DOM 节点。
+  const searchHits = await page.evaluate(() => new Set(
+    [...document.querySelectorAll('.board-card')].map((element) => element.dataset.cardId),
+  ).size)
+  if (searchHits !== 1) problems.push(`搜索命中卡片数异常：${searchHits}`)
+  await page.locator('[data-testid="board-search"]').fill('')
+  await page.waitForTimeout(250)
+
+  // 书目分组：只有 c1 有原文位置
+  await page.locator('[data-testid="board-group-document"]').click()
+  await page.waitForTimeout(250)
+  const byDocument = await readBoard()
+  if (!byDocument.labels.includes('测试教材')) problems.push(`书目分组缺少文档列：${byDocument.labels.join(',')}`)
+  if (!byDocument.labels.includes('未关联文档')) problems.push('书目分组缺少未关联列')
+
+  // 状态分组：固定三档
+  await page.locator('[data-testid="board-group-state"]').click()
+  await page.waitForTimeout(250)
+  const byState = await readBoard()
+  if (byState.labels.join(',') !== '新卡,学习中,复习中') problems.push(`状态分栏异常：${byState.labels.join(',')}`)
+  if (byState.counts.new !== 2 || byState.counts.learning !== 3 || byState.counts.review !== 3) {
+    problems.push(`状态分组数量异常：${JSON.stringify(byState.counts)}`)
+  }
+
+  // 拖拽：把只有「心内」的 c1 拖到空标签列
+  await page.locator('[data-testid="board-group-tag"]').click()
+  await page.waitForTimeout(300)
+  await page.locator('.board-card[data-card-id="c1"]').first()
+    .dragTo(page.locator('.board-column[data-column-id="空标签"]'))
+  await page.waitForTimeout(700)
+  const draggedTags = await page.evaluate(() => window.__cardState.find((item) => item.id === 'c1')?.tags ?? [])
+  if (JSON.stringify(draggedTags) !== JSON.stringify(['空标签'])) {
+    problems.push(`拖拽后标签应为 [空标签]：${JSON.stringify(draggedTags)}`)
+  }
+  const afterDrag = await readBoard()
+  if (afterDrag.counts['空标签'] !== 1) problems.push(`空标签列应有 1 张：${afterDrag.counts['空标签']}`)
+  if (afterDrag.counts['心内'] !== 3) problems.push(`心内列应剩 3 张：${afterDrag.counts['心内']}`)
+
+  if (process.env.SHOT) {
+    await page.screenshot({ path: '/tmp/pdfnote-board.png' })
+  }
+
+  // 点卡片回原文：c1 有 source_ref，应打开文档工作台
+  await page.locator('.board-card[data-card-id="c1"]').first().click()
+  await page.waitForSelector('.study-workspace', { timeout: 30000 })
+    .catch(() => problems.push('点卡片没有回到原文工作台'))
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'board', initial, byTag, byDocument, byState, afterDrag, draggedTags }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=recall：文档回忆要把手写与留白一起藏起来，退出后恢复。配合 RECALL_SEED=1 跑。
+if (process.env.STEP === 'recall') {
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+
+  const readRecall = () => page.evaluate(() => ({
+    inks: document.querySelectorAll('.pdf-ink').length,
+    notes: document.querySelectorAll('.pdf-note').length,
+    masks: document.querySelectorAll('.pdf-recall-mask').length,
+  }))
+
+  const before = await readRecall()
+  if (before.inks < 1) problems.push(`预置手写没有渲染：${before.inks}`)
+  if (before.notes < 1) problems.push(`预置留白没有渲染：${before.notes}`)
+
+  await page.locator('button[title="文档遮挡回忆"]').first().click()
+  await page.waitForTimeout(700)
+  const during = await readRecall()
+  if (during.inks !== 0) problems.push(`回忆态仍显示手写：${during.inks}`)
+  if (during.notes !== 0) problems.push(`回忆态仍显示留白：${during.notes}`)
+  if (during.masks < 1) problems.push(`回忆态没有遮挡块：${during.masks}`)
+
+  await page.locator('button[title="文档遮挡回忆"]').first().click()
+  await page.waitForTimeout(500)
+  const after = await readRecall()
+  if (after.inks !== before.inks) problems.push(`退出回忆后手写没有恢复：${after.inks}/${before.inks}`)
+  if (after.notes !== before.notes) problems.push(`退出回忆后留白没有恢复：${after.notes}/${before.notes}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'recall', before, during, after }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // 打开资料库里的文档 → 左 PDF 右脑图
 const card = page.locator('.document-card').first()
 if (await card.count()) {
@@ -1467,11 +1636,12 @@ if (STEP === 'pan') {
 if (STEP === 'arrange') {
   await page.waitForTimeout(1400)
   // 顶部完整工具栏只在独立脑图视图出现：先关文档再进脑图。
-  const nav = page.locator('.app-top button')
+  // 顶栏格子数量会随工作区增加；按文案定位，别用索引（0.34.0 加「卡片盒」后索引整体错位）。
+  const nav = page.locator('.app-segment')
   if (await nav.count() >= 4) {
-    await nav.nth(0).click()
+    await page.locator('.app-segment', { hasText: '资料库' }).click()
     await page.waitForTimeout(700)
-    await nav.nth(3).click()
+    await page.locator('.app-segment', { hasText: '脑图' }).click()
     await page.waitForTimeout(1500)
   }
   const arrange = page.locator('.mindmap-toolbar-actions button', { hasText: '自动整理' })
@@ -1510,11 +1680,12 @@ if (STEP === 'arrange') {
 
 if (STEP === 'clear') {
   await page.waitForTimeout(1400)
-  const nav = page.locator('.app-top button')
+  // 顶栏格子数量会随工作区增加；按文案定位，别用索引（0.34.0 加「卡片盒」后索引整体错位）。
+  const nav = page.locator('.app-segment')
   if (await nav.count() >= 4) {
-    await nav.nth(0).click()
+    await page.locator('.app-segment', { hasText: '资料库' }).click()
     await page.waitForTimeout(700)
-    await nav.nth(3).click()
+    await page.locator('.app-segment', { hasText: '脑图' }).click()
     await page.waitForTimeout(1500)
   }
   const clearButton = page.locator('.mindmap-toolbar-actions button', { hasText: '清空卡片' })
@@ -1847,12 +2018,12 @@ if (STEP === 'outline-back') {
   await page.waitForTimeout(1200)
   // 独立脑图视图（非嵌入，fitView 生效）才可能复现；刷新后文档关闭，顶栏「脑图」可直接进入。
   if (process.env.STANDALONE !== '0') {
-    const topButtons = page.locator('.app-top button')
+    const topButtons = page.locator('.app-segment')
     const topCount = await topButtons.count()
     if (topCount >= 4) {
-      await topButtons.nth(0).click()   // 资料库：关闭当前文档
+      await page.locator('.app-segment', { hasText: '资料库' }).click()   // 关闭当前文档
       await page.waitForTimeout(800)
-      await topButtons.nth(3).click()   // 脑图：进入独立视图
+      await page.locator('.app-segment', { hasText: '脑图' }).click()     // 进入独立视图
       await page.waitForTimeout(1600)
     } else {
       problems.push(`顶栏按钮数量异常：${topCount}`)

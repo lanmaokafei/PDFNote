@@ -3,6 +3,7 @@ import {
   BookOpen,
   Copy,
   FileText,
+  LayoutGrid,
   Network,
   Search,
   Settings,
@@ -24,6 +25,9 @@ const MindmapWorkspace = lazy(() =>
 const ReviewWorkspace = lazy(() =>
   import('./features/review/ReviewWorkspace').then((module) => ({ default: module.ReviewWorkspace })),
 )
+const BoardWorkspace = lazy(() =>
+  import('./features/board/BoardWorkspace').then((module) => ({ default: module.BoardWorkspace })),
+)
 const BackupWorkspace = lazy(() =>
   import('./features/backup/BackupWorkspace').then((module) => ({ default: module.BackupWorkspace })),
 )
@@ -44,7 +48,7 @@ import { autoCheckUpdate } from './services/update'
 import type { UpdateInfo } from './services/update'
 import { useCardStore } from './store/cardStore'
 
-type View = 'library' | 'mindmap' | 'review' | 'backup'
+type View = 'library' | 'board' | 'mindmap' | 'review' | 'backup'
 
 function App() {
   const [view, setView] = useState<View>('library')
@@ -163,6 +167,14 @@ function App() {
       onClick: () => goTo('library'),
     },
     {
+      key: 'board' as const,
+      icon: LayoutGrid,
+      label: '卡片盒',
+      hint: `${cardCount} 张卡片`,
+      active: !documentOpen && view === 'board',
+      onClick: () => goTo('board'),
+    },
+    {
       key: 'review' as const,
       icon: Sparkles,
       label: '复习',
@@ -218,6 +230,7 @@ function App() {
         ] },
         { id: 'navigate', title: '切换工作区', items: [
           { id: 'library', label: '资料库', icon: BookOpen, checked: !documentOpen && view === 'library', onSelect: () => goTo('library') },
+          { id: 'board', label: '卡片盒', icon: LayoutGrid, checked: !documentOpen && view === 'board', onSelect: () => goTo('board') },
           { id: 'mindmap', label: '知识脑图', icon: Network, checked: !documentOpen && view === 'mindmap', onSelect: () => goTo('mindmap') },
           { id: 'review', label: '复习', icon: Sparkles, checked: !documentOpen && view === 'review', onSelect: () => goTo('review') },
           { id: 'backup', label: '备份与恢复', icon: ShieldCheck, checked: !documentOpen && view === 'backup', onSelect: () => goTo('backup') },
@@ -281,13 +294,21 @@ function App() {
                 <button type="button" onClick={() => { setFatalError(''); void refreshStatus() }}>重试</button>
               </div>
             )}
-            <div className={`app-view${view === 'library' ? ' is-library' : ''}${view === 'mindmap' ? ' is-full' : ''}`}>
+            <div className={`app-view${view === 'library' ? ' is-library' : ''}${view === 'mindmap' || view === 'board' ? ' is-full' : ''}`}>
               {view === 'library' && (
                 <LibraryWorkspace
                   onOpenDocument={(document) => { setFatalError(''); setActiveDocument(document) }}
                   onChanged={() => void refreshStatus()}
                   focusSearchToken={searchToken}
                 />
+              )}
+              {view === 'board' && (
+                <Suspense fallback={<ViewLoading label="正在整理卡片盒…" />}>
+                  <BoardWorkspace
+                    onOpenMindmap={() => goTo('mindmap')}
+                    onCardsChanged={() => void refreshStatus()}
+                  />
+                </Suspense>
               )}
               {view === 'mindmap' && (
                 <Suspense fallback={<ViewLoading label="正在加载脑图…" />}>

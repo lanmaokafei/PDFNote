@@ -1534,3 +1534,42 @@
   color: #3f6849 !important;
   font-weight: 600;
 }
+
+/* ---------- 文档挖空（cloze） ---------- */
+
+/* 顶栏开关：只在回忆态出现，和「退出回忆」并排。 */
+.pdf-cloze-toggle {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid #cfdbd0 !important;
+  border-radius: 8px;
+  color: #47604c !important;
+  background: #f3f7f1 !important;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pdf-cloze-toggle.is-active {
+  border-color: #4f7f5c !important;
+  color: #fff !important;
+  background: #4f7f5c !important;
+}
+
+.pdf-cloze-toggle:hover:not(.is-active) {
+  background: #eaf2e7 !important;
+}
+
+/* 嵌入模式下没有右侧检查器，填空面板浮在 PDF 左下角（不挡顶部的评分条）。 */
+.pdf-cloze-float {
+  position: absolute;
+  bottom: 96px;
+  left: 16px;
+  z-index: 30;
+  width: min(430px, calc(100% - 32px));
+}
+
+.pdf-cloze-float .pdf-cloze {
+  max-width: none;
+}

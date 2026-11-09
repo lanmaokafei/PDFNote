@@ -101,7 +101,7 @@ const document = {
   updated_at: '2026-11-03T00:00:00.000Z',
 }
 
-await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, emptyDocCanvas, styleLink, board, recallSeed }) => {
+await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, emptyDocCanvas, styleLink, board, recallSeed, clozeSeed }) => {
   const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0))
   const cardState = cards.map((card) => ({ ...card }))
   const noteState = []
@@ -434,16 +434,41 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       if (index >= 0) noteState.splice(index, 1)
       return null
     },
-    list_annotations: () => [{
-      id: 'ann-1',
-      card_id: 'c1',
-      kind: 'highlight',
-      page: 1,
-      geometry: { rects: [{ x: 0.1, y: 0.12, width: 0.32, height: 0.05 }] },
-      style: {},
-      created_at: '2026-11-03T00:00:00.000Z',
-      updated_at: '2026-11-03T00:00:00.000Z',
-    }],
+    list_annotations: () => [
+      {
+        id: 'ann-1',
+        card_id: 'c1',
+        kind: 'highlight',
+        page: 1,
+        geometry: { rects: [{ x: 0.1, y: 0.12, width: 0.32, height: 0.05 }] },
+        style: {},
+        created_at: '2026-11-03T00:00:00.000Z',
+        updated_at: '2026-11-03T00:00:00.000Z',
+      },
+      // CLOZE_SEED=1：再加一条「有句子的摘录」，用来验证挖空填空（c1 是公式，走整句回忆）。
+      ...(clozeSeed ? [
+        {
+          id: 'ann-2',
+          card_id: 'c2',
+          kind: 'highlight',
+          page: 1,
+          geometry: { rects: [{ x: 0.1, y: 0.32, width: 0.36, height: 0.05 }] },
+          style: {},
+          created_at: '2026-11-03T00:00:00.000Z',
+          updated_at: '2026-11-03T00:00:00.000Z',
+        },
+        {
+          id: 'ann-3',
+          card_id: 'c4',
+          kind: 'highlight',
+          page: 1,
+          geometry: { rects: [{ x: 0.1, y: 0.52, width: 0.42, height: 0.05 }] },
+          style: {},
+          created_at: '2026-11-03T00:00:00.000Z',
+          updated_at: '2026-11-03T00:00:00.000Z',
+        },
+      ] : []),
+    ],
     remove_annotation: () => {
       throw new Error('annotation not found')
     },
@@ -697,7 +722,7 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     },
     transformCallback: (callback) => callback,
   }
-    }, { cards, document, pdfBase64, dense: process.env.DENSE === '1', canvasPref: process.env.CANVAS_PREF ?? 'main', emptyDocCanvas: process.env.EMPTY_DOC_CANVAS === '1', styleLink: process.env.STYLE_LINK === '1', board: process.env.BOARD === '1', recallSeed: process.env.RECALL_SEED === '1' })
+    }, { cards, document, pdfBase64, dense: process.env.DENSE === '1', canvasPref: process.env.CANVAS_PREF ?? 'main', emptyDocCanvas: process.env.EMPTY_DOC_CANVAS === '1', styleLink: process.env.STYLE_LINK === '1', board: process.env.BOARD === '1', recallSeed: process.env.RECALL_SEED === '1', clozeSeed: process.env.CLOZE_SEED === '1' })
 
 await page.goto('http://127.0.0.1:1420/', { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.app-shell')
@@ -1718,6 +1743,108 @@ if (process.env.STEP === 'recall') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'recall', before, during, after }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=cloze：文档回忆的挖空填空。配合 CLOZE_SEED=1 跑：
+// c1（ann-1）是公式摘录 → 退化成整句回忆；c4（ann-3）有完整句子 → 生成 2 个空。
+if (process.env.STEP === 'cloze') {
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+
+  const toggleRecall = async () => {
+    await page.locator('button[title="文档遮挡回忆"]').first().click()
+    await page.waitForTimeout(600)
+  }
+
+  await toggleRecall()
+  const masksBefore = await page.locator('.pdf-recall-mask').count()
+  if (masksBefore < 3) problems.push(`遮挡块不足：${masksBefore}`)
+  const toggleActive = await page.locator('[data-cloze-toggle]').first().evaluate((el) => el.classList.contains('is-active'))
+  if (!toggleActive) problems.push('回忆态没有默认开启挖空')
+
+  // 公式摘录：不硬挖空，给出「揭示这段摘录」，且未完成前不能显示整段原文。
+  await page.locator('[data-mask-index="0"]').click()
+  await page.waitForTimeout(300)
+  const formula = await page.evaluate(() => ({
+    fallback: document.querySelectorAll('.pdf-cloze-fallback').length,
+    inputs: document.querySelectorAll('.pdf-cloze-input').length,
+    reveal: document.querySelectorAll('.pdf-cloze-fallback button').length,
+    text: document.querySelector('.pdf-cloze-fallback')?.textContent ?? '',
+  }))
+  if (formula.fallback !== 1) problems.push(`公式摘录没有退化成整句回忆：${formula.fallback}`)
+  if (formula.inputs !== 0) problems.push(`公式摘录不应生成输入框：${formula.inputs}`)
+  if (formula.reveal !== 1) problems.push('公式摘录没有提供揭示入口')
+  if (!formula.text.includes('公式')) problems.push(`公式退化的说明不对：${formula.text}`)
+
+  // 句子摘录：点开是输入框（c4 那句能挖出 2 个空）。
+  await page.locator('[data-mask-index="2"]').click()
+  await page.waitForTimeout(300)
+  const blankCount = await page.locator('.pdf-cloze-input').count()
+  if (blankCount !== 2) problems.push(`c4 那句应挖出 2 个空：${blankCount}`)
+
+  // 先故意答错：标红 + 给出正确答案，且不揭示遮罩、不出现评分。
+  await page.locator('.pdf-cloze-input').first().fill('完全不对的答案')
+  await page.locator('.pdf-cloze-actions button.is-primary').click()
+  await page.waitForTimeout(300)
+  const wrong = await page.evaluate(() => ({
+    feedback: document.querySelector('[data-cloze-feedback]')?.textContent ?? '',
+    wrongInputs: document.querySelectorAll('.pdf-cloze-input.is-wrong').length,
+    masks: document.querySelectorAll('.pdf-recall-mask').length,
+    rating: document.querySelectorAll('.pdf-rating-buttons button').length,
+  }))
+  if (!wrong.feedback.includes('应为')) problems.push(`答错没有给出正确答案：${wrong.feedback}`)
+  if (wrong.wrongInputs < 1) problems.push('答错没有标红')
+  if (wrong.masks !== masksBefore) problems.push(`答错不该揭示遮罩：${wrong.masks}/${masksBefore}`)
+  if (wrong.rating !== 0) problems.push('未揭示就出现了评分按钮')
+
+  // 清空后检查一次，把所有空的标准答案从反馈里读出来（按空顺序）。
+  await page.locator('.pdf-cloze-actions button', { hasText: '重来' }).click()
+  await page.waitForTimeout(200)
+  await page.locator('.pdf-cloze-actions button.is-primary').click()
+  await page.waitForTimeout(300)
+  const emptyFeedback = await page.locator('[data-cloze-feedback]').textContent()
+  const answers = [...emptyFeedback.matchAll(/(?:应为|答案是)「(.+?)」/g)].map((match) => match[1])
+  if (answers.length !== blankCount) problems.push(`正确答案数量不匹配：${answers.length}/${blankCount}`)
+
+  for (let index = 0; index < answers.length; index += 1) {
+    await page.locator('.pdf-cloze-input').nth(index).fill(answers[index])
+  }
+  await page.locator('.pdf-cloze-actions button.is-primary').click()
+  await page.waitForTimeout(500)
+  // 文档工作区是左 PDF 右脑图（embedded），揭示后评分条浮在 PDF 右上角，而不是右侧检查器。
+  const solved = await page.evaluate(() => ({
+    masks: document.querySelectorAll('.pdf-recall-mask').length,
+    rating: document.querySelectorAll('.pdf-recall-float button').length,
+    cloze: document.querySelectorAll('[data-cloze-panel]').length,
+    notice: document.querySelector('.pdf-operation-bar')?.textContent ?? '',
+  }))
+  if (solved.masks !== masksBefore - 1) problems.push(`全部答对后遮罩没有消失：${solved.masks}/${masksBefore}`)
+  if (solved.rating !== 4) problems.push(`答对后没有出现评分：${solved.rating}`)
+  if (solved.cloze !== 0) problems.push('答对后填空面板没有收起')
+  if (!solved.notice.includes('全部补齐')) problems.push(`缺少完成提示：${solved.notice}`)
+
+  // 关掉挖空：遮挡块回到「点击揭示」的整块回忆。
+  await toggleRecall()
+  await toggleRecall()
+  await page.locator('[data-cloze-toggle]').first().click()
+  await page.waitForTimeout(300)
+  const offActive = await page.locator('[data-cloze-toggle]').first().evaluate((el) => el.classList.contains('is-active'))
+  if (offActive) problems.push('关闭挖空后开关仍是激活态')
+  await page.locator('[data-mask-index="2"]').click()
+  await page.waitForTimeout(300)
+  const plainReveal = await page.evaluate(() => ({
+    masks: document.querySelectorAll('.pdf-recall-mask').length,
+    panels: document.querySelectorAll('[data-cloze-panel]').length,
+    rating: document.querySelectorAll('.pdf-recall-float button').length,
+  }))
+  if (plainReveal.masks !== masksBefore - 1) problems.push(`关闭挖空后点击没有直接揭示：${plainReveal.masks}`)
+  if (plainReveal.panels !== 0) problems.push('关闭挖空后仍渲染填空面板')
+  if (plainReveal.rating !== 4) problems.push('关闭挖空后揭示没有出现评分')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'cloze', masksBefore, blankCount, answers, wrong, solved, plainReveal }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

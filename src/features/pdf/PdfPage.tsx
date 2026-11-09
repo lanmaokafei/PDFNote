@@ -95,6 +95,8 @@ interface PdfPageProps {
   excerpts: Record<string, string>
   tool: PdfTool
   recallMode: boolean
+  /** 挖空模式：遮挡块点击只选中卡片，由检查器里的填空面板负责揭示。 */
+  clozeMode: boolean
   revealedCardIds: ReadonlySet<string>
   selectedAnnotationId: string | null
   getPage: (pageNumber: number) => Promise<PDFPageProxy>
@@ -158,6 +160,7 @@ export function PdfPage({
   excerpts,
   tool,
   recallMode,
+  clozeMode,
   revealedCardIds,
   selectedAnnotationId,
   getPage,
@@ -651,6 +654,20 @@ export function PdfPage({
     onReveal(ids)
   }
 
+  /**
+   * 遮挡块点击：挖空模式下只选中卡片（由右侧填空面板负责补全与揭示），
+   * 整块回忆模式下保持原来的一键揭示。
+   */
+  const activateMask = (mask: NormalizedBBox) => {
+    if (!clozeMode) {
+      revealMask(mask)
+      return
+    }
+    const merged = annotations.filter((annotation) => annotation.geometry.rects.some((rect) => rectsOverlap(mask, rect)))
+    const target = merged.find((annotation) => !revealedCardIds.has(annotation.card_id)) ?? merged[0]
+    if (target) onSelect(target)
+  }
+
   const clearTextSelection = () => {
     setSelection(null)
     window.getSelection()?.removeAllRanges()
@@ -963,17 +980,17 @@ export function PdfPage({
                   className="pdf-recall-mask"
                   role="button"
                   tabIndex={0}
-                  aria-label="点击揭示标注"
+                  aria-label={clozeMode ? '点击打开挖空填空' : '点击揭示标注'}
                   onPointerDown={(event) => event.stopPropagation()}
-                  onClick={() => revealMask(mask)}
+                  onClick={() => activateMask(mask)}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') revealMask(mask)
+                    if (event.key === 'Enter' || event.key === ' ') activateMask(mask)
                   }}
                 >
                   <rect x={rect.left} y={rect.top} width={rect.width} height={rect.height} />
                   {rect.width > 70 && rect.height > 24 && (
                     <text x={rect.left + rect.width / 2} y={rect.top + rect.height / 2} textAnchor="middle" dominantBaseline="central">
-                      点击回忆
+                      {clozeMode ? '点击挖空' : '点击回忆'}
                     </text>
                   )}
                 </g>

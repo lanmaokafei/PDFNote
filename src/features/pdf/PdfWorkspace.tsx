@@ -50,6 +50,7 @@ import {
   Sparkles,
   Square,
   Tag,
+  TextCursorInput,
   Trash2,
   Type,
 } from 'lucide-react'
@@ -68,6 +69,15 @@ import { pruneCardAnnotations } from './annotationCache'
 import { TitleLinkPopover } from './TitleLinkPopover'
 import { SizeControl } from '../ink/SizeControl'
 import { readSizePreference, saveSizePreference } from '../ink/size'
+import { ClozePanel } from './ClozePanel'
+import {
+  buildCloze,
+  checkCloze,
+  readClozePreference,
+  saveClozePreference,
+  type ClozeExercise,
+  type ClozeResult,
+} from './cloze'
 import { buildTitleLinkIndex, type TitleLinkHit } from './titleLink'
 import { getAiSettings, isAiConfigured, recognizeSelection } from '../../services/ai'
 import './PdfWorkspace.css'
@@ -162,6 +172,11 @@ export function PdfWorkspace({
   const [revealedCardIds, setRevealedCardIds] = useState<Set<string>>(new Set())
   const [ratedCardIds, setRatedCardIds] = useState<Set<string>>(new Set())
   const [ratingBusy, setRatingBusy] = useState(false)
+  // 挖空填空：在「整块遮挡」和「揭示」之间多一层，先补关键词再评分。
+  const [clozeEnabled, setClozeEnabled] = useState(readClozePreference)
+  const [clozeAnswers, setClozeAnswers] = useState<Record<string, string[]>>({})
+  const [clozeResults, setClozeResults] = useState<Record<string, ClozeResult | null>>({})
+  const clozeCacheRef = useRef(new Map<string, ClozeExercise>())
   const [reviewedCards, setReviewedCards] = useState<Record<string, Card>>({})
   const [dockMenuOpen, setDockMenuOpen] = useState(false)
   const [tagTarget, setTagTarget] = useState<string | null>(null)
@@ -1070,7 +1085,11 @@ export function PdfWorkspace({
     setRevealedCardIds(new Set())
     setRatedCardIds(new Set())
     setReviewedCards({})
-    setNotice('回忆会话已开始；手写墨迹与留白已隐藏，点击遮挡块揭示内容。')
+    setClozeAnswers({})
+    setClozeResults({})
+    setNotice(clozeEnabled
+      ? '回忆会话已开始；手写墨迹与留白已隐藏，点遮挡块做挖空填空。'
+      : '回忆会话已开始；手写墨迹与留白已隐藏，点击遮挡块揭示内容。')
   }
 
   const allAnnotations = useMemo(() => Object.values(annotationsByPage).flat(), [annotationsByPage])
@@ -1107,6 +1126,69 @@ export function PdfWorkspace({
     const first = revealed[0]
     if (first) setSelectedAnnotationId(first.id)
   }, [allAnnotations])
+
+  /** 当前标注对应的挖空练习；同一张卡只解析一次，输入过程中不重建段。 */
+  const clozeExcerpt = selectedAnnotation
+    ? (selectedCard?.excerpt ?? excerpts[selectedAnnotation.card_id] ?? '')
+    : ''
+  const clozeExercise = useMemo(() => {
+    if (!clozeEnabled || !selectedAnnotation) return null
+    const cache = clozeCacheRef.current
+    const cached = cache.get(selectedAnnotation.card_id)
+    if (cached && cached.excerpt === clozeExcerpt) return cached
+    const next = buildCloze(clozeExcerpt)
+    cache.set(selectedAnnotation.card_id, next)
+    return next
+  }, [clozeEnabled, clozeExcerpt, selectedAnnotation])
+  const clozeCardId = selectedAnnotation?.card_id ?? ''
+  const clozeAnswerList = clozeCardId ? (clozeAnswers[clozeCardId] ?? []) : []
+  const clozeResult = clozeCardId ? (clozeResults[clozeCardId] ?? null) : null
+
+  const toggleCloze = () => {
+    setClozeEnabled((previous) => {
+      const next = !previous
+      saveClozePreference(next)
+      return next
+    })
+    setClozeAnswers({})
+    setClozeResults({})
+    setNotice(clozeEnabled ? '已关闭挖空，遮挡块回到「点击揭示」。' : '已开启挖空：补全关键词后自动揭示原文。')
+  }
+
+  const handleClozeAnswer = (cardId: string, index: number, value: string) => {
+    setClozeAnswers((previous) => {
+      const list = [...(previous[cardId] ?? [])]
+      list[index] = value
+      return { ...previous, [cardId]: list }
+    })
+    // 改了输入就清掉上一次判定，否则旧绿/红框会贴在刚改过的文字上。
+    setClozeResults((previous) => (previous[cardId] ? { ...previous, [cardId]: null } : previous))
+  }
+
+  const handleClozeCheck = () => {
+    if (!selectedAnnotation || !clozeExercise) return
+    const cardId = selectedAnnotation.card_id
+    const answers = clozeAnswers[cardId] ?? []
+    const result = checkCloze(clozeExercise, clozeExercise.blanks.map((_, index) => answers[index] ?? ''))
+    setClozeResults((previous) => ({ ...previous, [cardId]: result }))
+    if (result.solved) {
+      handleReveal([selectedAnnotation.id])
+      setNotice(`挖空 ${result.total}/${result.total} 全部补齐，已揭示原文，可以评分了。`)
+    } else {
+      setNotice(`挖空 ${result.correct}/${result.total} 空命中。`)
+    }
+  }
+
+  const handleClozeRetry = () => {
+    if (!clozeCardId) return
+    setClozeAnswers((previous) => ({ ...previous, [clozeCardId]: [] }))
+    setClozeResults((previous) => ({ ...previous, [clozeCardId]: null }))
+  }
+
+  const handleClozeReveal = () => {
+    if (!selectedAnnotation) return
+    handleReveal([selectedAnnotation.id])
+  }
 
   const handleRating = async (rating: Rating) => {
     if (!selectedAnnotation || !selectedCard || ratingBusy || ratedCardIds.has(selectedCard.id) || !sessionId) return
@@ -1247,6 +1329,19 @@ export function PdfWorkspace({
         <button type="button" className={`pdf-recall-toggle ${recallMode ? 'is-active' : ''}`} aria-pressed={recallMode} onClick={toggleRecall} disabled={!pdf}>
           {recallMode ? '退出回忆' : '文档回忆'}
         </button>
+
+        {recallMode && (
+          <button
+            type="button"
+            className={`pdf-cloze-toggle ${clozeEnabled ? 'is-active' : ''}`}
+            aria-pressed={clozeEnabled}
+            onClick={toggleCloze}
+            title="挖空填空：只留关键词的空，补全后自动揭示原文再评分"
+            data-cloze-toggle
+          >
+            挖空
+          </button>
+        )}
       </header>
       )}
 
@@ -1334,6 +1429,7 @@ export function PdfWorkspace({
                   excerpts={excerpts}
                   tool={tool}
                   recallMode={recallMode}
+                  clozeMode={recallMode && clozeEnabled}
                   revealedCardIds={revealedCardIds}
                   selectedAnnotationId={selectedAnnotationId}
                   getPage={getPage}
@@ -1373,7 +1469,10 @@ export function PdfWorkspace({
                 <span>{selectedAnnotation.kind === 'rectangle' ? '矩形标注' : '高亮标注'}</span>
                 <span>第 {selectedAnnotation.page} 页</span>
               </div>
-              <blockquote>{selectedCard?.excerpt || excerpts[selectedAnnotation.card_id] || '此标注没有文字摘录。'}</blockquote>
+              {/* 挖空未完成前不显示整段摘录，否则等于直接给答案。 */}
+              {(!recallMode || !clozeEnabled || revealedCardIds.has(selectedAnnotation.card_id)) && (
+                <blockquote>{selectedCard?.excerpt || excerpts[selectedAnnotation.card_id] || '此标注没有文字摘录。'}</blockquote>
+              )}
               {recallMode ? (
                 revealedCardIds.has(selectedAnnotation.card_id) ? (
                   <div className="pdf-rating-panel">
@@ -1392,6 +1491,17 @@ export function PdfWorkspace({
                     </div>
                     {!selectedCard && <small>卡片信息尚未载入，暂时无法评分。</small>}
                   </div>
+                ) : clozeEnabled && clozeExercise ? (
+                  <ClozePanel
+                    exercise={clozeExercise}
+                    answers={clozeAnswerList}
+                    result={clozeResult}
+                    onAnswerChange={(index, value) => handleClozeAnswer(selectedAnnotation.card_id, index, value)}
+                    onCheck={handleClozeCheck}
+                    onRetry={handleClozeRetry}
+                    onReveal={handleClozeReveal}
+                    onDisable={toggleCloze}
+                  />
                 ) : <p className="pdf-inspector-hint">点击页面上的遮挡块后再评分。</p>
               ) : (
                 <button type="button" className="pdf-delete-button" onClick={() => setDeleteTarget(selectedAnnotation)}>删除标注</button>
@@ -1400,8 +1510,8 @@ export function PdfWorkspace({
           ) : (
             <div className="pdf-inspector-empty">
               <span className="pdf-inspector-symbol">{recallMode ? '?' : '“”'}</span>
-              <strong>{recallMode ? '先回忆，再揭示' : '选择一条标注'}</strong>
-              <p>{recallMode ? '遮挡块已覆盖当前标注。点击揭示摘录，然后完成一次评分。' : tool === 'text' ? '像 Word 一样拖选文字，选中后可复制或直接建卡。' : tool === 'select' ? '点击标注查看摘录，或拖拽调整位置。' : '在页面上按下并拖拽，创建一条新标注。'}</p>
+              <strong>{recallMode ? (clozeEnabled ? '点遮挡块挖空' : '先回忆，再揭示') : '选择一条标注'}</strong>
+              <p>{recallMode ? (clozeEnabled ? '遮挡块盖住了关键内容。点开后补全空，答对会自动揭示原文并进入评分。' : '遮挡块已覆盖当前标注。点击揭示摘录，然后完成一次评分。') : tool === 'text' ? '像 Word 一样拖选文字，选中后可复制或直接建卡。' : tool === 'select' ? '点击标注查看摘录，或拖拽调整位置。' : '在页面上按下并拖拽，创建一条新标注。'}</p>
             </div>
           )}
 
@@ -1415,6 +1525,22 @@ export function PdfWorkspace({
 
       {embedded && (
         <>
+          {recallMode && clozeEnabled && selectedAnnotation && !revealedCardIds.has(selectedAnnotation.card_id) && clozeExercise && (
+            <div className="pdf-cloze-float" data-cloze-float>
+              <ClozePanel
+                floating
+                exercise={clozeExercise}
+                answers={clozeAnswerList}
+                result={clozeResult}
+                onAnswerChange={(index, value) => handleClozeAnswer(selectedAnnotation.card_id, index, value)}
+                onCheck={handleClozeCheck}
+                onRetry={handleClozeRetry}
+                onReveal={handleClozeReveal}
+                onDisable={toggleCloze}
+              />
+            </div>
+          )}
+
           {recallMode && selectedAnnotation && revealedCardIds.has(selectedAnnotation.card_id) && (
             <div className="pdf-recall-float" role="group" aria-label="文档回忆评分">
               <span>{selectedCard ? (ratedCardIds.has(selectedCard.id) ? '本会话已评分' : '回忆程度如何？') : '卡片尚未载入'}</span>
@@ -1451,6 +1577,11 @@ export function PdfWorkspace({
             <button type="button" className={tool === 'rectangle' ? 'is-active' : ''} onClick={() => setTool('rectangle')} disabled={recallMode} aria-pressed={tool === 'rectangle'} title="矩形框选"><Square size={17} /><span>框架</span></button>
             <button type="button" className={tool === 'ink' ? 'is-active' : ''} onClick={() => { setTool(tool === 'ink' ? 'select' : 'ink'); setInkErase(false) }} aria-pressed={tool === 'ink'} title="手写墨迹"><PenLine size={17} /><span>墨迹</span></button>
             <button type="button" onClick={() => setMergeOpen(true)} disabled={cardList.length < 2} title="合并多张卡片"><Merge size={17} /><span>合并</span></button>
+            {recallMode && (
+              <button type="button" className={clozeEnabled ? 'is-active' : ''} onClick={toggleCloze} aria-pressed={clozeEnabled} title="挖空填空：补全关键词后自动揭示原文" data-cloze-toggle>
+                <TextCursorInput size={17} /><span>挖空</span>
+              </button>
+            )}
             <button type="button" className={recallMode ? 'is-active' : ''} onClick={toggleRecall} disabled={!pdf} aria-pressed={recallMode} title="文档遮挡回忆"><MessageSquare size={17} /><span>{recallMode ? '退出' : '对话'}</span></button>
             <button type="button" onClick={() => { if (selectedAnnotation) setDeleteTarget(selectedAnnotation) }} disabled={!selectedAnnotation} title="删除选中的标注"><Trash2 size={17} /><span>删除</span></button>
             <button type="button" className={dockMenuOpen ? 'is-active' : ''} onClick={() => setDockMenuOpen((open) => !open)} aria-expanded={dockMenuOpen} title="更多：缩放与跳页"><MoreHorizontal size={17} /><span>更多</span></button>

@@ -15,11 +15,17 @@
  *
  * 用法：
  *   node scripts/publish-github-release.mjs [--dry-run] [--replace]
- *        [--tag v0.19.0] [--file release/xxx.dmg] [--notes "..."]
+ *        [--tag v0.19.0] [--file release/xxx.dmg] [--notes "..."] [--notes-file path]
+ *        [--notes-only] [--keep-notes]
  *
- * --dry-run  只打印计划，不写入 GitHub（无需 token）
- * --replace  同名资产已存在但内容不一致时，删除旧资产后重新上传；
- *            不加该参数会直接报错，避免误覆盖线上包。
+ * Release 正文默认由「本次提交的标题 + 提交说明里的功能条目」生成，
+ * 也就是当前版本改了什么、加了什么必须写进 Release，不能只留一句安装说明。
+ *
+ * --dry-run     只打印计划，不写入 GitHub（无需 token）
+ * --replace     同名资产已存在但内容不一致时，删除旧资产后重新上传；
+ *               不加该参数会直接报错，避免误覆盖线上包。
+ * --notes-only  只补写 / 更新 Release 正文，不碰资产（用于给已发布的版本补说明）
+ * --keep-notes  不自动改写正文（正文已被手工润色时用）
  */
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
@@ -27,6 +33,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve, join, basename } from 'node:path'
+import { buildReleaseNotes, canAutoUpdateNotes } from './releaseNotes.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 // 仅用于本地 mock 自测；正常发布不要设置这两个变量。
@@ -35,18 +42,22 @@ const UPLOAD = process.env.GITHUB_UPLOAD_BASE || 'https://uploads.github.com'
 
 function parseArgs(argv) {
   const options = {
-    tag: '', file: '', notes: '', replace: false, dryRun: false, skipVerify: false,
+    tag: '', file: '', notes: '', notesFile: '', replace: false, dryRun: false,
+    skipVerify: false, notesOnly: false, keepNotes: false,
   }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--replace') options.replace = true
     else if (arg === '--dry-run') options.dryRun = true
     else if (arg === '--skip-verify') options.skipVerify = true
+    else if (arg === '--notes-only') options.notesOnly = true
+    else if (arg === '--keep-notes') options.keepNotes = true
     else if (arg === '--tag') options.tag = argv[++index] ?? ''
     else if (arg === '--file') options.file = argv[++index] ?? ''
     else if (arg === '--notes') options.notes = argv[++index] ?? ''
+    else if (arg === '--notes-file') options.notesFile = argv[++index] ?? ''
     else if (arg === '--help' || arg === '-h') {
-      console.log('用法: node scripts/publish-github-release.mjs [--dry-run] [--replace] [--tag vX.Y.Z] [--file path.dmg] [--notes text]')
+      console.log('用法: node scripts/publish-github-release.mjs [--dry-run] [--replace] [--notes-only] [--keep-notes] [--tag vX.Y.Z] [--file path.dmg] [--notes text] [--notes-file path]')
       process.exit(0)
     } else throw new Error(`未知参数: ${arg}`)
   }
@@ -130,6 +141,29 @@ function sha256(buffer) {
   return createHash('sha256').update(buffer).digest('hex')
 }
 
+/** 本次提交的完整说明：第一行是标题，其余行是「改了什么 / 加了什么」。 */
+function commitBody() {
+  return git('log', '-1', '--format=%B')
+}
+
+/** README 里当前版本那一条（用户视角的一句话概要），用作正文的后备来源。 */
+function readmeHighlight(version) {
+  try {
+    const readme = readFileSync(join(ROOT, 'README.md'), 'utf8')
+    const line = readme
+      .split('\n')
+      .find((row) => row.startsWith('- **') && row.includes(`（${version}）`))
+    if (!line) return ''
+    return line
+      .replace(/^- /, '')
+      .replace(/\*\*/g, '')
+      .replace(/^([^（]+)（[^）]+）：/, '$1：')
+      .trim()
+  } catch {
+    return ''
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2))
   const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'))
@@ -159,6 +193,17 @@ async function main() {
     }
   }
 
+  // Release 正文：显式 --notes / --notes-file 优先，否则用本次提交说明生成。
+  const explicitNotes = options.notesFile
+    ? (await readFile(resolve(ROOT, options.notesFile), 'utf8')).trim()
+    : options.notes.trim()
+  const notes = explicitNotes || buildReleaseNotes({
+    version,
+    digest,
+    body: commitBody(),
+    highlight: readmeHighlight(version),
+  })
+
   console.log(`仓库      : ${slug}`)
   console.log(`版本/标签 : ${version} / ${tag}`)
   console.log(`本地文件  : ${dmg} (${bytes.length} bytes)`)
@@ -166,7 +211,8 @@ async function main() {
   console.log(`当前 HEAD : ${head}`)
 
   if (options.dryRun) {
-    console.log('\n[dry-run] 计划：创建或复用 Release，上传 DMG 与 .sha256；同名资产不一致时需 --replace。')
+    console.log('\n[dry-run] 计划：创建或复用 Release，写入下方正文，上传 DMG 与 .sha256（同名资产不一致时需 --replace）。')
+    console.log(`\n----- Release 正文 -----\n${notes}\n-------------------------`)
     return
   }
 
@@ -175,19 +221,32 @@ async function main() {
   try {
     release = await api(`/repos/${slug}/releases/tags/${encodeURIComponent(tag)}`, { token })
     console.log(`已有 Release: ${release.html_url}（${release.assets.length} 个资产）`)
-    const tagSha = git('ls-remote', 'origin', `refs/tags/${tag}`).split(/\s+/)[0]
+    // annotated tag 的 ref 指向 tag 对象而不是提交，必须用 ^{} 解引用再比较。
+    const tagSha = git('ls-remote', 'origin', `refs/tags/${tag}^{}`).split(/\s+/)[0]
+      || git('ls-remote', 'origin', `refs/tags/${tag}`).split(/\s+/)[0]
     if (tagSha && tagSha !== head) {
       console.warn(`⚠ 远端 tag ${tag} 指向 ${tagSha.slice(0, 7)}，与本地 HEAD ${head.slice(0, 7)} 不同；请确认 release 对应的源码。`)
     }
+    // 正文要写清这一版改了什么：空正文 / 旧模板 / 本脚本生成的正文直接刷新，手工润色的保持不动。
+    if (!options.keepNotes && notes !== (release.body ?? '').trim()) {
+      if (explicitNotes || canAutoUpdateNotes(release.body, version)) {
+        release = await api(`/repos/${slug}/releases/${release.id}`, {
+          token,
+          method: 'PATCH',
+          body: JSON.stringify({ body: notes }),
+          headers: { 'Content-Type': 'application/json' },
+        })
+        console.log('已更新 Release 正文（本次版本的功能说明）')
+      } else {
+        console.log('已有正文像是手工润色过的，跳过改写（要覆盖请传 --notes）')
+      }
+    }
   } catch (error) {
     if (!String(error.message).includes('404')) throw error
+    if (options.notesOnly) {
+      throw new Error(`Release ${tag} 不存在，无法只补正文；去掉 --notes-only 走正常发布。`)
+    }
     console.log('Release 不存在，将创建。')
-    const notes = options.notes || [
-      `PDFNote ${version}（macOS aarch64，ad-hoc 签名）`,
-      '',
-      '把 DMG 里的 PDFNote.app 拖进 Applications 安装；首次打开需右键「打开」（未公证）。',
-      `SHA-256: ${digest}`,
-    ].join('\n')
     release = await api(`/repos/${slug}/releases`, {
       token,
       method: 'POST',
@@ -198,6 +257,11 @@ async function main() {
       headers: { 'Content-Type': 'application/json' },
     })
     console.log(`已创建 Release: ${release.html_url}`)
+  }
+
+  if (options.notesOnly) {
+    console.log(`\n完成（仅正文）：${release.html_url}`)
+    return
   }
 
   for (const file of [dmg, shaFile]) {

@@ -68,6 +68,48 @@ describe('挖空抽取', () => {
   })
 })
 
+describe('每次会话换空', () => {
+  const text = '患者出现急性左心衰竭，需要立即给予利尿治疗，并监测 24 小时尿量与体重变化。'
+
+  const answersFor = (turn: number) => buildCloze(text, { turn }).blanks.map((blank) => blank.answer)
+
+  it('同一个 turn 结果完全稳定（会话内不会跳）', () => {
+    expect(answersFor(3)).toEqual(answersFor(3))
+    expect(answersFor(0)).toEqual(answersFor(0))
+  })
+
+  it('不同 turn 会换一批词，且循环回起点', () => {
+    const seen = new Set(Array.from({ length: 4 }, (_, turn) => answersFor(turn).join('|')))
+    expect(seen.size).toBeGreaterThan(1)
+    // 候选池是 4 个，turn 4 与 turn 0 取同一批
+    expect(answersFor(4)).toEqual(answersFor(0))
+  })
+
+  it('轮换后仍然只挖高分候选，且两个空之间留着线索', () => {
+    for (let turn = 0; turn < 8; turn += 1) {
+      const exercise = buildCloze(text, { turn })
+      expect(exercise.blanks).toHaveLength(2)
+      // 重建可见文本，量一下两个空之间还剩多少字
+      let visible = ''
+      let firstEnd = -1
+      let secondStart = -1
+      for (const segment of exercise.segments) {
+        if (segment.kind === 'text') visible += segment.text
+        else {
+          if (firstEnd < 0) firstEnd = visible.length
+          else if (secondStart < 0) secondStart = visible.length
+          visible += '【】'
+        }
+      }
+      if (secondStart >= 0 && firstEnd >= 0) {
+        expect(secondStart - firstEnd).toBeGreaterThanOrEqual(4)
+      }
+      // 轮换不能挖到泛化词
+      expect(exercise.blanks.map((blank) => blank.answer)).not.toContain('定义')
+    }
+  })
+})
+
 describe('填空判定', () => {
   it('完全一致算对，忽略标点、空格与全半角', () => {
     expect(judgeClozeBlank('心肌酶升高', '心肌酶升高')).toBe('correct')

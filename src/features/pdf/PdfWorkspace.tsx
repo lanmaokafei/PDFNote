@@ -71,6 +71,7 @@ import { SizeControl } from '../ink/SizeControl'
 import { readSizePreference, saveSizePreference } from '../ink/size'
 import { ClozePanel } from './ClozePanel'
 import {
+  bumpClozeTurn,
   buildCloze,
   checkCloze,
   readClozePreference,
@@ -176,7 +177,9 @@ export function PdfWorkspace({
   const [clozeEnabled, setClozeEnabled] = useState(readClozePreference)
   const [clozeAnswers, setClozeAnswers] = useState<Record<string, string[]>>({})
   const [clozeResults, setClozeResults] = useState<Record<string, ClozeResult | null>>({})
-  const clozeCacheRef = useRef(new Map<string, ClozeExercise>())
+  // 每次开始回忆会话 +1：同一条摘录换个空，但会话内保持不变。
+  const [clozeTurn, setClozeTurn] = useState(0)
+  const clozeCacheRef = useRef(new Map<string, { excerpt: string; turn: number; exercise: ClozeExercise }>())
   const [reviewedCards, setReviewedCards] = useState<Record<string, Card>>({})
   const [dockMenuOpen, setDockMenuOpen] = useState(false)
   const [tagTarget, setTagTarget] = useState<string | null>(null)
@@ -1087,6 +1090,7 @@ export function PdfWorkspace({
     setReviewedCards({})
     setClozeAnswers({})
     setClozeResults({})
+    setClozeTurn(bumpClozeTurn())
     setNotice(clozeEnabled
       ? '回忆会话已开始；手写墨迹与留白已隐藏，点遮挡块做挖空填空。'
       : '回忆会话已开始；手写墨迹与留白已隐藏，点击遮挡块揭示内容。')
@@ -1135,11 +1139,11 @@ export function PdfWorkspace({
     if (!clozeEnabled || !selectedAnnotation) return null
     const cache = clozeCacheRef.current
     const cached = cache.get(selectedAnnotation.card_id)
-    if (cached && cached.excerpt === clozeExcerpt) return cached
-    const next = buildCloze(clozeExcerpt)
-    cache.set(selectedAnnotation.card_id, next)
-    return next
-  }, [clozeEnabled, clozeExcerpt, selectedAnnotation])
+    if (cached && cached.excerpt === clozeExcerpt && cached.turn === clozeTurn) return cached.exercise
+    const exercise = buildCloze(clozeExcerpt, { turn: clozeTurn })
+    cache.set(selectedAnnotation.card_id, { excerpt: clozeExcerpt, turn: clozeTurn, exercise })
+    return exercise
+  }, [clozeEnabled, clozeExcerpt, selectedAnnotation, clozeTurn])
   const clozeCardId = selectedAnnotation?.card_id ?? ''
   const clozeAnswerList = clozeCardId ? (clozeAnswers[clozeCardId] ?? []) : []
   const clozeResult = clozeCardId ? (clozeResults[clozeCardId] ?? null) : null
@@ -1152,6 +1156,7 @@ export function PdfWorkspace({
     })
     setClozeAnswers({})
     setClozeResults({})
+    setClozeTurn(bumpClozeTurn())
     setNotice(clozeEnabled ? '已关闭挖空，遮挡块回到「点击揭示」。' : '已开启挖空：补全关键词后自动揭示原文。')
   }
 

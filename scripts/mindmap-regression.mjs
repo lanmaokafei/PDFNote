@@ -1783,6 +1783,10 @@ if (process.env.STEP === 'cloze') {
   await page.waitForTimeout(300)
   const blankCount = await page.locator('.pdf-cloze-input').count()
   if (blankCount !== 2) problems.push(`c4 那句应挖出 2 个空：${blankCount}`)
+  // 记录本轮挖的词（aria-label 里带首字与字数），用来验证「再进一次会换空」。
+  const readBlankHints = () => page.evaluate(() => [...document.querySelectorAll('.pdf-cloze-input')]
+    .map((element) => element.getAttribute('aria-label') ?? ''))
+  const firstHints = await readBlankHints()
 
   // 先故意答错：标红 + 给出正确答案，且不揭示遮罩、不出现评分。
   await page.locator('.pdf-cloze-input').first().fill('完全不对的答案')
@@ -1828,6 +1832,15 @@ if (process.env.STEP === 'cloze') {
   // 关掉挖空：遮挡块回到「点击揭示」的整块回忆。
   await toggleRecall()
   await toggleRecall()
+  // 第二次进入回忆应该换一批空（同一个 turn 内稳定，换了会话才轮换）。
+  await page.locator('[data-mask-index="2"]').click()
+  await page.waitForTimeout(300)
+  const secondHints = await readBlankHints()
+  if (secondHints.length !== firstHints.length) {
+    problems.push(`换空后空数变了：${secondHints.length}/${firstHints.length}`)
+  } else if (secondHints.join('|') === firstHints.join('|')) {
+    problems.push(`再次进入回忆没有换空：${secondHints.join(' / ')}`)
+  }
   await page.locator('[data-cloze-toggle]').first().click()
   await page.waitForTimeout(300)
   const offActive = await page.locator('[data-cloze-toggle]').first().evaluate((el) => el.classList.contains('is-active'))
@@ -1844,7 +1857,7 @@ if (process.env.STEP === 'cloze') {
   if (plainReveal.rating !== 4) problems.push('关闭挖空后揭示没有出现评分')
 
   await browser.close()
-  console.log(JSON.stringify({ problems, step: 'cloze', masksBefore, blankCount, answers, wrong, solved, plainReveal }, null, 2))
+  console.log(JSON.stringify({ problems, step: 'cloze', masksBefore, blankCount, answers, firstHints, secondHints, wrong, solved, plainReveal }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

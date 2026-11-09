@@ -66,6 +66,29 @@ export function saveClozePreference(enabled: boolean) {
   }
 }
 
+const CLOZE_TURN_KEY = 'pdfnote.cloze.turn'
+
+/** 读取轮换序号（跨会话、跨重启递增，保证每次进入回忆换一批空）。 */
+export function readClozeTurn(): number {
+  try {
+    const value = Number(globalThis.localStorage?.getItem(CLOZE_TURN_KEY) ?? '0')
+    return Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0
+  } catch {
+    return 0
+  }
+}
+
+/** 开始一次回忆会话时调用：序号 +1 并返回新值。 */
+export function bumpClozeTurn(): number {
+  const next = readClozeTurn() + 1
+  try {
+    globalThis.localStorage?.setItem(CLOZE_TURN_KEY, String(next))
+  } catch {
+    // 存不了就只在本次进程内递增，效果一样是「这次和上次不同」。
+  }
+  return next
+}
+
 /** 英文虚词不挖，避免把 the / of 变成空。 */
 const STOP_WORDS = new Set([
   'the', 'and', 'for', 'with', 'that', 'this', 'from', 'are', 'was', 'were',
@@ -252,6 +275,12 @@ function parsePieces(text: string): Piece[] {
 export interface BuildClozeOptions {
   /** 最多挖几个空；默认 2，超过 3 个基本是在考默写。 */
   maxBlanks?: number
+  /**
+   * 轮换序号：每次开始回忆会话 +1。
+   * 用它在「高分候选池」里换一个起点，让同一条摘录每次练到不同的词；
+   * 同一次会话内必须保持不变，否则打字打到一半空会跳走。
+   */
+  turn?: number
 }
 
 /**
@@ -284,10 +313,22 @@ export function buildCloze(excerpt: string, options: BuildClozeOptions = {}): Cl
   const candidates = pieces
     .map((piece, index) => ({ piece, index }))
     .filter((item) => item.piece.candidate)
-    .sort((a, b) => b.piece.score - a.piece.score)
+    // 同分按出现顺序，保证同一 turn 的结果稳定可复现。
+    .sort((a, b) => b.piece.score - a.piece.score || a.piece.offset - b.piece.offset)
+
+  // 轮换只在「高分候选池」里转：池子 = 前 max(4, 空数) 个候选，
+  // 起点按 turn 平移。这样每次换词，但不会为了变化去挖低分垃圾词。
+  const poolSize = Math.min(candidates.length, Math.max(4, maxBlanks))
+  const turn = Math.max(0, Math.trunc(options.turn ?? 0))
+  const start = poolSize > 1 ? turn % poolSize : 0
+  const ordered = [
+    ...candidates.slice(start, poolSize),
+    ...candidates.slice(0, start),
+    ...candidates.slice(poolSize),
+  ]
 
   const picked: Array<{ index: number; offset: number; length: number }> = []
-  for (const item of candidates) {
+  for (const item of ordered) {
     if (picked.length >= maxBlanks) break
     const length = charCount(item.piece.text)
     // 两个空之间必须留足够线索：中文至少隔 6 个字，英文至少隔一个短语。

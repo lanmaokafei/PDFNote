@@ -1,6 +1,6 @@
 use crate::{
-    ai, anki, backup, book, canvases, cards, documents, models, notebooks, review,
-    state::AppState, update,
+    ai, anki, backup, book, canvas_layers, canvases, cards, documents, models, notebooks,
+    review, state::AppState, update,
 };
 use tauri::{ipc::Response, State};
 
@@ -702,6 +702,43 @@ pub fn create_notebook_ink(
 #[tauri::command]
 pub fn delete_notebook_ink(state: State<'_, AppState>, id: String) -> Result<(), String> {
     notebooks::delete_notebook_ink(&state, id)
+}
+
+#[tauri::command]
+pub fn list_canvas_inks(
+    state: State<'_, AppState>,
+    canvas_id: String,
+) -> Result<Vec<models::CanvasInk>, String> {
+    canvas_layers::list_canvas_inks(&state, canvas_id)
+}
+
+#[tauri::command]
+pub fn create_canvas_ink(
+    state: State<'_, AppState>,
+    input: models::CreateCanvasInkInput,
+) -> Result<models::CanvasInk, String> {
+    canvas_layers::create_canvas_ink(&state, input)
+}
+
+#[tauri::command]
+pub fn delete_canvas_ink(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    canvas_layers::delete_canvas_ink(&state, id)
+}
+
+#[tauri::command]
+pub fn list_layer_members(
+    state: State<'_, AppState>,
+    canvas_id: String,
+) -> Result<Vec<models::LayerMember>, String> {
+    canvas_layers::list_layer_members(&state, canvas_id)
+}
+
+#[tauri::command]
+pub fn set_card_layer(
+    state: State<'_, AppState>,
+    input: models::SetCardLayerInput,
+) -> Result<(), String> {
+    canvas_layers::set_card_layer(&state, input)
 }
 
 #[cfg(test)]

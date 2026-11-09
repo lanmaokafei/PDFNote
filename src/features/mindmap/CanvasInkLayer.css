@@ -1,0 +1,215 @@
+/* ---------- 画布涂鸦：世界坐标墨迹 ---------- */
+
+/* ViewportPortal 把 svg 放进 .react-flow__viewport，平移缩放自动生效。
+   svg 本身只有 1px，靠 overflow:visible 让世界坐标里的 path 全部画出来。 */
+.mindmap-ink-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.mindmap-ink-svg path.is-hover { stroke: #d94f3d !important; }
+
+.mindmap-ink-eraser-cursor {
+  fill: rgba(217, 79, 61, .12);
+  stroke: #d94f3d;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+/* 落笔时盖住画布：z-index 4 在节点/画布之上、React Flow 面板(5)之下，
+   这样 Controls / MiniMap / 提示条仍然可点。 */
+.mindmap-ink-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* ---------- 图层面板 ---------- */
+
+.mindmap-layer-panel {
+  position: absolute;
+  top: 84px;
+  right: 16px;
+  z-index: 27;
+  width: 232px;
+  max-height: calc(100% - 170px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #dfe3d9;
+  border-radius: 10px;
+  background: #fbfcf8;
+  box-shadow: 0 16px 38px rgba(22, 28, 22, .16);
+  overflow: hidden;
+}
+
+.mindmap-layer-panel > header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 11px;
+  border-bottom: 1px solid #e8ece2;
+  color: #3a4734;
+}
+.mindmap-layer-panel > header strong { flex: 1; font-size: 10.5px; font-weight: 650; }
+.mindmap-layer-panel > header button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #dfe3d9;
+  border-radius: 5px;
+  color: #6f7a6a;
+  background: #fff;
+  cursor: pointer;
+}
+
+.mindmap-layer-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mindmap-layer-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 4px 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+.mindmap-layer-row.is-active { border-color: #c3d2b7; background: #eef3e7; }
+
+.mindmap-layer-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border: 0;
+  color: #465343;
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.mindmap-layer-name span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mindmap-layer-name small { color: #9aa294; font-size: 8px; }
+
+.mindmap-layer-rename {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 5px;
+  border: 1px solid #a8b99a;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 10px;
+  outline: none;
+}
+
+.mindmap-layer-row > button:not(.mindmap-layer-name) {
+  flex: 0 0 21px;
+  width: 21px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  color: #8c9488;
+  background: transparent;
+  cursor: pointer;
+}
+.mindmap-layer-row > button:not(.mindmap-layer-name):hover { color: #4e5e4b; background: #e6ece1; }
+.mindmap-layer-row > button.is-off { color: #b07a3c; }
+
+.mindmap-layer-confirm {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: calc(100% + 3px);
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 7px 8px;
+  border: 1px solid #edd5cd;
+  border-radius: 6px;
+  background: #fdf3ef;
+  box-shadow: 0 8px 18px #3542351a;
+}
+.mindmap-layer-confirm span { flex: 1 1 100%; color: #8b4439; font-size: 9px; }
+.mindmap-layer-confirm button {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid #dce1d6;
+  border-radius: 4px;
+  color: #687264;
+  background: #fff;
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+.mindmap-layer-confirm button.is-danger { border-color: #9b5a4a; color: #fff; background: #985545; }
+
+.mindmap-layer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 9px;
+  border-top: 1px solid #e8ece2;
+}
+.mindmap-layer-actions button {
+  height: 26px;
+  border: 1px solid #dfe3d9;
+  border-radius: 6px;
+  color: #5c655c;
+  background: #fff;
+  font: inherit;
+  font-size: 9.5px;
+  cursor: pointer;
+}
+.mindmap-layer-actions button:hover:not(:disabled) { border-color: #a8b99a; background: #f1f5eb; }
+.mindmap-layer-actions button:disabled { opacity: .45; cursor: default; }
+
+.mindmap-layer-panel > p {
+  margin: 0;
+  padding: 8px 11px 10px;
+  border-top: 1px solid #e8ece2;
+  color: #9aa294;
+  font-size: 8.5px;
+  line-height: 1.6;
+}
+.mindmap-layer-panel > p.is-error { color: #8b4439; background: #f8eae5; }
+
+/* 工具条里的尺寸滑杆触发按钮跟随现有按钮高度 */
+.mindmap-toolbar-actions .ink-size-control,
+.mindmap-float-actions .ink-size-control { flex: 0 0 auto; }
+.mindmap-toolbar-actions .ink-size-trigger,
+.mindmap-float-actions .ink-size-trigger { height: 27px; }
+
+.mindmap-ink-color {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #d3dacb;
+  cursor: pointer;
+}
+.mindmap-ink-color.is-active { box-shadow: 0 0 0 2px #6f8a63; }

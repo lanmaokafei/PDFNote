@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
 
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
 const DOCUMENT_PROGRESS_SQL: &str = include_str!("../../migrations/002_document_progress.sql");
 const COLLABORATION_SQL: &str = include_str!("../../migrations/003_collaboration.sql");
@@ -12,6 +12,7 @@ const PAGE_NOTES_SQL: &str = include_str!("../../migrations/007_page_notes.sql")
 const BOOK_DIGEST_SQL: &str = include_str!("../../migrations/008_book_digest.sql");
 const MINDMAP_CANVASES_SQL: &str = include_str!("../../migrations/009_mindmap_canvases.sql");
 const NOTEBOOKS_SQL: &str = include_str!("../../migrations/010_notebooks.sql");
+const CANVAS_LAYERS_SQL: &str = include_str!("../../migrations/011_canvas_layers.sql");
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
@@ -52,7 +53,7 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
             "数据库 schema 版本 {version} 高于当前应用支持的版本 {SCHEMA_VERSION}"
         ));
     }
-    let migrations: [(&str, u32); 10] = [
+    let migrations: [(&str, u32); 11] = [
         (INIT_SQL, 1),
         (DOCUMENT_PROGRESS_SQL, 2),
         (COLLABORATION_SQL, 3),
@@ -63,6 +64,7 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
         (BOOK_DIGEST_SQL, 8),
         (MINDMAP_CANVASES_SQL, 9),
         (NOTEBOOKS_SQL, 10),
+        (CANVAS_LAYERS_SQL, 11),
     ];
     for (sql, target_version) in migrations {
         if target_version > version {

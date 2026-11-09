@@ -454,6 +454,59 @@ pub struct UpdateNotebookInput {
     pub paper: String,
 }
 
+/** 画布涂鸦：一笔一行，points 是 React Flow 世界坐标。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanvasInk {
+    pub id: String,
+    pub canvas_id: String,
+    pub layer_id: String,
+    pub points: Vec<[f64; 2]>,
+    pub style: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub const CANVAS_INK_COLUMNS: &str =
+    "id, canvas_id, layer_id, points_json, style_json, created_at, updated_at";
+
+pub fn canvas_ink_from_row(row: &Row<'_>) -> Result<CanvasInk, Error> {
+    Ok(CanvasInk {
+        id: row.get(0)?,
+        canvas_id: row.get(1)?,
+        layer_id: row.get(2)?,
+        points: serde_json::from_str(&row.get::<_, String>(3)?)
+            .unwrap_or_default(),
+        style: serde_json::from_str(&row.get::<_, String>(4)?)
+            .unwrap_or(serde_json::json!({})),
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateCanvasInkInput {
+    pub canvas_id: String,
+    pub layer_id: String,
+    pub points: Vec<[f64; 2]>,
+    pub style: serde_json::Value,
+}
+
+/** 卡片归属某个画布图层；没有行的卡片属于「未分层」，永远可见。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerMember {
+    pub layer_id: String,
+    pub card_id: String,
+    pub canvas_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetCardLayerInput {
+    pub canvas_id: String,
+    pub card_id: String,
+    /// null = 移回「未分层」。
+    pub layer_id: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateLayerInput {
     pub scope: String,

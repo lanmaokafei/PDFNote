@@ -29,6 +29,8 @@
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
+| 画布涂鸦与脑图分层（0.38.0） | `STEP=canvas-ink CARD_COUNT=3` | 世界坐标笔迹随平移移动；新建图层后第二笔写进新层；隐藏层同时隐藏墨迹与归入该层的卡片；恢复显示一起回来；橡皮 56px 擦掉第一笔 |
+| schema v11 迁移与备份 | `cargo test --lib canvas_layers::` | `canvas_inks` / `mindmap_layer_members` 建表，`user_version=11`，旧库升级原数据保留；删图层级联清理墨迹与归属 |
 | 连续尺寸滑杆（0.37.0） | `STEP=ink-erase CARD_COUNT=3` | 笔宽滑杆 0.0018–0.0072（1.8‰ / 7.2‰）、橡皮半径滑杆 8–56px（小 / 特大）；浮层不裁切；最大半径光标 r=56；悬停命中高亮；拖动一次擦掉两条线，前后端 0 残留 |
 | 笔记本控件一致（0.37.0） | `STEP=notebook` | 笔记本橡皮滑杆同为 8–56px，拖到最大后擦除行为与 PDF 一致 |
 | 橡皮大小与连擦（0.31.0，历史） | `STEP=ink-erase CARD_COUNT=3` | 原为 4 档大小按钮；0.37.0 改为连续滑杆，保留连擦与命中语义 |

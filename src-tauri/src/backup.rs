@@ -376,6 +376,8 @@ fn import_overwrite(
         .transaction()
         .map_err(|error| error.to_string())?;
     for table in [
+        "mindmap_layer_members",
+        "canvas_inks",
         "notebook_inks",
         "layers",
         "notebooks",
@@ -421,11 +423,43 @@ fn import_overwrite(
             copy_table_if_present(&transaction, table)?;
         }
         // 0.36.0 图层与手写本：父表在前，避免外键失败。
-        for table in ["notebooks", "layers", "notebook_inks"] {
+        for table in ["notebooks", "layers", "notebook_inks", "canvas_inks", "mindmap_layer_members"] {
             copy_table_if_present(&transaction, table)?;
         }
         // v9 之前的备份没有画布表（main 刚被 DELETE 清掉），或布局里出现了未登记的画布 id。
         ensure_layout_canvases(&transaction, &now())?;
+        if import_has_table(&transaction, "canvas_inks")? {
+            transaction
+                .execute(
+                    "INSERT INTO canvas_inks (
+                        id, canvas_id, layer_id, points_json, style_json, created_at, updated_at
+                     )
+                     SELECT s.id, s.canvas_id, s.layer_id, s.points_json, s.style_json, s.created_at, s.updated_at
+                     FROM import_src.canvas_inks s
+                     WHERE NOT EXISTS (SELECT 1 FROM canvas_inks i WHERE i.id = s.id)
+                       AND EXISTS (SELECT 1 FROM mindmap_canvases c WHERE c.id = s.canvas_id)
+                       AND EXISTS (SELECT 1 FROM layers l WHERE l.id = s.layer_id)",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        if import_has_table(&transaction, "mindmap_layer_members")? {
+            transaction
+                .execute(
+                    "INSERT INTO mindmap_layer_members (layer_id, card_id, canvas_id)
+                     SELECT s.layer_id, s.card_id, s.canvas_id
+                     FROM import_src.mindmap_layer_members s
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM mindmap_layer_members m
+                         WHERE m.layer_id = s.layer_id AND m.card_id = s.card_id
+                     )
+                       AND EXISTS (SELECT 1 FROM layers l WHERE l.id = s.layer_id)
+                       AND EXISTS (SELECT 1 FROM cards c WHERE c.id = s.card_id)",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+
         Ok(())
     })();
     result?;

@@ -87,6 +87,13 @@ PDFNote-backup-YYYYMMDD-HHMMSS.zip
 - 翻页停止 700ms 后写入，关闭文档时再补一次；不更新 `updated_at`，避免资料库排序与备份新鲜度被翻页触发。
 - 备份导入时按清单 `schema_version` 选择列：schema v1 旧包没有 `last_page`，导入后为 1；schema v2 包会一并恢复。
 
+## 画布涂鸦与脑图分层（schema v11）
+
+- `canvas_inks(id, canvas_id, layer_id, points_json, style_json, …)`：一笔一行，`points_json` 是 React Flow 世界坐标数组；`layer_id` / `canvas_id` 都是外键且 `ON DELETE CASCADE`。
+- `mindmap_layer_members(layer_id, card_id, canvas_id)`：卡片属于哪个画布图层，主键 `(layer_id, card_id)`；没有行的卡片属于「未分层」，永远可见。
+- **不改 `mindmap_layout` / `cards`**：overwrite 的 `INSERT INTO mindmap_layout SELECT *` 不需要按 schema 版本分支，这是拆关联表的主要原因。
+- 备份：两表加入 overwrite 的 DELETE 列表（先子后父）与 `copy_table_if_present`；merge 按 id / 复合主键去重，并要求画布、卡片、图层都存在；旧备份（< v11）缺表时跳过。
+
 ## 手写笔记本与图层（schema v10）
 
 - `notebooks(id, title, paper, created_at, updated_at)`：独立于 PDF 的手写本；`paper` 只能是 `blank / lined / grid / dot`。

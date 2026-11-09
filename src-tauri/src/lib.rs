@@ -2,6 +2,7 @@ mod ai;
 mod anki;
 mod backup;
 mod book;
+mod canvas_layers;
 mod canvases;
 mod cards;
 mod commands;
@@ -107,6 +108,11 @@ pub fn run() {
             commands::list_notebook_inks,
             commands::create_notebook_ink,
             commands::delete_notebook_ink,
+            commands::list_canvas_inks,
+            commands::create_canvas_ink,
+            commands::delete_canvas_ink,
+            commands::list_layer_members,
+            commands::set_card_layer,
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;

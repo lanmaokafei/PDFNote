@@ -274,6 +274,31 @@ export interface NotebookInk {
   updated_at: string
 }
 
+/** 画布涂鸦：points 是 React Flow 世界坐标，随平移缩放一起变换。 */
+export interface CanvasInk {
+  id: string
+  canvas_id: string
+  layer_id: string
+  points: Array<[number, number]>
+  style: { color: string; width: number }
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateCanvasInkInput {
+  canvas_id: string
+  layer_id: string
+  points: Array<[number, number]>
+  style: { color: string; width: number }
+}
+
+/** 卡片归属某个画布图层；没有行的卡片属于「未分层」，永远可见。 */
+export interface LayerMember {
+  layer_id: string
+  card_id: string
+  canvas_id: string
+}
+
 export interface CreateNotebookInkInput {
   notebook_id: string
   page: number

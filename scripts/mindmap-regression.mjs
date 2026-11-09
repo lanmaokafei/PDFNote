@@ -122,6 +122,22 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
   window.__notebookState = notebookState
   window.__layerState = layerState
   window.__notebookInkState = notebookInkState
+  // 0.38.0：画布涂鸦与卡片图层
+  const canvasInkState = []
+  const layerMemberState = []
+  window.__canvasInkState = canvasInkState
+  window.__layerMemberState = layerMemberState
+  // 全局 main 画布自带一个图层，和真机 createLayer 的行为一致。
+  layerState.push({
+    id: 'canvas-layer-1',
+    scope: 'canvas',
+    owner_id: 'main',
+    name: '主层',
+    visible: true,
+    locked: false,
+    sort_order: 0,
+    created_at: '2026-11-09T00:00:00.000Z',
+  })
   // RECALL_SEED=1：预置一条手写与一条留白，验证文档回忆会把它们一起藏起来。
   if (recallSeed) {
     inkState.push({
@@ -316,6 +332,12 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       for (let i = notebookInkState.length - 1; i >= 0; i -= 1) {
         if (notebookInkState[i].layer_id === id) notebookInkState.splice(i, 1)
       }
+      for (let i = canvasInkState.length - 1; i >= 0; i -= 1) {
+        if (canvasInkState[i].layer_id === id) canvasInkState.splice(i, 1)
+      }
+      for (let i = layerMemberState.length - 1; i >= 0; i -= 1) {
+        if (layerMemberState[i].layer_id === id) layerMemberState.splice(i, 1)
+      }
       return null
     },
     list_notebook_inks: (args) => notebookInkState
@@ -339,6 +361,47 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     delete_notebook_ink: (args) => {
       const index = notebookInkState.findIndex((item) => item.id === args?.id)
       if (index >= 0) notebookInkState.splice(index, 1)
+      return null
+    },
+    list_canvas_inks: (args) => canvasInkState
+      .filter((item) => item.canvas_id === args?.canvasId)
+      .map((item) => ({ ...item })),
+    create_canvas_ink: (args) => {
+      const input = args?.input ?? {}
+      const ink = {
+        id: `cink-${canvasInkState.length + 1}`,
+        canvas_id: input.canvas_id,
+        layer_id: input.layer_id,
+        points: input.points ?? [],
+        style: input.style ?? {},
+        created_at: '2026-11-09T00:00:00.000Z',
+        updated_at: '2026-11-09T00:00:00.000Z',
+      }
+      canvasInkState.push(ink)
+      return { ...ink }
+    },
+    delete_canvas_ink: (args) => {
+      const index = canvasInkState.findIndex((item) => item.id === args?.id)
+      if (index >= 0) canvasInkState.splice(index, 1)
+      return null
+    },
+    list_layer_members: (args) => layerMemberState
+      .filter((item) => item.canvas_id === args?.canvasId)
+      .map((item) => ({ ...item })),
+    set_card_layer: (args) => {
+      const input = args?.input ?? {}
+      for (let i = layerMemberState.length - 1; i >= 0; i -= 1) {
+        if (layerMemberState[i].canvas_id === input.canvas_id && layerMemberState[i].card_id === input.card_id) {
+          layerMemberState.splice(i, 1)
+        }
+      }
+      if (input.layer_id) {
+        layerMemberState.push({
+          layer_id: input.layer_id,
+          card_id: input.card_id,
+          canvas_id: input.canvas_id,
+        })
+      }
       return null
     },
     create_page_note: (args) => {
@@ -1862,6 +1925,119 @@ if (process.env.STEP === 'outline-edit') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'outline-edit', draftBeforeTab, afterEnter, afterIndent, afterOutdent, afterDrag }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=canvas-ink：画布涂鸦（世界坐标）+ 脑图分层（墨迹与卡片一起显隐）。
+if (process.env.STEP === 'canvas-ink') {
+  await page.locator('.app-segment', { hasText: '脑图' }).click()
+  await page.waitForSelector('.mindmap-flow-host', { timeout: 30000 })
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(900)
+
+  const pane = await page.locator('.react-flow__pane').boundingBox()
+  if (!pane) {
+    problems.push('找不到画布 pane')
+    await browser.close()
+    console.log(JSON.stringify({ problems, step: 'canvas-ink' }, null, 2))
+    process.exit(1)
+  }
+
+  const drawStroke = async (offsetY) => {
+    const startX = pane.x + pane.width * 0.28
+    const startY = pane.y + pane.height * offsetY
+    await page.mouse.move(startX, startY)
+    await page.mouse.down()
+    for (let step = 1; step <= 10; step += 1) {
+      await page.mouse.move(startX + step * 14, startY + step * 3, { steps: 1 })
+    }
+    await page.mouse.up()
+    await page.waitForTimeout(400)
+  }
+
+  const inkCount = () => page.evaluate(() => window.__canvasInkState.length)
+  const pathCount = () => page.locator('[data-testid="mindmap-ink-svg"] path').count()
+
+  // 1) 进入涂鸦、画第一笔
+  await page.locator('[data-testid="mindmap-ink-toggle"]').click()
+  await page.waitForSelector('[data-testid="mindmap-ink-overlay"]', { timeout: 5000 })
+  await drawStroke(0.25)
+  if ((await inkCount()) !== 1) problems.push(`第一笔没有落库：${await inkCount()}`)
+  if ((await pathCount()) !== 1) problems.push(`第一笔没有渲染：${await pathCount()}`)
+
+  // 2) 退出涂鸦后平移：世界坐标笔迹必须跟着视口一起移动
+  await page.locator('[data-testid="mindmap-ink-toggle"]').click()
+  const pathBefore = await page.locator('[data-testid="mindmap-ink-svg"] path').first().boundingBox()
+  await page.mouse.move(pane.x + pane.width * 0.6, pane.y + pane.height * 0.5)
+  await page.mouse.wheel(0, 160)
+  await page.waitForTimeout(500)
+  const pathAfter = await page.locator('[data-testid="mindmap-ink-svg"] path').first().boundingBox()
+  if (!pathBefore || !pathAfter || Math.abs(pathAfter.y - pathBefore.y) < 40) {
+    problems.push(`平移后墨迹没有跟随世界坐标：${JSON.stringify({ pathBefore, pathAfter })}`)
+  }
+
+  // 3) 新图层 → 第二笔画进新层
+  await page.locator('[data-testid="mindmap-ink-toggle"]').click()
+  await page.locator('[data-testid="mindmap-layer-toggle"]').click()
+  await page.waitForSelector('[data-testid="mindmap-layer-panel"]', { timeout: 5000 })
+  await page.locator('[data-testid="mindmap-layer-add"]').click()
+  await page.waitForTimeout(350)
+  const rows = await page.locator('.mindmap-layer-row').count()
+  if (rows !== 2) problems.push(`新建图层后应有 2 层：${rows}`)
+  const secondLayerId = await page.locator('.mindmap-layer-row').nth(1).getAttribute('data-layer-id')
+  await drawStroke(0.65)
+  const secondInk = await page.evaluate(() => window.__canvasInkState[1]?.layer_id)
+  if (secondInk !== secondLayerId) problems.push(`第二笔没有写进新层：${secondInk} vs ${secondLayerId}`)
+
+  // 4) 隐藏第二层：只剩第一笔
+  await page.locator(`.mindmap-layer-row[data-layer-id="${secondLayerId}"] button[title="隐藏图层"]`).click()
+  await page.waitForTimeout(400)
+  if ((await pathCount()) !== 1) problems.push(`隐藏图层后笔迹没有减少：${await pathCount()}`)
+
+  // 5) 把选中卡片归入隐藏层 → 该卡片也应消失
+  await page.locator('[data-testid="mindmap-ink-toggle"]').click()
+  await page.locator('.react-flow__node').first().click()
+  await page.waitForTimeout(350)
+  await page.locator('[data-testid="mindmap-layer-assign"]').click()
+  await page.waitForTimeout(400)
+  const assigned = await page.evaluate(() => window.__layerMemberState.length)
+  if (assigned < 1) problems.push(`卡片没有归入图层：${assigned}`)
+  const hiddenNode = await page.locator('.react-flow__node[data-id="c1"]').count()
+  if (hiddenNode !== 0) problems.push('隐藏图层后归入该层的卡片仍然显示')
+
+  // 恢复显示：墨迹与卡片一起回来
+  await page.locator(`.mindmap-layer-row[data-layer-id="${secondLayerId}"] button[title="显示图层"]`).click()
+  await page.waitForTimeout(450)
+  if ((await pathCount()) !== 2) problems.push(`恢复图层后应有 2 笔：${await pathCount()}`)
+  if ((await page.locator('.react-flow__node[data-id="c1"]').count()) !== 1) problems.push('恢复图层后卡片没有回来')
+
+  // 6) 橡皮（半径滑杆拖到最大）擦掉第一笔
+  await page.locator('[data-testid="mindmap-ink-toggle"]').click()
+  await page.locator('[data-testid="mindmap-ink-eraser"]').click()
+  await page.locator('[data-testid="ink-size-trigger-eraser"]').click()
+  const eraserSlider = page.locator('[data-testid="ink-size-slider-eraser"]')
+  await eraserSlider.focus()
+  await page.keyboard.press('End')
+  await page.waitForTimeout(200)
+  const firstPath = await page.locator('[data-testid="mindmap-ink-svg"] path').first().boundingBox()
+  if (firstPath) {
+    const cx = firstPath.x + firstPath.width / 2
+    const cy = firstPath.y + firstPath.height / 2
+    await page.mouse.move(cx, cy)
+    await page.mouse.down()
+    for (let step = 1; step <= 6; step += 1) await page.mouse.move(cx + step * 4, cy + step * 2, { steps: 1 })
+    await page.mouse.up()
+    await page.waitForTimeout(600)
+  }
+  if ((await inkCount()) !== 1) problems.push(`橡皮后应剩 1 笔：${await inkCount()}`)
+
+  if (process.env.SHOT) {
+    await page.screenshot({ path: '/tmp/pdfnote-canvas-ink.png' })
+  }
+
+  const inkLeft = await inkCount()
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'canvas-ink', rows, secondInk, assigned, inkLeft }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

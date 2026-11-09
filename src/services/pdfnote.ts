@@ -25,6 +25,9 @@ import type {
   Layer,
   PaperStyle,
   LayerScope,
+  CanvasInk,
+  CreateCanvasInkInput,
+  LayerMember,
   ReviewInput,
   ReviewStats,
   UpdateCardContentInput,
@@ -370,6 +373,35 @@ export async function listNotebookInks(notebookId: string): Promise<NotebookInk[
 export async function createNotebookInk(input: CreateNotebookInkInput): Promise<NotebookInk> {
   desktopOnly()
   return invoke('create_notebook_ink', { input })
+}
+
+export async function listCanvasInks(canvasId: string): Promise<CanvasInk[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_canvas_inks', { canvasId })
+}
+
+export async function createCanvasInk(input: CreateCanvasInkInput): Promise<CanvasInk> {
+  desktopOnly()
+  return invoke('create_canvas_ink', { input })
+}
+
+export async function deleteCanvasInk(id: string): Promise<void> {
+  desktopOnly()
+  return invoke('delete_canvas_ink', { id })
+}
+
+export async function listLayerMembers(canvasId: string): Promise<LayerMember[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_layer_members', { canvasId })
+}
+
+export async function setCardLayer(
+  canvasId: string,
+  cardId: string,
+  layerId: string | null,
+): Promise<void> {
+  desktopOnly()
+  return invoke('set_card_layer', { input: { canvas_id: canvasId, card_id: cardId, layer_id: layerId } })
 }
 
 export async function deleteNotebookInk(id: string): Promise<void> {

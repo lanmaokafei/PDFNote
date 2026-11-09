@@ -81,6 +81,7 @@ import {
   type DropPosition,
 } from './outlineEdit'
 import { ExpandableField } from './ExpandableField'
+import { useCanvasInk } from './CanvasInkLayer'
 import { CanvasSwitcher } from './CanvasSwitcher'
 import { AnkiImportDialog } from '../book/AnkiImportDialog'
 import type { AnkiImportResult } from '../../services/anki'
@@ -217,6 +218,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   const [positions, setPositions] = useState<Record<string, Point>>({})
   const [measuredSizes, setMeasuredSizes] = useState<Record<string, { width: number; height: number }>>({})
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
+  /** 画布涂鸦 / 图层：世界坐标墨迹 + 卡片分层显隐（schema v11）。 */
+  const ink = useCanvasInk(canvasId, selectedIds)
 
   // 尺寸回写熔断：极端情况下（容器 0 宽、图片抖动）测量会连续变化，
   // 超过阈值后本秒内停止回写，直接断开 StoreUpdater ↔ onNodesChange 的回路。
@@ -326,9 +329,11 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   const canvasName = currentCanvas?.name ?? canvasId
   const cards = useMemo(
     () => Object.values(cardsById).filter(
-      (card) => card.surface_mindmap && layoutCardIds.has(card.id),
+      (card) => card.surface_mindmap
+        && layoutCardIds.has(card.id)
+        && !ink.hiddenCardIds.has(card.id),
     ),
-    [cardsById, layoutCardIds],
+    [cardsById, layoutCardIds, ink.hiddenCardIds],
   )
   const parentIds = useMemo(() => {
     const ids = new Set(cards.map((card) => card.id))
@@ -1819,6 +1824,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
           <button type="button" className={viewMode === 'outline' ? 'active' : ''} onClick={() => setViewMode('outline')} aria-pressed={viewMode === 'outline'}>大纲</button>
         </div>
         <div className="mindmap-toolbar-actions">
+          {ink.toolbar()}
           <button type="button" onClick={() => void refresh()} disabled={loading || busy}>刷新</button>
           <button type="button" onClick={autoArrange} disabled={busy || !cards.length || viewMode === 'outline'}>自动整理</button>
           <button type="button" onClick={() => fitReadable(320)} disabled={!cards.length || viewMode === 'outline'} title="把视图对准内容；节点很多时只对准前几十个，保证文字可读">适应视图</button>
@@ -1833,6 +1839,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
 
       {compact && viewMode === 'canvas' && (
         <div className="mindmap-float-actions">
+          {ink.toolbar(true)}
           <button type="button" onClick={() => void refresh()} disabled={loading || busy}>刷新</button>
           <button type="button" onClick={() => setViewMode('outline')}>大纲</button>
           <button type="button" onClick={autoArrange} disabled={busy || !cards.length}>整理</button>
@@ -1886,7 +1893,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
           <div className="mindmap-state"><span className="mindmap-spinner" /><h2>正在读取脑图</h2><p>加载最新卡片与已保存的布局…</p></div>
         ) : !hasLoaded ? (
           <div className="mindmap-state"><span className="mindmap-state-mark">!</span><h2>暂时无法打开脑图</h2><p>{error}</p><button type="button" className="mindmap-button primary" onClick={() => void refresh()}>重试</button></div>
-        ) : cards.length === 0 ? (
+        ) : cards.length === 0 && ink.inkMode === 'off' ? (
           <div className="mindmap-state"><span className="mindmap-state-mark">◇</span><h2>「{canvasName}」还是空的</h2><p>新建独立卡片、从 PDF 划重点，或导入 AnkiDroid 导出的 txt；每张画布的卡片与坐标互相独立。</p><div className="mindmap-state-actions"><button type="button" className="mindmap-button primary" onClick={() => setEditor('new')}>新建独立卡片</button><button type="button" className="mindmap-button" onClick={() => setAnkiOpen(true)}>导入 Anki 牌组</button></div></div>
         ) : (
           <>
@@ -1914,18 +1921,20 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
             maxZoom={1.8}
             // 低缩放（lite）下把拖动让给画布平移：这个比例下看不清卡片，
             // 而 React Flow 会为每个可见节点逐帧重建（338 个节点一次拖拽近 8000 次渲染）。
-            nodesDraggable={!busy && !lite}
-            nodesConnectable={!busy && !lite}
+            nodesDraggable={!busy && !lite && ink.inkMode === 'off'}
+            nodesConnectable={!busy && !lite && ink.inkMode === 'off'}
             deleteKeyCode={null}
-            selectionKeyCode="Shift"
-            panOnDrag={PAN_ON_DRAG}
-            panOnScroll
+            selectionKeyCode={ink.inkMode === 'off' ? 'Shift' : null}
+            panOnDrag={ink.inkMode === 'off' ? PAN_ON_DRAG : false}
+            panOnScroll={ink.inkMode === 'off'}
             zoomOnScroll={false}
             zoomActivationKeyCode="Meta"
             zoomOnDoubleClick={false}
             multiSelectionKeyCode={MULTI_SELECTION_KEYS}
           >
             <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#d7ded9" />
+            {ink.portal}
+            {ink.overlay}
             {!compact && (
               <Panel position="top-left" className="mindmap-canvas-hint">
                 拖拽空白或双指滑动平移 · ⌘+滚轮 / 捏合缩放 · Shift 拖拽框选
@@ -1944,6 +1953,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
             )}
               </ReactFlow>
             </div>
+            {ink.panel}
             {viewMode === 'outline' && (
             <div className="mindmap-outline" onContextMenu={handleOutlinePaneContextMenu}>
               <div className="mindmap-outline-head">

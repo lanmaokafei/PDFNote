@@ -6,7 +6,7 @@ import {
   type PDFDocumentLoadingTask,
   type PDFDocumentProxy,
   type PDFPageProxy,
-} from 'pdfjs-dist'
+} from './pdfjs'
 import type { OcrLine } from '../../services/pdfnote'
 import { notifyMindmapChanged, readCanvasId } from '../mindmap/canvas'
 import { nextMindmapInsertPoint } from '../mindmap/viewport'
@@ -66,28 +66,20 @@ import { decideFormulaRecognition } from './formulaRecognition'
 import { describeAiFailure } from './aiFailure'
 import { pruneCardAnnotations } from './annotationCache'
 import { TitleLinkPopover } from './TitleLinkPopover'
+import { SizeControl } from '../ink/SizeControl'
+import { readSizePreference, saveSizePreference } from '../ink/size'
 import { buildTitleLinkIndex, type TitleLinkHit } from './titleLink'
 import { getAiSettings, isAiConfigured, recognizeSelection } from '../../services/ai'
 import './PdfWorkspace.css'
 
-GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs'
+// 必须用 legacy worker：常规 worker 依赖 Map.prototype.getOrInsertComputed，
+// macOS 15 及更早的 WKWebView 没有，打开 PDF 会直接失败（详见 ./pdfjs）。
+GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.legacy.min.mjs'
 
 const DEFAULT_PAGE_SIZE: PageSize = { width: 612, height: 792 }
 const PAGE_PROXY_CACHE_LIMIT = 16
 const EMPTY_INKS: PageInk[] = []
 const INK_COLORS = ['#d94f3d', '#2f6f8f', '#3f7a4c', '#2f3330']
-const INK_WIDTHS = [
-  { label: '细', value: 0.0018 },
-  { label: '中', value: 0.0028 },
-  { label: '粗', value: 0.0042 },
-]
-/** 橡皮直径（CSS px）：命中半径随它变，dot 是工具栏上的预览圆点。 */
-const ERASER_SIZES = [
-  { label: '小', value: 8, dot: 6 },
-  { label: '中', value: 18, dot: 10 },
-  { label: '大', value: 32, dot: 14 },
-  { label: '特大', value: 56, dot: 20 },
-]
 const MIN_SCALE = 0.5
 const MAX_SCALE = 3
 const EMPTY_ANNOTATIONS: Annotation[] = []
@@ -180,9 +172,20 @@ export function PdfWorkspace({
   const [pageNotes, setPageNotes] = useState<PageNote[]>([])
   const [digestOpen, setDigestOpen] = useState(false)
   const [inkColor, setInkColor] = useState(INK_COLORS[0])
-  const [inkWidth, setInkWidth] = useState(INK_WIDTHS[1].value)
-  const [eraserSize, setEraserSize] = useState(ERASER_SIZES[1].value)
+  const [inkWidth, setInkWidth] = useState(() => readSizePreference('pen'))
+  const [eraserSize, setEraserSize] = useState(() => readSizePreference('eraser'))
   const [inkErase, setInkErase] = useState(false)
+
+  // 连续滑杆：拖一下就落一次偏好，PDF 与笔记本共用同一份记忆。
+  const changeInkWidth = (value: number) => {
+    setInkWidth(value)
+    saveSizePreference('pen', value)
+    setInkErase(false)
+  }
+  const changeEraserSize = (value: number) => {
+    setEraserSize(value)
+    saveSizePreference('eraser', value)
+  }
   // 标题链接默认关闭：卡片库还很小时开启只会有开销，没有「过去的笔记」可浮现。
   const [titleLinkEnabled, setTitleLinkEnabled] = useState(readTitleLinkPreference)
   const [titleLinkPreview, setTitleLinkPreview] = useState<TitleLinkHit | null>(null)
@@ -1467,44 +1470,18 @@ export function PdfWorkspace({
                   />
                 ))}
               </div>
-              <div className="pdf-ink-widths">
-                {INK_WIDTHS.map((option) => (
-                  <button
-                    key={option.label}
-                    type="button"
-                    className={inkWidth === option.value && !inkErase ? 'is-active' : ''}
-                    onClick={() => { setInkWidth(option.value); setInkErase(false) }}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
+              <SizeControl kind="pen" label="笔宽" value={inkWidth} onChange={changeInkWidth} />
               <button
                 type="button"
                 className={inkErase ? 'is-active' : ''}
                 onClick={() => setInkErase((value) => !value)}
-                title="橡皮：擦掉不想要的墨迹；选中后可调大小，按住拖动可连擦"
+                title="橡皮：擦掉不想要的墨迹；选中后可浮动拖动半径，按住可连擦"
               >
                 橡皮
               </button>
-              {/* 橡皮大小：直径就是命中范围，太小不好选中细笔画。 */}
+              {/* 半径滑杆浮在墨迹小菜单上方：最小值是「小」，最大值是「特大」。 */}
               {inkErase && (
-                <div className="pdf-eraser-sizes" role="group" aria-label="橡皮大小">
-                  <span className="pdf-eraser-sizes-label">大小</span>
-                  {ERASER_SIZES.map((option) => (
-                    <button
-                      key={option.label}
-                      type="button"
-                      data-testid={`eraser-size-${option.label}`}
-                      className={eraserSize === option.value ? 'is-active' : ''}
-                      onClick={() => setEraserSize(option.value)}
-                      title={`橡皮大小：${option.label}（${option.value}px）`}
-                    >
-                      <span className="pdf-eraser-dot" style={{ width: option.dot, height: option.dot }} />
-                      <em>{option.label}</em>
-                    </button>
-                  ))}
-                </div>
+                <SizeControl kind="eraser" label="橡皮半径" value={eraserSize} onChange={changeEraserSize} />
               )}
               <button type="button" onClick={() => { setTool('select'); setInkErase(false) }}>完成</button>
             </div>

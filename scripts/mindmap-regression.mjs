@@ -1142,18 +1142,50 @@ if (process.env.STEP === 'ink-erase') {
   const inkCount = () => page.locator('.pdf-ink').count()
   if ((await inkCount()) !== 2) problems.push(`画两条线后应有 2 条墨迹，实际 ${await inkCount()}`)
 
-  // 点橡皮：大小选择区必须出现
-  await page.locator('.pdf-ink-palette button', { hasText: '橡皮' }).click()
-  await page.waitForSelector('.pdf-eraser-sizes', { timeout: 5000 })
-  const sizeButtons = await page.locator('.pdf-eraser-sizes button').count()
-  if (sizeButtons !== 4) problems.push(`橡皮大小档位不是 4 档：${sizeButtons}`)
+  // 笔宽滑杆：浮在墨迹小菜单上方，可拖到两端
+  await page.locator('[data-testid="ink-size-trigger-pen"]').click()
+  await page.waitForSelector('[data-testid="ink-size-popover-pen"]', { timeout: 5000 })
+  const penSlider = page.locator('[data-testid="ink-size-slider-pen"]')
+  const penBounds = await penSlider.evaluate((input) => ({ min: Number(input.min), max: Number(input.max) }))
+  if (!(penBounds.min === 0.0018 && penBounds.max === 0.0072)) {
+    problems.push(`笔宽滑杆范围异常：${JSON.stringify(penBounds)}`)
+  }
+  await penSlider.focus()
+  await page.keyboard.press('Home')
+  await page.waitForTimeout(200)
+  const penMin = await page.locator('[data-testid="ink-size-value-pen"]').innerText()
+  if (!penMin.includes('1.8')) problems.push(`笔宽最小值不是「细」：${penMin}`)
+  await page.keyboard.press('End')
+  await page.waitForTimeout(200)
+  const penMax = await page.locator('[data-testid="ink-size-value-pen"]').innerText()
+  if (!penMax.includes('7.2')) problems.push(`笔宽最大值异常：${penMax}`)
+
+  // 点橡皮：半径滑杆浮层出现，最小 = 小(8)，最大 = 特大(56)
+  await page.locator('.pdf-ink-palette > button', { hasText: '橡皮' }).click()
+  await page.locator('[data-testid="ink-size-trigger-eraser"]').click()
+  await page.waitForSelector('[data-testid="ink-size-popover-eraser"]', { timeout: 5000 })
+  const eraserSlider = page.locator('[data-testid="ink-size-slider-eraser"]')
+  const eraserBounds = await eraserSlider.evaluate((input) => ({
+    min: Number(input.min), max: Number(input.max), step: Number(input.step),
+  }))
+  if (!(eraserBounds.min === 8 && eraserBounds.max === 56 && eraserBounds.step === 1)) {
+    problems.push(`橡皮半径滑杆范围异常：${JSON.stringify(eraserBounds)}`)
+  }
+  await eraserSlider.focus()
+  await page.keyboard.press('Home')
+  await page.waitForTimeout(150)
+  const eraserMin = await page.locator('[data-testid="ink-size-value-eraser"]').innerText()
+  if (!eraserMin.includes('8')) problems.push(`橡皮最小值不是「小」：${eraserMin}`)
+  await page.keyboard.press('End')
+  await page.waitForTimeout(200)
+  const eraserMax = await page.locator('[data-testid="ink-size-value-eraser"]').innerText()
+  if (!eraserMax.includes('56')) problems.push(`橡皮最大值不是「特大」：${eraserMax}`)
   if (process.env.SHOT) {
-    await page.locator('.pdf-ink-palette').screenshot({ path: '/tmp/pdfnote-eraser-palette.png' })
+    // 元素截图会把浮层裁掉，必须截整个视口才能看到浮在菜单上方的滑杆。
+    await page.screenshot({ path: '/tmp/pdfnote-eraser-palette.png' })
   }
 
-  // 选「特大」，光标圆圈半径要跟着变
-  await page.locator('[data-testid="eraser-size-特大"]').click()
-  await page.waitForTimeout(250)
+  // 拖到最大后，页面上的光标圆圈半径要跟着变
   await page.mouse.move(box.x + 150, box.y + 180)
   await page.waitForTimeout(350)
   const cursor = await page.evaluate(() => {
@@ -1187,7 +1219,7 @@ if (process.env.STEP === 'ink-erase') {
   if (stored !== 0) problems.push(`后端还留着 ${stored} 条墨迹`)
 
   await browser.close()
-  console.log(JSON.stringify({ problems, step: 'ink-erase', sizeButtons, cursor, hovered, after, stored }, null, 2))
+  console.log(JSON.stringify({ problems, step: 'ink-erase', penBounds, penMin, penMax, eraserBounds, eraserMin, eraserMax, cursor, hovered, after, stored }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 
@@ -1681,7 +1713,17 @@ if (process.env.STEP === 'notebook') {
 
   // 橡皮擦掉第一笔（第一层）
   await page.locator('.notebook-tool-group button[title="橡皮"]').click()
-  await page.locator('.notebook-tool-group button', { hasText: '大' }).click()
+  // 与 PDF 墨迹一致：浮动半径滑杆，拖到最大（特大 56px）
+  await page.locator('[data-testid="ink-size-trigger-eraser"]').click()
+  await page.waitForSelector('[data-testid="ink-size-popover-eraser"]', { timeout: 5000 })
+  const notebookSlider = page.locator('[data-testid="ink-size-slider-eraser"]')
+  const notebookBounds = await notebookSlider.evaluate((input) => ({ min: Number(input.min), max: Number(input.max) }))
+  if (!(notebookBounds.min === 8 && notebookBounds.max === 56)) {
+    problems.push(`笔记本橡皮滑杆范围与墨迹不一致：${JSON.stringify(notebookBounds)}`)
+  }
+  await notebookSlider.focus()
+  await page.keyboard.press('End')
+  await page.waitForTimeout(200)
   {
     const box = await page.locator('.notebook-page').first().boundingBox()
     if (box) {

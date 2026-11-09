@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { OPS, type PDFPageProxy, type RenderTask } from 'pdfjs-dist'
+import { OPS, type PDFPageProxy, type RenderTask } from './pdfjs'
 import type { Annotation, AnnotationGeometry, NormalizedBBox, PageInk, PageNote } from '../../domain/card'
 import type { OcrLine } from '../../services/pdfnote'
 import {

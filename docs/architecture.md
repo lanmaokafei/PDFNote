@@ -151,7 +151,7 @@ app-data/               运行时生成，不随安装包写入
 - 在线升级（0.32.0）的网络请求（GitHub Releases 检查、DMG 下载、.sha256 获取）全部在 Rust `update.rs`（reqwest + rustls）完成，前端 CSP 保持 `connect-src 'self'` 不放开；下载进度经 `update-download-progress` 事件推送。
 - 前端只负责交互、PDF.js 渲染、归一化几何与 FSRS 调度计算。
 - 开发期静态资源来自 Vite `/pdfjs/...`；打包后同一相对 URL 来自 frontendDist，不引用开发机绝对路径。
-- PDF.js worker 使用 `new URL('/pdfjs/pdf.worker.min.mjs', window.location.origin)` 的统一封装，并通过测试确认 asset 协议下可用；字体和 CMap 路径同步配置。
+- PDF.js 一律走 **legacy 构建**：主线程从 `src/features/pdf/pdfjs.ts`（重导出 `pdfjs-dist/legacy/build/pdf.mjs`）导入，worker 用 `/pdfjs/pdf.worker.legacy.min.mjs`（自 `pdfjs-dist/legacy/build/` 拷入 `public/`）。常规构建直接调用 `Map.prototype.getOrInsertComputed`（2026-02 才 Baseline，Safari 26 起才有），macOS 15 及更早的 WKWebView 打开 PDF 会直接失败；legacy 构建带 core-js 兜底与语法降级，两个 realm 都要用。字体和 CMap 路径同步配置，升级 pdfjs-dist 后需重新拷贝 worker 文件，否则 API 与 Worker 版本不一致。
 
 ## 8. 界面结构
 

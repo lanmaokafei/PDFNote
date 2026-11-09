@@ -1033,46 +1033,6 @@
 }
 .pdf-ink-colors button.is-active { border-color: #2c3a2f; }
 
-.pdf-ink-widths { display: flex; gap: 2px; }
-
-/* 橡皮大小：圆点直径就是命中范围的直观预览。 */
-.pdf-eraser-sizes {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 3px 5px;
-  border: 1px solid rgba(26, 32, 26, .10);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, .92);
-}
-.pdf-eraser-sizes-label { color: #7c8676; font-size: 9px; }
-.pdf-eraser-sizes button {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  min-width: 30px;
-  padding: 3px 4px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: #6b7565;
-  cursor: pointer;
-}
-.pdf-eraser-sizes button em { font-style: normal; font-size: 8px; line-height: 1; }
-.pdf-eraser-sizes button:hover { background: #f2f6ec; }
-.pdf-eraser-sizes button.is-active {
-  border-color: #5f7a55;
-  background: #eef4e7;
-  color: #38512f;
-  font-weight: 600;
-}
-.pdf-eraser-dot {
-  display: inline-block;
-  border-radius: 50%;
-  background: currentColor;
-}
-.pdf-ink-widths button,
 .pdf-ink-palette > button {
   height: 26px;
   padding: 0 9px;
@@ -1083,10 +1043,11 @@
   font-size: 9px;
   cursor: pointer;
 }
-.pdf-ink-widths button.is-active,
 .pdf-ink-palette > button.is-active { border-color: #405943; color: #f4f6ef; background: #405943; }
-.pdf-ink-palette > button:hover:not(.is-active),
-.pdf-ink-widths button:hover:not(.is-active) { background: #eff3e9; }
+.pdf-ink-palette > button:hover:not(.is-active) { background: #eff3e9; }
+
+/* 尺寸滑杆浮在色板上方：共享组件自带定位，这里只保证不被色板的 flex 裁掉。 */
+.pdf-ink-palette > .ink-size-control { flex: 0 0 auto; }
 
 /* ---------- 扫描页可选文字层（Apple Vision 整页识别后铺成 DOM 文本） ---------- */
 .pdf-text-layer {

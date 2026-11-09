@@ -17,7 +17,7 @@
 | 色块主题与画布设置（0.33.0） | `STEP=style CARD_COUNT=3 STYLE_LINK=1` | 实心头背景 = 主色、字色对比度 ≥4.5、无左侧色条；深墨连线无箭头带圆点；链接虚线跟随色调、标签可隐藏；单项覆盖与重载保留 |
 | 卡片盒看板（0.34.0） | `STEP=board BOARD=1 CARD_COUNT=8` | 标签/书目/状态三种分栏，空标签列保留；8 卡 10 落位、未分组 2；过滤与搜索正确；拖 c1 到空标签列后 `set_card_tags` 收到 `[空标签]`；点卡片回到原文 |
 | 可编辑结构大纲（0.35.0） | `STEP=outline-edit CARD_COUNT=3` | 行内改标题写回显示字段；回车建同级并进入编辑；Tab / Shift+Tab 改父级与深度；拖 c3 到 c2 中间成为子级；同级 sort_order 无重复 |
-| 手写笔记本与图层（0.36.0） | `STEP=notebook` | 新建 4 页 → 画两笔（第二笔进新图层）→ 隐藏图层 → 大号橡皮擦掉一层 → 切网格纸样 → 滚到底 4→6 页 → 返回书架 → 二次确认删除 |
+| 手写笔记本与图层（0.36.0） | `STEP=notebook` | 新建 4 页 → 画两笔（第二笔进新图层）→ 隐藏图层 → 橡皮半径滑杆拖到 56px 擦掉一层 → 切网格纸样 → 滚到底 4→6 页 → 返回书架 → 二次确认删除 |
 | schema v10 迁移 | `cargo test --lib db::` | `notebooks / layers / notebook_inks` 建表，`user_version=10`，旧库升级后原有数据保留 |
 | 文档回忆藏手写与留白（0.34.0） | `STEP=recall RECALL_SEED=1 CARD_COUNT=3` | 回忆态墨迹 1→0、留白 1→0、遮挡块 1；退出后恢复 1/1 |
 | 文字层冒烟 | `node scripts/textlayer-smoke.mjs` | 通过：透明 DOM 文字可原生拖选「信息系统项目管」，选区 bbox 换算正确 |
@@ -29,7 +29,9 @@
 | 启动初始化 | 启动 release `.app` | 自动创建 db/pdfs/backups/tmp，`user_version=5`，`quick_check=ok` |
 | schema 迁移 | 真实数据库副本执行 v4 → v5 | `page_ocr` 表建立，5 张卡片 / 1 个文档保留，`quick_check=ok`（真实库已是 v4） |
 | UI 冒烟 | `node scripts/ui-smoke.mjs` | 4 视图无 console error / pageerror |
-| 橡皮大小与连擦（0.31.0） | `STEP=ink-erase CARD_COUNT=3` | 4 档大小；特大光标 r=56；悬停命中高亮；拖动一次擦掉两条线，前后端 0 残留 |
+| 连续尺寸滑杆（0.37.0） | `STEP=ink-erase CARD_COUNT=3` | 笔宽滑杆 0.0018–0.0072（1.8‰ / 7.2‰）、橡皮半径滑杆 8–56px（小 / 特大）；浮层不裁切；最大半径光标 r=56；悬停命中高亮；拖动一次擦掉两条线，前后端 0 残留 |
+| 笔记本控件一致（0.37.0） | `STEP=notebook` | 笔记本橡皮滑杆同为 8–56px，拖到最大后擦除行为与 PDF 一致 |
+| 橡皮大小与连擦（0.31.0，历史） | `STEP=ink-erase CARD_COUNT=3` | 原为 4 档大小按钮；0.37.0 改为连续滑杆，保留连擦与命中语义 |
 | 卡片配色面板（0.30.0） | `STEP=style CARD_COUNT=3` | 面板顶部 24 色块；点色块卡片变色并落盘；「跟随子树」恢复自动分配 |
 | 卡片样式主题（0.29.0） | `STEP=style CARD_COUNT=3` | 右键 → 样式面板；墨色卡面 `rgb(36,41,37)`、自定义 14px/宽松、换主题清覆盖、重载保留 |
 | AI 解析覆盖所有卡片（0.28.0） | `NO_QUESTION=1 STEP=explain CARD_COUNT=3` | 3 张卡都有按钮；只有摘录的卡可用并写回笔记（1115 字）；无 question 的提示文案指向摘录；三者全空的卡禁用 |

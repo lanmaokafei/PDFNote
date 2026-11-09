@@ -1,0 +1,112 @@
+.ink-size-control { position: relative; display: inline-flex; }
+
+.ink-size-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid #dfe4da;
+  border-radius: 7px;
+  color: #5c655c;
+  background: #fbfcf9;
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ink-size-trigger:hover,
+.ink-size-trigger.is-open {
+  border-color: #8fa87f;
+  color: #38512f;
+  background: #eef4e7;
+}
+
+.ink-size-trigger-text { display: inline-flex; align-items: baseline; gap: 4px; }
+.ink-size-trigger-text em { color: #8a9483; font-style: normal; font-size: 8.5px; }
+
+.ink-size-preview {
+  flex: 0 0 auto;
+  display: inline-block;
+  border-radius: 50%;
+  background: #405943;
+}
+
+.ink-size-preview.is-eraser {
+  border: 1.5px dashed #c05a45;
+  background: rgba(217, 79, 61, .16);
+}
+
+.ink-size-popover {
+  position: absolute;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  z-index: 60;
+  width: 218px;
+  padding: 10px 12px 9px;
+  border: 1px solid #dce2d5;
+  border-radius: 10px;
+  color: #3a4734;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(22, 28, 22, .18);
+  transform: translateX(-50%);
+}
+
+/* 小三角指向触发按钮 */
+.ink-size-popover::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-right: 1px solid #dce2d5;
+  border-bottom: 1px solid #dce2d5;
+  background: #ffffff;
+  transform: translate(-50%, -5px) rotate(45deg);
+}
+
+.ink-size-popover > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ink-size-popover > header strong { font-size: 10px; font-weight: 650; }
+.ink-size-popover > header span { color: #5f7a55; font-family: Georgia, serif; font-size: 12px; }
+
+.ink-size-live {
+  display: grid;
+  place-items: center;
+  height: 46px;
+  margin: 7px 0 4px;
+  border: 1px dashed #e2e7dc;
+  border-radius: 7px;
+  background: #fafbf6;
+}
+
+.ink-size-popover input[type='range'] {
+  width: 100%;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: #5f7a55;
+  cursor: ew-resize;
+}
+
+.ink-size-bounds {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1px;
+  color: #9aa294;
+  font-size: 8.5px;
+}
+
+.ink-size-popover p {
+  margin: 7px 0 0;
+  color: #9aa294;
+  font-size: 8.5px;
+  line-height: 1.5;
+  text-align: center;
+}

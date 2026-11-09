@@ -35,6 +35,8 @@ import {
   updateNotebook,
 } from '../../services/pdfnote'
 import { findInkHits, type InkHitCandidate } from '../pdf/inkErase'
+import { SizeControl } from '../ink/SizeControl'
+import { readSizePreference, saveSizePreference } from '../ink/size'
 import './NotebookWorkspace.css'
 
 /** 固定虚拟画布：墨迹坐标按 0–1 存，渲染时换算到这套尺寸，换窗口大小不会变形。 */
@@ -51,17 +53,6 @@ const PAPER_OPTIONS: Array<{ value: PaperStyle; label: string }> = [
 ]
 
 const INK_COLORS = ['#2f3330', '#d94f3d', '#2f6f8f', '#3f7a4c', '#8a5cab']
-const INK_WIDTHS = [
-  { label: '细', value: 0.0022 },
-  { label: '中', value: 0.0035 },
-  { label: '粗', value: 0.0058 },
-]
-const ERASER_SIZES = [
-  { label: '小', value: 10 },
-  { label: '中', value: 22 },
-  { label: '大', value: 40 },
-]
-
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
 }
@@ -299,8 +290,17 @@ function NotebookEditor({ notebook, onBack, onNotebookUpdated }: NotebookEditorP
   const [activeLayerId, setActiveLayerId] = useState('')
   const [tool, setTool] = useState<'pen' | 'eraser'>('pen')
   const [color, setColor] = useState(INK_COLORS[0])
-  const [width, setWidth] = useState(INK_WIDTHS[1].value)
-  const [eraserSize, setEraserSize] = useState(ERASER_SIZES[1].value)
+  const [width, setWidth] = useState(() => readSizePreference('pen'))
+  const [eraserSize, setEraserSize] = useState(() => readSizePreference('eraser'))
+
+  const changeWidth = (value: number) => {
+    setWidth(value)
+    saveSizePreference('pen', value)
+  }
+  const changeEraserSize = (value: number) => {
+    setEraserSize(value)
+    saveSizePreference('eraser', value)
+  }
   const [pages, setPages] = useState(INITIAL_PAGES)
   const [layersOpen, setLayersOpen] = useState(true)
   const [error, setError] = useState('')
@@ -609,34 +609,10 @@ function NotebookEditor({ notebook, onBack, onNotebookUpdated }: NotebookEditorP
                 />
               ))}
             </div>
-            <div className="notebook-tool-group">
-              {INK_WIDTHS.map((option) => (
-                <button
-                  key={option.label}
-                  type="button"
-                  className={width === option.value ? 'is-active' : ''}
-                  aria-pressed={width === option.value}
-                  onClick={() => setWidth(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
+            <SizeControl kind="pen" label="笔宽" value={width} onChange={changeWidth} />
           </>
         ) : (
-          <div className="notebook-tool-group">
-            {ERASER_SIZES.map((option) => (
-              <button
-                key={option.label}
-                type="button"
-                className={eraserSize === option.value ? 'is-active' : ''}
-                aria-pressed={eraserSize === option.value}
-                onClick={() => setEraserSize(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <SizeControl kind="eraser" label="橡皮半径" value={eraserSize} onChange={changeEraserSize} />
         )}
 
         <span className={`notebook-status${canDraw ? '' : ' is-locked'}`}>
@@ -732,7 +708,7 @@ function InkPage({
       const hits = findInkHits(
         { x: local.x, y: local.y },
         candidates.filter((candidate) => !erasedRef.current.has(candidate.id)),
-        (eraserSize / 2 + 2) * local.scale,
+        eraserSize * local.scale,
       )
       setHoverIds(new Set(hits.map((hit) => hit.id)))
       if (erasingRef.current) applyErase(local.x, local.y, local.scale)
@@ -749,7 +725,7 @@ function InkPage({
     const hits = findInkHits(
       { x, y },
       candidates.filter((candidate) => !erasedRef.current.has(candidate.id)),
-      (eraserSize / 2 + 2) * scale,
+      eraserSize * scale,
     )
     if (!hits.length) return
     for (const hit of hits) erasedRef.current.add(hit.id)
@@ -828,7 +804,7 @@ function InkPage({
             className="notebook-eraser-cursor"
             cx={cursor.x}
             cy={cursor.y}
-            r={(eraserSize / 2) * cursor.scale}
+            r={eraserSize * cursor.scale}
           />
         )}
       </svg>

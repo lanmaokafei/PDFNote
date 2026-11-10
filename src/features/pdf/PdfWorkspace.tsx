@@ -30,11 +30,14 @@ import {
   listPageInks,
   listPageNotes,
   readPdfChunk,
+  getReadingState,
   removeAnnotation,
+  saveRecallNote,
   setCardTags,
   updateAnnotationGeometry,
   updateCardContent,
   updatePageNote,
+  setReadingPass,
   updateDocumentProgress,
 } from '../../services/pdfnote'
 import {
@@ -173,6 +176,12 @@ export function PdfWorkspace({
   const [revealedCardIds, setRevealedCardIds] = useState<Set<string>>(new Set())
   const [ratedCardIds, setRatedCardIds] = useState<Set<string>>(new Set())
   const [ratingBusy, setRatingBusy] = useState(false)
+  // 粗读 / 精读：阶段与召回随书存数据库；粗读只保留「高亮」一种产出。
+  const [readingPass, setReadingPassState] = useState(1)
+  const [recallNote, setRecallNote] = useState('')
+  const [recallOpen, setRecallOpen] = useState(false)
+  const [recallDraft, setRecallDraft] = useState('')
+  const [readingBusy, setReadingBusy] = useState(false)
   // 挖空填空：在「整块遮挡」和「揭示」之间多一层，先补关键词再评分。
   const [clozeEnabled, setClozeEnabled] = useState(readClozePreference)
   const [clozeAnswers, setClozeAnswers] = useState<Record<string, string[]>>({})
@@ -210,6 +219,35 @@ export function PdfWorkspace({
   // 只有用户配置了视觉模型才尝试公式识别；否则保持原图 + 手动补录。
   const [aiReady, setAiReady] = useState(false)
   const [aiTimeoutSecs, setAiTimeoutSecs] = useState(120)
+
+  const firstPass = readingPass === 1
+
+  // 操作提示只停留几秒：否则它会一直浮在页面上，挡住阶段条等控件。
+  useEffect(() => {
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(''), 5000)
+    return () => window.clearTimeout(timer)
+  }, [notice])
+
+  // 打开文档时读阶段与召回；读不到就按粗读处理，不打断文档加载。
+  useEffect(() => {
+    let active = true
+    getReadingState(document.id)
+      .then((state) => {
+        if (!active) return
+        setReadingPassState(state.pass === 2 ? 2 : 1)
+        setRecallNote(state.recallNote)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [document.id])
+
+  // 粗读只允许点选与高亮；其它工具先收起来，避免一上来就做细节。
+  useEffect(() => {
+    if (firstPass && tool !== 'select' && tool !== 'highlight') setTool('highlight')
+  }, [firstPass, tool])
 
   const cardsById = useCardStore((state) => state.cardsById)
   const createCard = useCardStore((state) => state.createCard)
@@ -1195,6 +1233,58 @@ export function PdfWorkspace({
     handleReveal([selectedAnnotation.id])
   }
 
+  /** 切换两遍阅读的阶段；失败就退回原阶段，不留下半套状态。 */
+  const changePass = async (pass: 1 | 2) => {
+    if (readingBusy || readingPass === pass) return
+    const previous = readingPass
+    setReadingPassState(pass)
+    setReadingBusy(true)
+    setOperationError('')
+    try {
+      const state = await setReadingPass(document.id, pass)
+      setReadingPassState(state.pass === 2 ? 2 : 1)
+      setRecallNote(state.recallNote)
+      if (pass === 1) {
+        setTool('highlight')
+        setNotice('回到粗读：只标关键词，先读完再整理。')
+      } else {
+        setNotice('进入精读：先按目录搭骨架，再把细节作为子节点挂上去。')
+      }
+    } catch (reason) {
+      setReadingPassState(previous)
+      setOperationError(`切换阅读阶段失败：${errorMessage(reason)}`)
+    } finally {
+      setReadingBusy(false)
+    }
+  }
+
+  const openRecall = () => {
+    setRecallDraft(recallNote)
+    setRecallOpen(true)
+  }
+
+  const submitRecall = async () => {
+    if (readingBusy) return
+    setReadingBusy(true)
+    setOperationError('')
+    try {
+      const state = await saveRecallNote(document.id, recallDraft)
+      setRecallNote(state.recallNote)
+      setRecallOpen(false)
+      if (firstPass) {
+        const next = await setReadingPass(document.id, 2)
+        setReadingPassState(next.pass === 2 ? 2 : 1)
+        setNotice('已记下粗读的框架感，进入精读：先按目录搭骨架。')
+      } else {
+        setNotice('召回笔记已保存。')
+      }
+    } catch (reason) {
+      setOperationError(`保存召回笔记失败：${errorMessage(reason)}`)
+    } finally {
+      setReadingBusy(false)
+    }
+  }
+
   const handleRating = async (rating: Rating) => {
     if (!selectedAnnotation || !selectedCard || ratingBusy || ratedCardIds.has(selectedCard.id) || !sessionId) return
     setRatingBusy(true)
@@ -1235,10 +1325,43 @@ export function PdfWorkspace({
   const largeDocument = document.file_size > 200 * 1024 * 1024
   const loadingMessage = document.file_status === 'importing' ? '文档正在导入，请稍候…' : largeDocument ? '正在按需读取大型 PDF…' : '正在打开 PDF 文档…'
 
+  /** 阶段条：非嵌入模式贴在工具栏下方，嵌入模式浮在 PDF 左上角。 */
+  const passBar = (
+    <div className={`pdf-pass-bar${embedded ? ' is-floating' : ''}`} data-pass-bar data-pass={readingPass}>
+      <button
+        type="button"
+        className="pdf-pass-chip"
+        data-testid="pdf-pass-chip"
+        onClick={() => void changePass(readingPass === 1 ? 2 : 1)}
+        disabled={readingBusy || !pdf}
+        title="粗读找骨，精读填肉；点击切换"
+      >
+        <span className="pdf-pass-index">{readingPass}</span>
+        {readingPass === 1 ? '粗读 · 找骨' : '精读 · 填肉'}
+      </button>
+      {firstPass ? (
+        <>
+          <span className="pdf-pass-hint">只标关键词，读完再整理</span>
+          <button type="button" className="pdf-pass-action" data-testid="pdf-pass-finish" onClick={openRecall} disabled={readingBusy || !pdf}>
+            粗读完成
+          </button>
+        </>
+      ) : (
+        <button type="button" className="pdf-pass-action" data-testid="pdf-pass-note" onClick={openRecall} disabled={readingBusy}>
+          {recallNote ? '看召回笔记' : '补写召回'}
+        </button>
+      )}
+    </div>
+  )
+
   /** PDF 页右键菜单把工作区级动作上抛，这里统一分发到已有的工具与对话框。 */
   function handleContextAction(action: PdfContextAction) {
     switch (action.type) {
       case 'tool':
+        if (firstPass && action.tool !== 'select' && action.tool !== 'highlight') {
+          setNotice('粗读只标关键词；框选、墨迹、文字到精读再用。')
+          break
+        }
         setTool(action.tool)
         if (action.tool === 'ink') setInkErase(false)
         break
@@ -1290,8 +1413,8 @@ export function PdfWorkspace({
         <div className="pdf-tool-group" aria-label="标注工具">
           <button type="button" className={tool === 'select' ? 'is-active' : ''} aria-pressed={tool === 'select'} onClick={() => setTool('select')} disabled={recallMode}>选择</button>
           <button type="button" className={tool === 'highlight' ? 'is-active' : ''} aria-pressed={tool === 'highlight'} onClick={() => setTool('highlight')} disabled={recallMode}>高亮</button>
-          <button type="button" className={tool === 'rectangle' ? 'is-active' : ''} aria-pressed={tool === 'rectangle'} onClick={() => setTool('rectangle')} disabled={recallMode}>矩形</button>
-          <button type="button" className={tool === 'text' ? 'is-active' : ''} aria-pressed={tool === 'text'} onClick={() => setTool('text')} disabled={recallMode}>文字</button>
+          <button type="button" className={tool === 'rectangle' ? 'is-active' : ''} aria-pressed={tool === 'rectangle'} onClick={() => setTool('rectangle')} disabled={recallMode || firstPass} title={firstPass ? '粗读只标关键词，精读再框选' : undefined}>矩形</button>
+          <button type="button" className={tool === 'text' ? 'is-active' : ''} aria-pressed={tool === 'text'} onClick={() => setTool('text')} disabled={recallMode || firstPass} title={firstPass ? '粗读只标关键词，精读再拖选文字' : undefined}>文字</button>
         </div>
 
         <div className="pdf-zoom-group" aria-label="缩放">
@@ -1324,8 +1447,8 @@ export function PdfWorkspace({
           type="button"
           className="pdf-digest-toggle"
           onClick={() => setDigestOpen(true)}
-          disabled={!pdf || pageCount === 0}
-          title="AI 拆书：分块抽取要点，生成问题驱动的脑图骨架"
+          disabled={!pdf || pageCount === 0 || firstPass}
+          title={firstPass ? '粗读先读完；精读再按目录或 AI 搭骨架' : 'AI 拆书：分块抽取要点，生成问题驱动的脑图骨架'}
         >
           <Sparkles size={14} />
           AI 拆书
@@ -1349,6 +1472,8 @@ export function PdfWorkspace({
         )}
       </header>
       )}
+
+      {!embedded && passBar}
 
       {(operationError || notice || creating || ocrMessage) && (
         <div className={`pdf-operation-bar${embedded ? ' is-floating' : ''} ${operationError ? 'is-error' : ''}`} role={operationError ? 'alert' : 'status'}>
@@ -1530,6 +1655,8 @@ export function PdfWorkspace({
 
       {embedded && (
         <>
+          {passBar}
+
           {recallMode && clozeEnabled && selectedAnnotation && !revealedCardIds.has(selectedAnnotation.card_id) && clozeExercise && (
             <div className="pdf-cloze-float" data-cloze-float>
               <ClozePanel
@@ -1575,12 +1702,12 @@ export function PdfWorkspace({
           <div className="pdf-dock" role="toolbar" aria-label="标注与阅读工具">
             <button type="button" disabled title="剪切（暂未支持）"><Scissors size={17} /><span>剪切</span></button>
             <button type="button" className={tool === 'select' ? 'is-active' : ''} onClick={() => setTool('select')} disabled={recallMode} aria-pressed={tool === 'select'} title="套索选择"><MousePointer2 size={17} /><span>套索</span></button>
-            <button type="button" className={tool === 'text' ? 'is-active' : ''} onClick={() => setTool('text')} disabled={recallMode} aria-pressed={tool === 'text'} title="文字选择：像 Word 一样拖选文字，可复制或建卡"><Type size={17} /><span>文字</span></button>
+            <button type="button" className={tool === 'text' ? 'is-active' : ''} onClick={() => setTool('text')} disabled={recallMode || firstPass} aria-pressed={tool === 'text'} title={firstPass ? '粗读只标关键词，精读再拖选文字' : '文字选择：像 Word 一样拖选文字，可复制或建卡'}><Type size={17} /><span>文字</span></button>
             <button type="button" className={tool === 'highlight' ? 'is-active' : ''} onClick={() => setTool('highlight')} disabled={recallMode} aria-pressed={tool === 'highlight'} title="高亮颜色"><Highlighter size={17} /><span>颜色</span></button>
             <button type="button" onClick={() => { if (selectedAnnotation) setTagTarget(selectedAnnotation.card_id) }} disabled={!selectedAnnotation} title="给选中标注的卡片加标签"><Tag size={17} /><span>标签</span></button>
             <button type="button" onClick={() => { if (selectedAnnotation) setLinkTarget(selectedAnnotation.card_id) }} disabled={!selectedAnnotation} title="把选中卡片关联到其他卡片"><Link2 size={17} /><span>链接</span></button>
-            <button type="button" className={tool === 'rectangle' ? 'is-active' : ''} onClick={() => setTool('rectangle')} disabled={recallMode} aria-pressed={tool === 'rectangle'} title="矩形框选"><Square size={17} /><span>框架</span></button>
-            <button type="button" className={tool === 'ink' ? 'is-active' : ''} onClick={() => { setTool(tool === 'ink' ? 'select' : 'ink'); setInkErase(false) }} aria-pressed={tool === 'ink'} title="手写墨迹"><PenLine size={17} /><span>墨迹</span></button>
+            <button type="button" className={tool === 'rectangle' ? 'is-active' : ''} onClick={() => setTool('rectangle')} disabled={recallMode || firstPass} aria-pressed={tool === 'rectangle'} title={firstPass ? '粗读只标关键词，精读再框选' : '矩形框选'}><Square size={17} /><span>框架</span></button>
+            <button type="button" className={tool === 'ink' ? 'is-active' : ''} onClick={() => { setTool(tool === 'ink' ? 'select' : 'ink'); setInkErase(false) }} disabled={firstPass} aria-pressed={tool === 'ink'} title={firstPass ? '粗读只标关键词，精读再手写' : '手写墨迹'}><PenLine size={17} /><span>墨迹</span></button>
             <button type="button" onClick={() => setMergeOpen(true)} disabled={cardList.length < 2} title="合并多张卡片"><Merge size={17} /><span>合并</span></button>
             {recallMode && (
               <button type="button" className={clozeEnabled ? 'is-active' : ''} onClick={toggleCloze} aria-pressed={clozeEnabled} title="挖空填空：补全关键词后自动揭示原文" data-cloze-toggle>
@@ -1712,6 +1839,37 @@ export function PdfWorkspace({
             void loadCards()
           }}
         />
+      )}
+
+      {recallOpen && (
+        <div className="pdf-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !readingBusy) setRecallOpen(false)
+        }}>
+          <div className="pdf-modal pdf-recall-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-recall-title" data-testid="pdf-recall-modal">
+            <small>{firstPass ? 'ROUGH READ · RECALL' : 'ROUGH READ · NOTE'}</small>
+            <h2 id="pdf-recall-title">你现在还记得什么？</h2>
+            <p className="pdf-recall-tip">
+              {firstPass
+                ? '不要翻书，用一分钟写下这部分的框架。写不出来说明粗读太快了，回去再读一遍。'
+                : '这是粗读后写下的框架感，随时回看；但它不能替代精读。'}
+            </p>
+            <textarea
+              data-testid="pdf-recall-input"
+              value={recallDraft}
+              onChange={(event) => setRecallDraft(event.target.value)}
+              rows={6}
+              placeholder="例如：第一章讲了三个机制——…"
+              disabled={readingBusy}
+              autoFocus
+            />
+            <div className="pdf-modal-actions">
+              <button type="button" onClick={() => setRecallOpen(false)} disabled={readingBusy}>稍后</button>
+              <button type="button" className="is-primary" data-testid="pdf-recall-save" onClick={() => void submitRecall()} disabled={readingBusy}>
+                {readingBusy ? '保存中…' : firstPass ? '保存并进入精读' : '保存召回'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {deleteTarget && (

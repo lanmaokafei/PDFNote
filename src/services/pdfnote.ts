@@ -322,6 +322,29 @@ export async function deletePageNote(id: string): Promise<void> {
   return invoke('delete_page_note', { id })
 }
 
+/** 两遍阅读：一本书一行，没有行时按第一遍处理。 */
+export interface ReadingState {
+  documentId: string
+  pass: number
+  recallNote: string
+  updatedAt: string
+}
+
+export async function getReadingState(documentId: string): Promise<ReadingState> {
+  if (!isTauriRuntime()) return { documentId, pass: 1, recallNote: '', updatedAt: '' }
+  return invoke('get_reading_state', { input: { documentId } })
+}
+
+export async function setReadingPass(documentId: string, pass: number): Promise<ReadingState> {
+  desktopOnly()
+  return invoke('set_reading_pass', { input: { documentId, pass } })
+}
+
+export async function saveRecallNote(documentId: string, note: string): Promise<ReadingState> {
+  desktopOnly()
+  return invoke('save_recall_note', { input: { documentId, note } })
+}
+
 export async function listNotebooks(): Promise<Notebook[]> {
   if (!isTauriRuntime()) return []
   return invoke('list_notebooks')

@@ -1,5 +1,5 @@
 use crate::{
-    ai, anki, backup, book, canvas_layers, canvases, cards, documents, models, notebooks,
+    ai, anki, backup, book, canvas_layers, canvases, cards, documents, models, notebooks, reading,
     review, state::AppState, update,
 };
 use tauri::{ipc::Response, State};
@@ -771,4 +771,28 @@ mod tests {
         assert!(empty.contains("为空"));
         let _ = std::fs::remove_dir_all(&directory);
     }
+}
+
+#[tauri::command]
+pub fn get_reading_state(
+    state: State<'_, AppState>,
+    input: reading::DocumentRefInput,
+) -> Result<reading::ReadingState, String> {
+    reading::get_reading_state(&state, &input.document_id)
+}
+
+#[tauri::command]
+pub fn set_reading_pass(
+    state: State<'_, AppState>,
+    input: reading::SetReadingPassInput,
+) -> Result<reading::ReadingState, String> {
+    reading::set_reading_pass(&state, &input.document_id, input.pass)
+}
+
+#[tauri::command]
+pub fn save_recall_note(
+    state: State<'_, AppState>,
+    input: reading::SaveRecallNoteInput,
+) -> Result<reading::ReadingState, String> {
+    reading::save_recall_note(&state, &input.document_id, &input.note)
 }

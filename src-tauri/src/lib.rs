@@ -13,6 +13,7 @@ mod notebooks;
 mod notes;
 mod ocr;
 mod page_text;
+mod reading;
 mod review;
 mod state;
 mod update;
@@ -113,6 +114,9 @@ pub fn run() {
             commands::delete_canvas_ink,
             commands::list_layer_members,
             commands::set_card_layer,
+            commands::get_reading_state,
+            commands::set_reading_pass,
+            commands::save_recall_note,
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;

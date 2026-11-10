@@ -393,6 +393,7 @@ fn import_overwrite(
         "card_tags",
         "page_inks",
         "cards",
+        "document_readings",
         "documents",
     ] {
         transaction
@@ -422,6 +423,8 @@ fn import_overwrite(
         for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr", "book_analysis", "book_outline", "mindmap_canvases"] {
             copy_table_if_present(&transaction, table)?;
         }
+        // 0.41.0 两遍阅读：一本书一行，直接整表覆盖。
+        copy_table_if_present(&transaction, "document_readings")?;
         // 0.36.0 图层与手写本：父表在前，避免外键失败。
         for table in ["notebooks", "layers", "notebook_inks", "canvas_inks", "mindmap_layer_members"] {
             copy_table_if_present(&transaction, table)?;
@@ -659,6 +662,43 @@ fn import_merge(
                      FROM import_src.page_notes s
                      WHERE NOT EXISTS (SELECT 1 FROM page_notes p WHERE p.id = s.id)
                        AND EXISTS (SELECT 1 FROM documents d WHERE d.id = s.document_id)",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+
+        if import_has_table(&transaction, "document_readings")? {
+            // 阅读状态挂在文档上：按内容哈希重指向本地文档，同一本书保留 updated_at 较新的那条。
+            transaction
+                .execute(
+                    "UPDATE import_src.document_readings SET document_id = (
+                        SELECT d.id FROM documents d
+                        WHERE d.content_hash = (
+                            SELECT s2.content_hash FROM import_src.documents s2
+                            WHERE s2.id = import_src.document_readings.document_id
+                        )
+                     ) WHERE document_id IS NOT NULL",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO document_readings (document_id, pass, recall_note, toc_json, created_at, updated_at)
+                     SELECT s.document_id, s.pass, s.recall_note, s.toc_json, s.created_at, s.updated_at
+                     FROM import_src.document_readings s
+                     WHERE EXISTS (SELECT 1 FROM documents d WHERE d.id = s.document_id)
+                       AND NOT EXISTS (SELECT 1 FROM document_readings r WHERE r.document_id = s.document_id)",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "UPDATE document_readings AS r SET
+                        pass = s.pass,
+                        recall_note = s.recall_note,
+                        updated_at = s.updated_at
+                     FROM import_src.document_readings s
+                     WHERE r.document_id = s.document_id AND r.updated_at < s.updated_at",
                     [],
                 )
                 .map_err(|error| error.to_string())?;
@@ -990,6 +1030,9 @@ mod tests {
         )
         .unwrap();
         crate::cards::create_card_link(&source_state, card.id.clone(), second.id).unwrap();
+        // 粗读精读的阶段与召回也属于用户内容，必须随备份往返。
+        crate::reading::set_reading_pass(&source_state, &document.id, 2).unwrap();
+        crate::reading::save_recall_note(&source_state, &document.id, "粗读召回").unwrap();
 
         let archive = source_dir.join("backup.zip");
         let exported = export_backup(&source_state, archive.to_string_lossy().to_string()).unwrap();
@@ -1032,6 +1075,12 @@ mod tests {
             (1, 1, 1),
             "标签/链接/墨迹必须随备份恢复"
         );
+        let reading: (i64, String) = database
+            .query_row("SELECT pass, recall_note FROM document_readings", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(reading, (2, "粗读召回".to_string()), "阶段与召回必须随备份恢复");
         let with_image: i64 = database
             .query_row(
                 "SELECT COUNT(*) FROM cards WHERE excerpt_image IS NOT NULL",

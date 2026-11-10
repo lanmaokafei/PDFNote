@@ -795,7 +795,7 @@
 
 .pdf-operation-bar.is-floating {
   position: absolute;
-  top: 14px;
+  top: 56px;
   left: 50%;
   z-index: 32;
   width: auto;
@@ -1572,4 +1572,127 @@
 
 .pdf-cloze-float .pdf-cloze {
   max-width: none;
+}
+
+/* ---------- 两遍阅读（0.41.0） ---------- */
+
+.pdf-pass-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid #e5eae1;
+  background: #f7faf4;
+}
+
+/* 嵌入模式没有工具栏，阶段条浮在 PDF 左上角；提示条下移到它下面，避免互相遮挡。 */
+.pdf-pass-bar.is-floating {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 26;
+  padding: 6px 8px;
+  border: 1px solid rgba(30, 42, 33, .08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 8px 22px rgba(30, 42, 33, .12);
+  backdrop-filter: blur(6px);
+}
+
+.pdf-pass-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+  border: 1px solid #cfdcc8;
+  border-radius: 999px;
+  color: #3f5a44;
+  background: #eef4e9;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pdf-pass-chip:hover:not(:disabled) {
+  background: #e3eedd;
+}
+
+.pdf-pass-index {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #4f7f5c;
+  font-size: 10px;
+}
+
+.pdf-pass-bar[data-pass="2"] .pdf-pass-chip {
+  border-color: #c9d7e0;
+  color: #3c5a70;
+  background: #eef3f7;
+}
+
+.pdf-pass-bar[data-pass="2"] .pdf-pass-index {
+  background: #3f6a85;
+}
+
+.pdf-pass-hint {
+  color: #8a978b;
+  font-size: 11px;
+}
+
+.pdf-pass-bar.is-floating .pdf-pass-hint {
+  display: none;
+}
+
+.pdf-pass-action {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid #d7dfd2;
+  border-radius: 7px;
+  color: #4d5f52;
+  background: #fff;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pdf-pass-action:hover:not(:disabled) {
+  background: #eef4e9;
+}
+
+.pdf-pass-action:disabled {
+  color: #b3bcb4;
+  cursor: default;
+}
+
+.pdf-recall-tip {
+  margin: 0 0 4px;
+  color: #7d887c;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.pdf-recall-modal textarea {
+  width: 100%;
+  min-height: 140px;
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #dde4da;
+  border-radius: 8px;
+  color: #38443b;
+  background: #fbfdf9;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.75;
+  resize: vertical;
+}
+
+.pdf-recall-modal textarea:focus {
+  border-color: #b8cbb4;
+  outline: 2px solid rgba(79, 127, 92, .16);
 }

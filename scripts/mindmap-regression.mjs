@@ -101,7 +101,7 @@ const document = {
   updated_at: '2026-11-03T00:00:00.000Z',
 }
 
-await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, emptyDocCanvas, styleLink, board, recallSeed, clozeSeed }) => {
+await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, emptyDocCanvas, styleLink, board, recallSeed, clozeSeed, readingSeedPass, readingSeedNote }) => {
   const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0))
   const cardState = cards.map((card) => ({ ...card }))
   const noteState = []
@@ -199,6 +199,30 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     '怎么用：先估计分布，再计算每个符号的最优码长，最后与等长编码比较压缩率。',
     '易错点：把熵和方差混为一谈；忽略对数底导致 bit 与 nat 混用。',
   ].join('\n')
+  // 两遍阅读：状态放 sessionStorage，刷新页面后仍能读到，用来验证「关掉再打开还记得」。
+  const readingKey = 'mock-reading-state'
+  const readStored = () => {
+    try {
+      return JSON.parse(sessionStorage.getItem(readingKey) ?? 'null')
+    } catch {
+      return null
+    }
+  }
+  let readingState = readStored() ?? {
+    documentId: document.id,
+    pass: readingSeedPass ? Number(readingSeedPass) : 1,
+    recallNote: readingSeedNote ?? '',
+    updatedAt: '',
+  }
+  const storeReading = () => {
+    try {
+      sessionStorage.setItem(readingKey, JSON.stringify(readingState))
+    } catch {
+      // 忽略：内存里仍然是最新状态
+    }
+  }
+  window.__readingState = () => readingState
+
   const handlers = {
     get_bootstrap_status: () => ({ database_ready: true, schema_version: 6, document_count: 1, card_count: cardState.length }),
     list_cards: () => cardState,
@@ -433,6 +457,17 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       const index = noteState.findIndex((item) => item.id === args?.id)
       if (index >= 0) noteState.splice(index, 1)
       return null
+    },
+    get_reading_state: () => readingState,
+    set_reading_pass: (args) => {
+      readingState = { ...readingState, pass: args?.input?.pass ?? 1, updatedAt: new Date().toISOString() }
+      storeReading()
+      return readingState
+    },
+    save_recall_note: (args) => {
+      readingState = { ...readingState, recallNote: args?.input?.note ?? '', updatedAt: new Date().toISOString() }
+      storeReading()
+      return readingState
     },
     list_annotations: () => [
       {
@@ -722,7 +757,7 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     },
     transformCallback: (callback) => callback,
   }
-    }, { cards, document, pdfBase64, dense: process.env.DENSE === '1', canvasPref: process.env.CANVAS_PREF ?? 'main', emptyDocCanvas: process.env.EMPTY_DOC_CANVAS === '1', styleLink: process.env.STYLE_LINK === '1', board: process.env.BOARD === '1', recallSeed: process.env.RECALL_SEED === '1', clozeSeed: process.env.CLOZE_SEED === '1' })
+    }, { cards, document, pdfBase64, dense: process.env.DENSE === '1', canvasPref: process.env.CANVAS_PREF ?? 'main', emptyDocCanvas: process.env.EMPTY_DOC_CANVAS === '1', styleLink: process.env.STYLE_LINK === '1', board: process.env.BOARD === '1', recallSeed: process.env.RECALL_SEED === '1', clozeSeed: process.env.CLOZE_SEED === '1', readingSeedPass: process.env.READING_SEED_PASS ?? '', readingSeedNote: process.env.READING_SEED_NOTE ?? '' })
 
 await page.goto('http://127.0.0.1:1420/', { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.app-shell')
@@ -1858,6 +1893,90 @@ if (process.env.STEP === 'cloze') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'cloze', masksBefore, blankCount, answers, firstHints, secondHints, wrong, solved, plainReveal }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=two-pass：粗读精读的阶段切换、粗读的工具门禁、自由召回与持久化。
+if (process.env.STEP === 'two-pass') {
+  const openDoc = async () => {
+    await page.locator('.document-card').first().click()
+    await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+    await page.waitForTimeout(1200)
+  }
+  const dockDisabled = (label) => page.evaluate((text) => {
+    const button = [...document.querySelectorAll('.pdf-dock button')].find((item) => item.textContent?.includes(text))
+    return button ? button.disabled : null
+  }, label)
+
+  await openDoc()
+  const initial = {
+    pass: await page.getAttribute('[data-pass-bar]', 'data-pass'),
+    bar: await page.locator('[data-pass-bar]').innerText(),
+    finish: await page.locator('[data-testid="pdf-pass-finish"]').count(),
+    rectangle: await dockDisabled('框架'),
+    ink: await dockDisabled('墨迹'),
+    text: await dockDisabled('文字'),
+  }
+  if (initial.pass !== '1') problems.push(`默认不是粗读：${initial.pass}`)
+  if (!initial.bar.includes('粗读')) problems.push(`阶段条没有写「粗读」：${initial.bar}`)
+  if (initial.finish !== 1) problems.push('粗读缺少「粗读完成」入口')
+  if (!initial.rectangle || !initial.ink || !initial.text) {
+    problems.push(`粗读没有收起细节工具：${JSON.stringify(initial)}`)
+  }
+
+  // 读完第一遍 → 写「我记得的」→ 自动进入第二遍
+  await page.locator('[data-testid="pdf-pass-finish"]').click()
+  await page.waitForSelector('[data-testid="pdf-recall-modal"]', { timeout: 5000 })
+  await page.locator('[data-testid="pdf-recall-input"]').fill('第一章：三个机制、两个前提')
+  await page.locator('[data-testid="pdf-recall-save"]').click()
+  await page.waitForTimeout(800)
+  const afterFinish = {
+    pass: await page.getAttribute('[data-pass-bar]', 'data-pass'),
+    bar: await page.locator('[data-pass-bar]').innerText(),
+    note: await page.evaluate(() => window.__readingState?.().recallNote ?? ''),
+    rectangle: await dockDisabled('框架'),
+    modal: await page.locator('[data-testid="pdf-recall-modal"]').count(),
+  }
+  if (afterFinish.pass !== '2') problems.push(`保存召回后没有进入精读：${afterFinish.pass}`)
+  if (!afterFinish.bar.includes('精读')) problems.push(`阶段条没有写「精读」：${afterFinish.bar}`)
+  if (!afterFinish.bar.includes('看召回笔记')) problems.push(`第二遍没有召回入口：${afterFinish.bar}`)
+  if (afterFinish.note !== '第一章：三个机制、两个前提') problems.push(`召回没有写到后端：${afterFinish.note}`)
+  if (afterFinish.rectangle !== false) problems.push('精读工具没有解锁')
+  if (afterFinish.modal !== 0) problems.push('保存后弹窗没有关闭')
+
+  // 回看召回
+  await page.locator('[data-testid="pdf-pass-note"]').click()
+  await page.waitForTimeout(300)
+  const recalled = await page.locator('[data-testid="pdf-recall-input"]').inputValue()
+  if (recalled !== '第一章：三个机制、两个前提') problems.push(`召回回看不一致：${recalled}`)
+  await page.locator('.pdf-modal-actions button', { hasText: '稍后' }).click()
+  await page.waitForTimeout(250)
+
+  // 切回第一遍：工具重新收起
+  await page.locator('[data-testid="pdf-pass-chip"]').click()
+  await page.waitForTimeout(700)
+  const backToFirst = {
+    pass: await page.getAttribute('[data-pass-bar]', 'data-pass'),
+    rectangle: await dockDisabled('框架'),
+  }
+  if (backToFirst.pass !== '1') problems.push(`切不回粗读：${backToFirst.pass}`)
+  if (backToFirst.rectangle !== true) problems.push('回到粗读后细节工具没有收起')
+
+  // 再切回第二遍，刷新页面后阶段与召回仍在（读的是后端状态而不是内存）
+  await page.locator('[data-testid="pdf-pass-chip"]').click()
+  await page.waitForTimeout(700)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.app-shell')
+  await openDoc()
+  const persisted = {
+    pass: await page.getAttribute('[data-pass-bar]', 'data-pass'),
+    bar: await page.locator('[data-pass-bar]').innerText(),
+  }
+  if (persisted.pass !== '2') problems.push(`刷新后阶段丢失：${persisted.pass}`)
+  if (!persisted.bar.includes('看召回笔记')) problems.push('刷新后召回入口丢失')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'two-pass', initial, afterFinish, backToFirst, persisted }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

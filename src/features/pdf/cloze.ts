@@ -66,6 +66,25 @@ export function saveClozePreference(enabled: boolean) {
   }
 }
 
+const REVIEW_CLOZE_KEY = 'pdfnote.review.cloze'
+
+/** 复习工作区的挖空模式：默认关闭，保持原来的自由作答。 */
+export function readReviewClozePreference(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(REVIEW_CLOZE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function saveReviewClozePreference(enabled: boolean) {
+  try {
+    globalThis.localStorage?.setItem(REVIEW_CLOZE_KEY, enabled ? '1' : '0')
+  } catch {
+    // 隐私模式下存不了，仅本次会话生效。
+  }
+}
+
 const CLOZE_TURN_KEY = 'pdfnote.cloze.turn'
 
 /** 读取轮换序号（跨会话、跨重启递增，保证每次进入回忆换一批空）。 */

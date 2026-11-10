@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'vitest'
-import { buildCloze, checkCloze, judgeClozeBlank } from './cloze'
+import { beforeEach, describe, expect, it } from 'vitest'
+import {
+  buildCloze,
+  bumpClozeTurn,
+  checkCloze,
+  judgeClozeBlank,
+  readClozePreference,
+  readClozeTurn,
+  readReviewClozePreference,
+  saveClozePreference,
+  saveReviewClozePreference,
+} from './cloze'
 
 const plain = (exercise: ReturnType<typeof buildCloze>) => exercise.segments
   .map((segment) => (segment.kind === 'text' ? segment.text : `【${segment.blank.answer}】`))
@@ -107,6 +117,42 @@ describe('每次会话换空', () => {
       // 轮换不能挖到泛化词
       expect(exercise.blanks.map((blank) => blank.answer)).not.toContain('定义')
     }
+  })
+})
+
+describe('偏好与轮换序号', () => {
+  function installStorage() {
+    const map = new Map<string, string>()
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => map.get(key) ?? null,
+        setItem: (key: string, value: string) => { map.set(key, value) },
+        removeItem: (key: string) => { map.delete(key) },
+        clear: () => map.clear(),
+        key: (index: number) => [...map.keys()][index] ?? null,
+        get length() { return map.size },
+      },
+    })
+    return map
+  }
+
+  beforeEach(() => { installStorage() })
+
+  it('回忆挖空默认开，复习挖空默认关', () => {
+    expect(readClozePreference()).toBe(true)
+    expect(readReviewClozePreference()).toBe(false)
+    saveClozePreference(false)
+    saveReviewClozePreference(true)
+    expect(readClozePreference()).toBe(false)
+    expect(readReviewClozePreference()).toBe(true)
+  })
+
+  it('轮换序号每次 +1，跨会话累计', () => {
+    expect(readClozeTurn()).toBe(0)
+    expect(bumpClozeTurn()).toBe(1)
+    expect(bumpClozeTurn()).toBe(2)
+    expect(readClozeTurn()).toBe(2)
   })
 })
 

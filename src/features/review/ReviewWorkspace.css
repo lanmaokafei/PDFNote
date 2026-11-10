@@ -203,3 +203,52 @@
 /* 卡片摘录图像（扫描版公式/图表） */
 .review-question-image,
 .review-answer-image { display: block; max-width: min(420px, 100%); max-height: 220px; margin: 10px 0 4px; border: 1px solid #dfe3d8; border-radius: 8px; object-fit: contain; background: #fff; }
+
+/* ---------- 挖空复习（0.40.0） ---------- */
+
+.review-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-cloze-toggle {
+  padding: 10px 15px;
+  border: 1px solid #d7ddd2;
+  border-radius: 7px;
+  color: #5d695a;
+  background: #f9faf6;
+  font-size: 12px;
+}
+
+.review-cloze-toggle:hover {
+  background: #edf1e8;
+}
+
+.review-cloze-toggle.is-active {
+  border-color: #526c4d;
+  color: #fff;
+  background: #526c4d;
+}
+
+.review-cloze-toggle.is-active:hover {
+  background: #476043;
+}
+
+.review-cloze-done {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px dashed #cfd8c9;
+  border-radius: 8px;
+  color: #5a6a55;
+  background: #f7faf3;
+  font-size: 12px;
+}
+
+.review-cloze-fallback {
+  margin: 0 0 8px;
+  color: #93824f;
+  font-size: 11px;
+  line-height: 1.6;
+}

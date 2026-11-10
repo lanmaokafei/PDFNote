@@ -8,6 +8,15 @@ import { getReviewStats, listDueCards, updateCardContent } from '../../services/
 import { useCardStore } from '../../store/cardStore'
 import { MATCH_LABELS, evaluateAnswer } from './answerMatch'
 import { reviewCard } from './scheduler'
+import { ClozePanel } from '../pdf/ClozePanel'
+import {
+  bumpClozeTurn,
+  buildCloze,
+  checkCloze,
+  readReviewClozePreference,
+  saveReviewClozePreference,
+  type ClozeResult,
+} from '../pdf/cloze'
 import './ReviewWorkspace.css'
 
 interface ReviewWorkspaceProps {
@@ -95,6 +104,11 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
   const [completed, setCompleted] = useState(0)
   const [sessionTotal, setSessionTotal] = useState(0)
   const [lastReviewed, setLastReviewed] = useState<{ question: string; due: string; rating: Rating } | null>(null)
+  // 挖空复习：默认关，开了以后正面用「摘录挖空」代替自由作答。
+  const [clozeMode, setClozeMode] = useState(readReviewClozePreference)
+  const [clozeTurn, setClozeTurn] = useState(0)
+  const [clozeInputs, setClozeInputs] = useState<string[]>([])
+  const [clozeResult, setClozeResult] = useState<ClozeResult | null>(null)
   const { menu, show, close } = useContextMenu()
 
   const mountedRef = useRef(false)
@@ -139,6 +153,13 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
       loadRequestRef.current += 1
     }
   }, [loadWorkspace])
+
+  // 每张卡开始复习时清空填空并换一个轮换序号：同一张卡显示期间空不会变。
+  useEffect(() => {
+    setClozeInputs([])
+    setClozeResult(null)
+    if (clozeMode) setClozeTurn(bumpClozeTurn())
+  }, [clozeMode, current?.id])
 
   const refreshCommittedData = useCallback(async () => {
     const [cardsResult, statsResult] = await Promise.allSettled([
@@ -246,6 +267,48 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
     })
   }
 
+  const currentExcerpt = current?.excerpt ?? ''
+  /** 当前卡的挖空练习：换卡或换轮换序号才重建，输入过程中段不变。 */
+  const clozeExercise = useMemo(() => {
+    if (!clozeMode) return null
+    return buildCloze(currentExcerpt, { turn: clozeTurn })
+  }, [clozeMode, currentExcerpt, clozeTurn])
+  const clozeReady = Boolean(clozeExercise && clozeExercise.blanks.length > 0)
+
+  const toggleClozeMode = () => {
+    setClozeMode((previous) => {
+      const next = !previous
+      saveReviewClozePreference(next)
+      setNotice(next ? '已开启挖空复习：正面只保留摘录里的空。' : '已关闭挖空复习，回到自由作答。')
+      return next
+    })
+  }
+
+  const handleClozeAnswer = (index: number, value: string) => {
+    setClozeInputs((previous) => {
+      const next = [...previous]
+      next[index] = value
+      return next
+    })
+    // 改了输入就丢掉上一次判定，避免旧红框贴在刚改过的文字上。
+    setClozeResult(null)
+  }
+
+  const handleClozeCheck = () => {
+    if (!clozeExercise) return
+    const result = checkCloze(clozeExercise, clozeExercise.blanks.map((_, index) => clozeInputs[index] ?? ''))
+    setClozeResult(result)
+    if (result.solved) {
+      setRevealed(true)
+      setNotice(`挖空 ${result.total}/${result.total} 全部补齐，已揭示背面。`)
+    }
+  }
+
+  const handleClozeRetry = () => {
+    setClozeInputs([])
+    setClozeResult(null)
+  }
+
   // 揭示答案之前也会计算，但不渲染任何要点，避免提前泄露答案内容。
   const answerMatch = useMemo(
     () => evaluateAnswer(answerDraft, [current?.excerpt ?? '', current?.user_note ?? '']),
@@ -271,11 +334,27 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
         <div>
           <p className="review-eyebrow">ACTIVE RECALL · FSRS</p>
           <h1>复习工作区</h1>
-          <p>先写出你的答案，再揭示背面查看对比反馈；每次评分都会立即保存到本地数据库。</p>
+          <p>
+            {clozeMode
+              ? '挖空复习：正面只留摘录里的关键词空，补全后自动揭示背面；每次评分都会立即保存。'
+              : '先写出你的答案，再揭示背面查看对比反馈；每次评分都会立即保存到本地数据库。'}
+          </p>
         </div>
-        <button className="review-refresh" type="button" onClick={() => void loadWorkspace()} disabled={busy || loading}>
-          {loading ? '正在检查…' : '重新检查到期卡片'}
-        </button>
+        <div className="review-header-actions">
+          <button
+            className={`review-cloze-toggle${clozeMode ? ' is-active' : ''}`}
+            type="button"
+            aria-pressed={clozeMode}
+            onClick={toggleClozeMode}
+            data-testid="review-cloze-toggle"
+            title="挖空复习：把有摘录的卡片变成填空，补全后自动揭示背面"
+          >
+            挖空复习
+          </button>
+          <button className="review-refresh" type="button" onClick={() => void loadWorkspace()} disabled={busy || loading}>
+            {loading ? '正在检查…' : '重新检查到期卡片'}
+          </button>
+        </div>
       </header>
 
       <div className="review-layout">
@@ -366,7 +445,30 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
                         loading="lazy"
                       />
                     )}
+                    {clozeMode && clozeReady ? (
+                      revealed ? (
+                        <p className="review-cloze-done" data-testid="review-cloze-done">
+                          {clozeResult?.solved ? '挖空已全部补齐，下面是原文与笔记。' : '已揭示背面，下面是完整摘录。'}
+                        </p>
+                      ) : (
+                        <ClozePanel
+                          exercise={clozeExercise!}
+                          answers={clozeInputs}
+                          result={clozeResult}
+                          onAnswerChange={handleClozeAnswer}
+                          onCheck={handleClozeCheck}
+                          onRetry={handleClozeRetry}
+                          onReveal={() => setRevealed(true)}
+                          onDisable={toggleClozeMode}
+                        />
+                      )
+                    ) : (
                     <div className="review-recall">
+                      {clozeMode && clozeExercise?.reason && (
+                        <p className="review-cloze-fallback" data-testid="review-cloze-fallback">
+                          挖空复习暂不可用（{clozeExercise.reason}），已回到自由作答。
+                        </p>
+                      )}
                       <label className="review-recall-label" htmlFor="review-recall-input">
                         <span>先写出你的答案</span>
                         <small>{answerMatch.inputLength} 字</small>
@@ -434,6 +536,7 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
                         </div>
                       )}
                     </div>
+                    )}
                   </div>
 
                   {revealed && (

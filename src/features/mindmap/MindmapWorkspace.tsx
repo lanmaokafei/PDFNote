@@ -89,6 +89,7 @@ import {
   DEFAULT_CANVAS_ID,
   MINDMAP_CHANGED_EVENT,
   documentCanvasName,
+  notifyCanvasChanged,
   readCanvasId,
   readCanvasPreference,
   saveCanvasId,
@@ -182,6 +183,11 @@ interface MindmapWorkspaceProps {
   documentId?: string | null
   /** 文档标题：新导入 / 升级前导入的书缺少专属画布时，用它给画布命名。 */
   documentTitle?: string | null
+  /**
+   * 固定画布：粗读精读工作区用它把整块脑图钉在「精读 · 书名」这张画布上，
+   * 不读也不写本书的画布偏好（否则退出后普通阅读会被带跑）。
+   */
+  fixedCanvasId?: string | null
 }
 
 interface ConfirmationState {
@@ -189,7 +195,7 @@ interface ConfirmationState {
   id: string
 }
 
-function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, documentTitle = null }: MindmapWorkspaceProps) {
+function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, documentTitle = null, fixedCanvasId = null }: MindmapWorkspaceProps) {
   const cardsById = useCardStore((state) => state.cardsById)
   const loadCards = useCardStore((state) => state.loadCards)
   const createCardInStore = useCardStore((state) => state.createCard)
@@ -201,8 +207,9 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     getViewport,
   } = useReactFlow<MindmapFlowNode, Edge>()
 
-  // 当前画布：全局独立视图只用 main，文档工作台会按 documentId 单独记住上次选的画布。
-  const [canvasId, setCanvasId] = useState(() => readCanvasId(documentId))
+  // 当前画布：全局独立视图只用 main，文档工作台按 documentId 记住上次选的画布；
+  // 粗读精读工作区传 fixedCanvasId，整块钉在专属画布上。
+  const [canvasId, setCanvasId] = useState(() => fixedCanvasId ?? readCanvasId(documentId))
   const [canvases, setCanvases] = useState<MindmapCanvas[]>([])
   /**
    * 画布归属解析完成前不加载成员：否则新导入的书会先用 main 拉一遍，
@@ -732,7 +739,21 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
    * 之前这里默认回落到 main（全局画布），而 main 里往往是上一本书的 AI 拆书内容，
    * 于是新导入的 PDF 打开看到的是别人的脑图。
    */
+  // 固定画布：只把画布列表读出来显示名字，不解析偏好、也不补建。
   useEffect(() => {
+    if (!fixedCanvasId) return
+    let cancelled = false
+    setCanvasId(fixedCanvasId)
+    canvasResolvedRef.current = true
+    setCanvasResolved(true)
+    void listMindmapCanvases(documentId ?? null).then((list) => {
+      if (!cancelled) setCanvases(list)
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [fixedCanvasId, documentId])
+
+  useEffect(() => {
+    if (fixedCanvasId) return
     let cancelled = false
     canvasResolvedRef.current = !documentId
     setCanvasResolved(!documentId)
@@ -804,7 +825,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       }
     })()
     return () => { cancelled = true }
-  }, [documentId, documentTitle])
+  }, [documentId, documentTitle, fixedCanvasId])
 
   useEffect(() => {
     if (!canvasResolved) return
@@ -876,6 +897,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     resetMindmapInsertSequence()
     saveCanvasId(documentId, id)
     setCanvasId(id)
+    // 通知 PDF：标注跟着画布走（同一本书的两张画布各有各的高亮）。
+    notifyCanvasChanged(documentId, id)
     setNotice(`已切换到「${canvases.find((canvas) => canvas.id === id)?.name ?? id}」。`)
   }, [canvasId, canvases, documentId])
 
@@ -885,9 +908,9 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     const resolved = list.some((canvas) => canvas.id === target)
       ? target
       : list.find((canvas) => canvas.id === DEFAULT_CANVAS_ID)?.id ?? DEFAULT_CANVAS_ID
-    saveCanvasId(documentId, resolved)
+    if (!fixedCanvasId) saveCanvasId(documentId, resolved)
     setCanvasId(resolved)
-  }, [canvasId, documentId])
+  }, [canvasId, documentId, fixedCanvasId])
 
   /** Anki 导入在后端单事务建树；小图刷新后整理并对齐视口，上千张时不再全量重排。 */
   const handleAnkiImported = useCallback((result: AnkiImportResult) => {
@@ -1780,25 +1803,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
 
       {!compact && (
       <div className="mindmap-canvas-bar">
-        <CanvasSwitcher
-          documentId={documentId}
-          canvasId={canvasId}
-          canvases={canvases}
-          busy={busy || switching}
-          onSelect={selectCanvas}
-          onCanvasesChanged={handleCanvasesChanged}
-          onError={setError}
-        />
-        <button type="button" className="mindmap-import-button" data-testid="anki-open" onClick={() => setAnkiOpen(true)} disabled={busy || switching}>
-          导入 Anki 牌组…
-        </button>
-      </div>
-      )}
-
-      {compact && (
-        <div className="mindmap-float-canvas">
+        {!fixedCanvasId && (
           <CanvasSwitcher
-            compact
             documentId={documentId}
             canvasId={canvasId}
             canvases={canvases}
@@ -1807,6 +1813,27 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
             onCanvasesChanged={handleCanvasesChanged}
             onError={setError}
           />
+        )}
+        <button type="button" className="mindmap-import-button" data-testid="anki-open" onClick={() => setAnkiOpen(true)} disabled={busy || switching}>
+          导入 Anki 牌组…
+        </button>
+      </div>
+      )}
+
+      {compact && (
+        <div className="mindmap-float-canvas">
+          {!fixedCanvasId && (
+            <CanvasSwitcher
+              compact
+              documentId={documentId}
+              canvasId={canvasId}
+              canvases={canvases}
+              busy={busy || switching}
+              onSelect={selectCanvas}
+              onCanvasesChanged={handleCanvasesChanged}
+              onError={setError}
+            />
+          )}
           <button type="button" className="mindmap-import-button" data-testid="anki-open" onClick={() => setAnkiOpen(true)} disabled={busy || switching}>
             导入 Anki
           </button>

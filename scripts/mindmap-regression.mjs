@@ -181,7 +181,8 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
   const layoutMembership = {
     main: cards.map((card) => card.id),
     'doc-canvas': cards.slice(0, 2).map((card) => card.id),
-    'book-canvas-b': cards.slice(0, 1).map((card) => card.id),
+    // B 画布只放第二张卡：用来验证 PDF 标注会跟着画布切换（ann-1 属于 c1）。
+    'book-canvas-b': cards.slice(1, 2).map((card) => card.id),
   }
   window.__canvasState = canvasState
   window.__layoutMembership = layoutMembership
@@ -1621,7 +1622,7 @@ if (process.env.STEP === 'tone') {
   }
 
   // 微缩导航图（独立视图才有 MiniMap）：色块必须跟随节气色调，不能一片同色。
-  await page.locator('.app-segment', { hasText: '资料库' }).click()
+  await page.locator('.app-segment').filter({ hasText: '资料库' }).first().click()
   await page.waitForTimeout(400)
   await page.locator('.app-segment', { hasText: '脑图' }).click()
   await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
@@ -1939,7 +1940,7 @@ if (process.env.STEP === 'two-pass') {
   }
   if (afterFinish.pass !== '2') problems.push(`保存召回后没有进入精读：${afterFinish.pass}`)
   if (!afterFinish.bar.includes('精读')) problems.push(`阶段条没有写「精读」：${afterFinish.bar}`)
-  if (!afterFinish.bar.includes('看召回笔记')) problems.push(`第二遍没有召回入口：${afterFinish.bar}`)
+  if (!afterFinish.bar.includes('看粗读笔记')) problems.push(`第二遍没有召回入口：${afterFinish.bar}`)
   if (afterFinish.note !== '第一章：三个机制、两个前提') problems.push(`召回没有写到后端：${afterFinish.note}`)
   if (afterFinish.rectangle !== false) problems.push('精读工具没有解锁')
   if (afterFinish.modal !== 0) problems.push('保存后弹窗没有关闭')
@@ -1973,10 +1974,51 @@ if (process.env.STEP === 'two-pass') {
     bar: await page.locator('[data-pass-bar]').innerText(),
   }
   if (persisted.pass !== '2') problems.push(`刷新后阶段丢失：${persisted.pass}`)
-  if (!persisted.bar.includes('看召回笔记')) problems.push('刷新后召回入口丢失')
+  if (!persisted.bar.includes('看粗读笔记')) problems.push('刷新后召回入口丢失')
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'two-pass', initial, afterFinish, backToFirst, persisted }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=closereading：独立菜单进入、专属画布、原有标记不混入、切回资料库仍在。
+if (process.env.STEP === 'closereading') {
+  await page.locator('.app-segment', { hasText: '粗读精读' }).click()
+  await page.waitForSelector('.close-reading-list', { timeout: 10000 })
+  const books = await page.locator('.close-reading-list button').count()
+  if (books < 1) problems.push(`粗读精读书单为空：${books}`)
+
+  await page.locator('.close-reading-list button').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1800)
+
+  const entered = await page.evaluate(() => ({
+    docbar: document.querySelector('.close-reading-docbar')?.textContent ?? '',
+    annotations: document.querySelectorAll('.pdf-annotation').length,
+    masks: document.querySelectorAll('.pdf-recall-mask').length,
+    canvases: (window.__canvasState ?? []).map((canvas) => canvas.name),
+    membership: JSON.parse(JSON.stringify(window.__layoutMembership ?? {})),
+  }))
+  if (!entered.docbar.includes('专属画布')) problems.push(`没有标注专属画布：${entered.docbar}`)
+  if (!entered.docbar.includes('精读 · ')) problems.push(`专属画布名字不对：${entered.docbar}`)
+  if (entered.annotations !== 0) problems.push(`专属画布上混入了原有标注：${entered.annotations}`)
+  if (entered.masks !== 0) problems.push(`专属画布上混入了原有遮挡：${entered.masks}`)
+
+  // 阶段条在新入口里也在，默认粗读。
+  const pass = await page.getAttribute('[data-pass-bar]', 'data-pass')
+  if (pass !== '1') problems.push(`新入口默认不是粗读：${pass}`)
+
+  // 回到资料库打开同一本书：原有标注必须还在（画布过滤没有误伤）。
+  await page.locator('.app-segment').filter({ hasText: '资料库' }).first().click()
+  await page.waitForSelector('.document-card', { timeout: 10000 })
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1800)
+  const normal = await page.evaluate(() => document.querySelectorAll('.pdf-annotation').length)
+  if (normal < 1) problems.push(`回到资料库后原有标注丢了：${normal}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'closereading', books, entered, normal }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 
@@ -2439,7 +2481,7 @@ if (STEP === 'arrange') {
   // 顶栏格子数量会随工作区增加；按文案定位，别用索引（0.34.0 加「卡片盒」后索引整体错位）。
   const nav = page.locator('.app-segment')
   if (await nav.count() >= 4) {
-    await page.locator('.app-segment', { hasText: '资料库' }).click()
+    await page.locator('.app-segment').filter({ hasText: '资料库' }).first().click()
     await page.waitForTimeout(700)
     await page.locator('.app-segment', { hasText: '脑图' }).click()
     await page.waitForTimeout(1500)
@@ -2483,7 +2525,7 @@ if (STEP === 'clear') {
   // 顶栏格子数量会随工作区增加；按文案定位，别用索引（0.34.0 加「卡片盒」后索引整体错位）。
   const nav = page.locator('.app-segment')
   if (await nav.count() >= 4) {
-    await page.locator('.app-segment', { hasText: '资料库' }).click()
+    await page.locator('.app-segment').filter({ hasText: '资料库' }).first().click()
     await page.waitForTimeout(700)
     await page.locator('.app-segment', { hasText: '脑图' }).click()
     await page.waitForTimeout(1500)
@@ -2559,6 +2601,8 @@ if (STEP === 'canvas') {
     })
     await picker.selectOption('doc-canvas')
     await page.waitForTimeout(1100)
+    const marksOnA = await page.evaluate(() => document.querySelectorAll('.pdf-annotation').length)
+    if (marksOnA !== 1) problems.push(`切到含 c1 的画布后标注应显示 1 条，实际 ${marksOnA}`)
     const nodesOnA = await page.locator('.mindmap-node').count()
     if (nodesOnA !== 2) problems.push(`本书脑图 A 应只有 2 张卡片，实际 ${nodesOnA}`)
     const probe = await page.locator('.react-flow').first().getAttribute('data-canvas-probe').catch(() => null)
@@ -2566,10 +2610,14 @@ if (STEP === 'canvas') {
 
     await picker.selectOption('book-canvas-b')
     await page.waitForTimeout(900)
+    const marksOnB = await page.evaluate(() => document.querySelectorAll('.pdf-annotation').length)
+    if (marksOnB !== 0) problems.push(`切到不含 c1 的画布后标注应隐藏，实际 ${marksOnB}`)
     const nodesOnB = await page.locator('.mindmap-node').count()
     if (nodesOnB !== 1) problems.push(`本书脑图 B 应只有 1 张卡片，实际 ${nodesOnB}`)
     await picker.selectOption('main')
     await page.waitForTimeout(900)
+    const marksBack = await page.evaluate(() => document.querySelectorAll('.pdf-annotation').length)
+    if (marksBack !== 1) problems.push(`切回默认画布后标注应恢复，实际 ${marksBack}`)
     const nodesBack = await page.locator('.mindmap-node').count()
     if (nodesBack !== expected) problems.push(`切回默认画布后节点数异常：${nodesBack}`)
 
@@ -2821,7 +2869,7 @@ if (STEP === 'outline-back') {
     const topButtons = page.locator('.app-segment')
     const topCount = await topButtons.count()
     if (topCount >= 4) {
-      await page.locator('.app-segment', { hasText: '资料库' }).click()   // 关闭当前文档
+      await page.locator('.app-segment').filter({ hasText: '资料库' }).first().click()   // 关闭当前文档
       await page.waitForTimeout(800)
       await page.locator('.app-segment', { hasText: '脑图' }).click()     // 进入独立视图
       await page.waitForTimeout(1600)

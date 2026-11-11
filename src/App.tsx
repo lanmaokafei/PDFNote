@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import {
   BookOpen,
+  BookOpenCheck,
   Copy,
   FileText,
   LayoutGrid,
@@ -25,6 +26,9 @@ const MindmapWorkspace = lazy(() =>
 )
 const ReviewWorkspace = lazy(() =>
   import('./features/review/ReviewWorkspace').then((module) => ({ default: module.ReviewWorkspace })),
+)
+const CloseReadingWorkspace = lazy(() =>
+  import('./features/closereading/CloseReadingWorkspace').then((module) => ({ default: module.CloseReadingWorkspace })),
 )
 const BoardWorkspace = lazy(() =>
   import('./features/board/BoardWorkspace').then((module) => ({ default: module.BoardWorkspace })),
@@ -52,7 +56,7 @@ import { autoCheckUpdate } from './services/update'
 import type { UpdateInfo } from './services/update'
 import { useCardStore } from './store/cardStore'
 
-type View = 'library' | 'board' | 'notebook' | 'mindmap' | 'review' | 'backup'
+type View = 'library' | 'board' | 'notebook' | 'mindmap' | 'review' | 'closereading' | 'backup'
 
 function App() {
   const [view, setView] = useState<View>('library')
@@ -195,6 +199,14 @@ function App() {
       onClick: () => goTo('review'),
     },
     {
+      key: 'closereading' as const,
+      icon: BookOpenCheck,
+      label: '粗读精读',
+      hint: '建地图 → 挖重点',
+      active: !documentOpen && view === 'closereading',
+      onClick: () => goTo('closereading'),
+    },
+    {
       key: 'document' as const,
       icon: FileText,
       label: activeDocument?.title ?? '未打开文档',
@@ -246,6 +258,7 @@ function App() {
           { id: 'notebook', label: '笔记本', icon: NotebookPen, checked: !documentOpen && view === 'notebook', onSelect: () => goTo('notebook') },
           { id: 'mindmap', label: '知识脑图', icon: Network, checked: !documentOpen && view === 'mindmap', onSelect: () => goTo('mindmap') },
           { id: 'review', label: '复习', icon: Sparkles, checked: !documentOpen && view === 'review', onSelect: () => goTo('review') },
+          { id: 'closereading', label: '粗读精读', icon: BookOpenCheck, checked: !documentOpen && view === 'closereading', onSelect: () => goTo('closereading') },
           { id: 'backup', label: '备份与恢复', icon: ShieldCheck, checked: !documentOpen && view === 'backup', onSelect: () => goTo('backup') },
         ] },
       ],
@@ -307,7 +320,7 @@ function App() {
                 <button type="button" onClick={() => { setFatalError(''); void refreshStatus() }}>重试</button>
               </div>
             )}
-            <div className={`app-view${view === 'library' ? ' is-library' : ''}${view === 'mindmap' || view === 'board' || view === 'notebook' ? ' is-full' : ''}`}>
+            <div className={`app-view${view === 'library' ? ' is-library' : ''}${view === 'mindmap' || view === 'board' || view === 'notebook' || view === 'closereading' ? ' is-full' : ''}`}>
               {view === 'library' && (
                 <LibraryWorkspace
                   onOpenDocument={(document) => { setFatalError(''); setActiveDocument(document) }}
@@ -336,6 +349,11 @@ function App() {
               {view === 'review' && (
                 <Suspense fallback={<ViewLoading label="正在加载复习队列…" />}>
                   <ReviewWorkspace onCardsChanged={() => void refreshStatus()} />
+                </Suspense>
+              )}
+              {view === 'closereading' && (
+                <Suspense fallback={<ViewLoading label="正在准备粗读精读…" />}>
+                  <CloseReadingWorkspace onCardsChanged={() => void refreshStatus()} />
                 </Suspense>
               )}
               {view === 'backup' && (

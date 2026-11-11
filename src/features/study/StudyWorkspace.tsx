@@ -11,6 +11,8 @@ interface StudyWorkspaceProps {
   onJumpHandled?: () => void
   onPageCount: (count: number) => void
   onCardsChanged: () => void
+  /** 固定画布：粗读精读工作区把 PDF 标注与脑图都钉在专属画布上。 */
+  canvasId?: string
 }
 
 const MIN_RATIO = 32
@@ -24,6 +26,7 @@ export function StudyWorkspace({
   onJumpHandled,
   onPageCount,
   onCardsChanged,
+  canvasId,
 }: StudyWorkspaceProps) {
   const [ratio, setRatio] = useState(54)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -58,6 +61,7 @@ export function StudyWorkspace({
         <PdfWorkspace
           document={document}
           embedded
+          canvasId={canvasId}
           jumpTarget={jumpTarget}
           onJumpHandled={onJumpHandled}
           onPageCount={onPageCount}
@@ -84,6 +88,7 @@ export function StudyWorkspace({
               compact
               documentId={document.id}
               documentTitle={document.title}
+              fixedCanvasId={canvasId ?? null}
               onCardsChanged={onCardsChanged}
             />
           </div>

@@ -8,7 +8,7 @@ import {
   type PDFPageProxy,
 } from './pdfjs'
 import type { OcrLine } from '../../services/pdfnote'
-import { notifyMindmapChanged, readCanvasId } from '../mindmap/canvas'
+import { CANVAS_CHANGED_EVENT, MINDMAP_CHANGED_EVENT, notifyMindmapChanged, readCanvasId } from '../mindmap/canvas'
 import { nextMindmapInsertPoint } from '../mindmap/viewport'
 import type {
   Annotation,
@@ -27,6 +27,7 @@ import {
   deletePageNote,
   getPageOcr,
   listAnnotations,
+  listMindmapLayout,
   listPageInks,
   listPageNotes,
   readPdfChunk,
@@ -119,7 +120,20 @@ export interface PdfWorkspaceProps {
   /** 外部请求跳到某页（脑图卡片点击页码）。token 保证同一页再次点击也能触发。 */
   jumpTarget?: { documentId: string; page: number; token: number } | null
   onJumpHandled?: () => void
+  /**
+   * 固定画布：粗读精读工作区把 PDF 的标注也钉在同一张画布上。
+   * 不传则跟随本书当前画布（并随画布切换事件更新）。
+   */
+  canvasId?: string
 }
+
+const RECALL_TEMPLATE = `【主旨】
+
+【论证】
+
+【与我的关系】
+
+【精读清单】3–5 章 / 还没弄懂的问题`
 
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
@@ -140,6 +154,7 @@ export function PdfWorkspace({
   jumpTarget,
   onJumpHandled,
   embedded = false,
+  canvasId: canvasIdOverride,
 }: PdfWorkspaceProps) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [pageCount, setPageCount] = useState(document.page_count)
@@ -156,6 +171,10 @@ export function PdfWorkspace({
   // 用第 1 页的真实尺寸作为未测量占位页的高度，否则数百页后跳转会累计明显偏差。
   const [defaultPageSize, setDefaultPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE)
   const [annotationsByPage, setAnnotationsByPage] = useState<Record<number, Annotation[]>>({})
+  // 标注跟着画布走：同一本书的两张画布各有各的高亮。
+  const [activeCanvasId, setActiveCanvasId] = useState(() => canvasIdOverride ?? readCanvasId(document.id))
+  /** null = 还没读到画布成员，此时不过滤，避免打开文档时先闪一下空白。 */
+  const [canvasCardIds, setCanvasCardIds] = useState<ReadonlySet<string> | null>(null)
   const [annotationVersion, setAnnotationVersion] = useState(0)
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
   const [operationError, setOperationError] = useState('')
@@ -522,6 +541,42 @@ export function PdfWorkspace({
         })
       })
   }, [annotationVersion, document.id, pdf, visiblePages])
+
+  // 画布成员：不在当前画布的卡片，其标注一律不渲染（两遍阅读 / 多画布各自干净）。
+  useEffect(() => {
+    let active = true
+    const reload = () => {
+      listMindmapLayout(activeCanvasId || 'main')
+        .then((rows) => {
+          if (active) setCanvasCardIds(new Set(rows.map((row) => row.card_id)))
+        })
+        .catch(() => {
+          if (active) setCanvasCardIds(null)
+        })
+    }
+    reload()
+    window.addEventListener(MINDMAP_CHANGED_EVENT, reload)
+    return () => {
+      active = false
+      window.removeEventListener(MINDMAP_CHANGED_EVENT, reload)
+    }
+  }, [activeCanvasId])
+
+  // 画布切换：普通阅读里从脑图下拉换画布时，PDF 的标注要跟着换。
+  useEffect(() => {
+    if (canvasIdOverride) {
+      setActiveCanvasId(canvasIdOverride)
+      return
+    }
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ documentId: string | null; canvasId: string }>).detail
+      if (!detail?.canvasId) return
+      if (detail.documentId && detail.documentId !== document.id) return
+      setActiveCanvasId(detail.canvasId)
+    }
+    window.addEventListener(CANVAS_CHANGED_EVENT, handler)
+    return () => window.removeEventListener(CANVAS_CHANGED_EVENT, handler)
+  }, [canvasIdOverride, document.id])
 
   /**
    * 打开文档后回到上次阅读位置。占位页高度依赖页尺寸，测量会带来轻微位移，
@@ -993,7 +1048,7 @@ export function PdfWorkspace({
 
     try {
       // 从 PDF 划重点建卡时写入读者当前选中的画布，而不是永远塞进 main。
-      const targetCanvasId = readCanvasId(document.id)
+      const targetCanvasId = activeCanvasId
       // 落点 = 右栏画布此刻的视口中心：用户不用再缩小去找新卡。
       const insertPoint = nextMindmapInsertPoint()
       const card = await createCard({
@@ -1050,7 +1105,7 @@ export function PdfWorkspace({
     } finally {
       setCreating(false)
     }
-  }, [aiReady, aiTimeoutSecs, createCard, creating, document.id, invalidateAnnotations, recallMode, tool])
+  }, [activeCanvasId, aiReady, aiTimeoutSecs, createCard, creating, document.id, invalidateAnnotations, recallMode, tool])
 
   const handleMove = useCallback((annotation: Annotation, geometry: AnnotationGeometry, bbox: NormalizedBBox) => {
     const requestId = (moveRequestsRef.current.get(annotation.id) ?? 0) + 1
@@ -1134,7 +1189,17 @@ export function PdfWorkspace({
       : '回忆会话已开始；手写墨迹与留白已隐藏，点击遮挡块揭示内容。')
   }
 
-  const allAnnotations = useMemo(() => Object.values(annotationsByPage).flat(), [annotationsByPage])
+  /** 当前画布上的标注；还没读到成员时先不过滤，避免打开文档闪空白。 */
+  const scopedAnnotationsByPage = useMemo(() => {
+    if (!canvasCardIds) return annotationsByPage
+    const result: Record<number, Annotation[]> = {}
+    for (const [page, list] of Object.entries(annotationsByPage)) {
+      const kept = list.filter((annotation) => canvasCardIds.has(annotation.card_id))
+      if (kept.length > 0) result[Number(page)] = kept
+    }
+    return result
+  }, [annotationsByPage, canvasCardIds])
+  const allAnnotations = useMemo(() => Object.values(scopedAnnotationsByPage).flat(), [scopedAnnotationsByPage])
   const cardList = useMemo(() => Object.values(cardsById), [cardsById])
   const titleLinkIndex = useMemo(
     () => (titleLinkEnabled ? buildTitleLinkIndex(cardList) : null),
@@ -1246,9 +1311,9 @@ export function PdfWorkspace({
       setRecallNote(state.recallNote)
       if (pass === 1) {
         setTool('highlight')
-        setNotice('回到粗读：只标关键词，先读完再整理。')
+        setNotice('回到粗读：先把地图建起来，别急着做细节。')
       } else {
-        setNotice('进入精读：先按目录搭骨架，再把细节作为子节点挂上去。')
+        setNotice('进入精读：只读核心章，边读边批注、复述、做卡。')
       }
     } catch (reason) {
       setReadingPassState(previous)
@@ -1259,7 +1324,7 @@ export function PdfWorkspace({
   }
 
   const openRecall = () => {
-    setRecallDraft(recallNote)
+    setRecallDraft(recallNote || RECALL_TEMPLATE)
     setRecallOpen(true)
   }
 
@@ -1274,7 +1339,7 @@ export function PdfWorkspace({
       if (firstPass) {
         const next = await setReadingPass(document.id, 2)
         setReadingPassState(next.pass === 2 ? 2 : 1)
-        setNotice('已记下粗读的框架感，进入精读：先按目录搭骨架。')
+        setNotice('已记下粗读的三句话与清单，开始精读：先读清单里的核心章。')
       } else {
         setNotice('召回笔记已保存。')
       }
@@ -1321,7 +1386,7 @@ export function PdfWorkspace({
   }, [])
 
   const pageNumbers = useMemo(() => Array.from({ length: Math.max(0, pageCount) }, (_, index) => index + 1), [pageCount])
-  const visibleAnnotationCount = [...visiblePages].reduce((count, page) => count + (annotationsByPage[page]?.length ?? 0), 0)
+  const visibleAnnotationCount = [...visiblePages].reduce((count, page) => count + (scopedAnnotationsByPage[page]?.length ?? 0), 0)
   const largeDocument = document.file_size > 200 * 1024 * 1024
   const loadingMessage = document.file_status === 'importing' ? '文档正在导入，请稍候…' : largeDocument ? '正在按需读取大型 PDF…' : '正在打开 PDF 文档…'
 
@@ -1334,21 +1399,21 @@ export function PdfWorkspace({
         data-testid="pdf-pass-chip"
         onClick={() => void changePass(readingPass === 1 ? 2 : 1)}
         disabled={readingBusy || !pdf}
-        title="粗读找骨，精读填肉；点击切换"
+        title="粗读建地图，精读挖重点；点击切换"
       >
         <span className="pdf-pass-index">{readingPass}</span>
-        {readingPass === 1 ? '粗读 · 找骨' : '精读 · 填肉'}
+        {readingPass === 1 ? '粗读 · 建地图' : '精读 · 挖重点'}
       </button>
       {firstPass ? (
         <>
-          <span className="pdf-pass-hint">只标关键词，读完再整理</span>
+          <span className="pdf-pass-hint">先建地图：目录、序言、首尾段、图表</span>
           <button type="button" className="pdf-pass-action" data-testid="pdf-pass-finish" onClick={openRecall} disabled={readingBusy || !pdf}>
             粗读完成
           </button>
         </>
       ) : (
         <button type="button" className="pdf-pass-action" data-testid="pdf-pass-note" onClick={openRecall} disabled={readingBusy}>
-          {recallNote ? '看召回笔记' : '补写召回'}
+          {recallNote ? '看粗读笔记' : '补写三句话'}
         </button>
       )}
     </div>
@@ -1547,7 +1612,7 @@ export function PdfWorkspace({
                   shouldRender={renderPages.has(pageNumber)}
                   scale={scale}
                   size={pageSizes[pageNumber] ?? defaultPageSize}
-                  annotations={annotationsByPage[pageNumber] ?? EMPTY_ANNOTATIONS}
+                  annotations={scopedAnnotationsByPage[pageNumber] ?? EMPTY_ANNOTATIONS}
                   inks={inksByPage[pageNumber] ?? EMPTY_INKS}
                   inkColor={inkColor}
                   inkWidth={inkWidth}
@@ -1846,26 +1911,26 @@ export function PdfWorkspace({
           if (event.target === event.currentTarget && !readingBusy) setRecallOpen(false)
         }}>
           <div className="pdf-modal pdf-recall-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-recall-title" data-testid="pdf-recall-modal">
-            <small>{firstPass ? 'ROUGH READ · RECALL' : 'ROUGH READ · NOTE'}</small>
-            <h2 id="pdf-recall-title">你现在还记得什么？</h2>
+            <small>{firstPass ? 'ROUGH READ · MAP' : 'ROUGH READ · NOTE'}</small>
+            <h2 id="pdf-recall-title">{firstPass ? '粗读收尾：写下三句话' : '粗读时写下的三句话'}</h2>
             <p className="pdf-recall-tip">
               {firstPass
-                ? '不要翻书，用一分钟写下这部分的框架。写不出来说明粗读太快了，回去再读一遍。'
-                : '这是粗读后写下的框架感，随时回看；但它不能替代精读。'}
+                ? '不要翻书。这本书讲什么、作者怎么论证、和你有什么关系；再列 3–5 个最值得精读的章节。'
+                : '这是粗读时留下的地图与清单，精读时对照着走；读完再回来补上答案。'}
             </p>
             <textarea
               data-testid="pdf-recall-input"
               value={recallDraft}
               onChange={(event) => setRecallDraft(event.target.value)}
               rows={6}
-              placeholder="例如：第一章讲了三个机制——…"
+              placeholder={RECALL_TEMPLATE}
               disabled={readingBusy}
               autoFocus
             />
             <div className="pdf-modal-actions">
               <button type="button" onClick={() => setRecallOpen(false)} disabled={readingBusy}>稍后</button>
               <button type="button" className="is-primary" data-testid="pdf-recall-save" onClick={() => void submitRecall()} disabled={readingBusy}>
-                {readingBusy ? '保存中…' : firstPass ? '保存并进入精读' : '保存召回'}
+                {readingBusy ? '保存中…' : firstPass ? '保存并开始精读' : '保存笔记'}
               </button>
             </div>
           </div>

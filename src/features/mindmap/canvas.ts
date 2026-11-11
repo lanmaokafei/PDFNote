@@ -41,6 +41,13 @@ export function saveCanvasId(documentId: string | null | undefined, canvasId: st
   }
 }
 
+/** 粗读精读工作区专用的画布名：和本书普通画布区分开，按书名稳定复用。 */
+export function closeReadingCanvasName(title?: string | null): string {
+  const value = (title ?? '').trim()
+  const base = value ? `精读 · ${value}` : '精读 · 本书'
+  return Array.from(base).slice(0, 60).join('')
+}
+
 /** 画布下拉里显示的归属说明。 */
 export function canvasScopeLabel(documentId: string | null | undefined): string {
   return documentId ? '本书' : '全局'
@@ -52,4 +59,17 @@ export const MINDMAP_CHANGED_EVENT = 'pdfnote:mindmap-changed'
 export function notifyMindmapChanged(canvasId?: string): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent(MINDMAP_CHANGED_EVENT, { detail: { canvasId } }))
+}
+
+/**
+ * 切换画布后通知 PDF 工作区：标注要跟着画布走，
+ * 否则同一本书的两张画布会共用同一批高亮。
+ */
+export const CANVAS_CHANGED_EVENT = 'pdfnote:canvas-changed'
+
+export function notifyCanvasChanged(documentId: string | null | undefined, canvasId: string): void {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(CANVAS_CHANGED_EVENT, {
+    detail: { documentId: documentId ?? null, canvasId },
+  }))
 }

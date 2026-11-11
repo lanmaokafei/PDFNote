@@ -1,0 +1,227 @@
+.close-reading {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+  min-height: 0;
+  padding: 24px 28px 18px;
+  overflow: auto;
+}
+
+.close-reading-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.close-reading-eyebrow {
+  margin: 0 0 8px;
+  color: #7d8b76;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.8px;
+}
+
+.close-reading-head h1 {
+  margin: 0;
+  color: #29372e;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.5px;
+}
+
+.close-reading-head p:last-child {
+  margin: 8px 0 0;
+  color: #788177;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.close-reading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.close-reading-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 13px;
+  border: 1px solid #d7ddd2;
+  border-radius: 8px;
+  color: #4f5d52;
+  background: #f9faf6;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.close-reading-actions button:hover:not(:disabled) {
+  background: #edf1e8;
+}
+
+.close-reading-error {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid #edd8d4;
+  border-radius: 8px;
+  color: #994d42;
+  background: #fff5f2;
+  font-size: 12px;
+}
+
+.close-reading-method {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+  padding: 16px 18px;
+  border: 1px solid #e2e8e1;
+  border-radius: 12px;
+  background: #fbfdf9;
+}
+
+.close-reading-method h2 {
+  margin: 0;
+  color: #33443a;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.close-reading-method-note {
+  margin: 4px 0 10px;
+  color: #8a948b;
+  font-size: 11px;
+}
+
+.close-reading-method ol {
+  margin: 0;
+  padding-left: 18px;
+  color: #4c5b50;
+  font-size: 12px;
+  line-height: 1.9;
+}
+
+.close-reading-principle {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px dashed #e2e8e1;
+  color: #6d7a6e;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.close-reading-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.close-reading-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #e3e8e1;
+  border-radius: 11px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.close-reading-list button:hover:not(:disabled) {
+  border-color: #c9d7c6;
+  background: #f8fbf5;
+}
+
+.close-reading-book {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.close-reading-book strong {
+  overflow: hidden;
+  color: #33443a;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.close-reading-book small {
+  color: #94a094;
+  font-size: 11px;
+}
+
+.close-reading-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 220px;
+  color: #87927f;
+  font-size: 12px;
+  text-align: center;
+}
+
+.close-reading-empty span {
+  width: 26px;
+  height: 26px;
+  border: 2px solid #dce4d8;
+  border-top-color: #7f9a7a;
+  border-radius: 50%;
+  animation: close-reading-spin 0.9s linear infinite;
+}
+
+@keyframes close-reading-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 学习区占满剩余高度：PDF 与脑图各自滚动，不把整页撑高。 */
+.close-reading-study {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #e2e8e1;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.close-reading-docbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #eef2ec;
+  background: #fafcf7;
+}
+
+.close-reading-docbar strong {
+  color: #35453b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.close-reading-docbar span {
+  color: #93a08f;
+  font-size: 11px;
+}
+
+.close-reading-study .study-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+}

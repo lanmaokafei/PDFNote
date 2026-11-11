@@ -2008,6 +2008,33 @@ if (process.env.STEP === 'closereading') {
   const pass = await page.getAttribute('[data-pass-bar]', 'data-pass')
   if (pass !== '1') problems.push(`新入口默认不是粗读：${pass}`)
 
+  // 精读阶段才有「按目录建骨架」；mini.pdf 没有内置目录时要老实报错，不造节点。
+  await page.locator('[data-testid="pdf-pass-chip"]').click()
+  await page.waitForTimeout(700)
+  await page.waitForSelector('[data-testid="toc-skeleton"]', { timeout: 5000 })
+  await page.locator('[data-testid="toc-skeleton"]').click()
+  await page.waitForTimeout(800)
+  const toc = await page.evaluate(() => ({
+    message: document.querySelector('.pdf-operation-bar')?.textContent ?? '',
+    nodes: document.querySelectorAll('.mindmap-node').length,
+    cardCount: Object.keys(window.__cardState ?? {}).length,
+  }))
+  if (!toc.message.includes('没有可用的内置目录')) problems.push(`无目录时没有说明：${toc.message}`)
+
+  // 在粗读精读里点页码（脑图卡片的来源跳转）不能跳回资料库工作区、也不能换画布。
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent('pdfnote:open-source', { detail: { documentId: 'doc1', page: 1 } }))
+  })
+  await page.waitForTimeout(900)
+  const afterJump = await page.evaluate(() => ({
+    closereading: document.querySelectorAll('.close-reading-study').length,
+    docbar: document.querySelector('.close-reading-docbar')?.textContent ?? '',
+    documentSegmentActive: document.querySelector('.app-segment.is-document')?.getAttribute('aria-selected') ?? '',
+  }))
+  if (afterJump.closereading !== 1) problems.push('点页码后离开了粗读精读工作区')
+  if (!afterJump.docbar.includes('专属画布')) problems.push('点页码后画布说明丢了')
+  if (afterJump.documentSegmentActive === 'true') problems.push('点页码后切到了文档工作区')
+
   // 回到资料库打开同一本书：原有标注必须还在（画布过滤没有误伤）。
   await page.locator('.app-segment').filter({ hasText: '资料库' }).first().click()
   await page.waitForSelector('.document-card', { timeout: 10000 })
@@ -2018,7 +2045,7 @@ if (process.env.STEP === 'closereading') {
   if (normal < 1) problems.push(`回到资料库后原有标注丢了：${normal}`)
 
   await browser.close()
-  console.log(JSON.stringify({ problems, step: 'closereading', books, entered, normal }, null, 2))
+  console.log(JSON.stringify({ problems, step: 'closereading', books, entered, toc, afterJump, normal }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

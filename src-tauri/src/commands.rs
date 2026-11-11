@@ -436,6 +436,33 @@ pub fn export_markdown(path: String, content: String) -> Result<(), String> {
     std::fs::write(&target, content).map_err(|error| format!("写入 Markdown 失败: {error}"))
 }
 
+/// 导出 OPML 到用户选择的路径（MindManager / 幕布可直接导入做分层背诵）。
+#[tauri::command(async)]
+pub fn export_opml(path: String, content: String) -> Result<(), String> {
+    if content.trim().is_empty() {
+        return Err("导出内容为空".into());
+    }
+    let target = std::path::PathBuf::from(path.trim());
+    if target.as_os_str().is_empty() {
+        return Err("导出路径为空".into());
+    }
+    let opml_extension = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("opml"))
+        .unwrap_or(false);
+    if !opml_extension {
+        return Err("导出文件必须使用 .opml 扩展名".into());
+    }
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("无法创建导出目录: {error}"))?;
+        }
+    }
+    std::fs::write(&target, content).map_err(|error| format!("写入 OPML 失败: {error}"))
+}
+
 #[tauri::command]
 pub fn set_card_tags(
     state: State<'_, AppState>,
@@ -787,6 +814,14 @@ pub fn set_reading_pass(
     input: reading::SetReadingPassInput,
 ) -> Result<reading::ReadingState, String> {
     reading::set_reading_pass(&state, &input.document_id, input.pass)
+}
+
+#[tauri::command]
+pub fn save_toc_json(
+    state: State<'_, AppState>,
+    input: reading::SaveTocJsonInput,
+) -> Result<reading::ReadingState, String> {
+    reading::save_toc_json(&state, &input.document_id, &input.toc_json)
 }
 
 #[tauri::command]

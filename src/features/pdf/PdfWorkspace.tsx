@@ -34,6 +34,7 @@ import {
   getReadingState,
   removeAnnotation,
   saveRecallNote,
+  saveTocJson,
   setCardTags,
   updateAnnotationGeometry,
   updateCardContent,
@@ -74,6 +75,7 @@ import { TitleLinkPopover } from './TitleLinkPopover'
 import { SizeControl } from '../ink/SizeControl'
 import { readSizePreference, saveSizePreference } from '../ink/size'
 import { ClozePanel } from './ClozePanel'
+import { assignSkeletonParents, parentIdForPage, readPdfOutline } from './pdfOutline'
 import {
   bumpClozeTurn,
   buildCloze,
@@ -125,6 +127,13 @@ export interface PdfWorkspaceProps {
    * 不传则跟随本书当前画布（并随画布切换事件更新）。
    */
   canvasId?: string
+}
+
+interface TocSkeletonEntry {
+  cardId: string
+  page: number
+  title: string
+  level: number
 }
 
 const RECALL_TEMPLATE = `【主旨】
@@ -201,6 +210,9 @@ export function PdfWorkspace({
   const [recallOpen, setRecallOpen] = useState(false)
   const [recallDraft, setRecallDraft] = useState('')
   const [readingBusy, setReadingBusy] = useState(false)
+  // 目录骨架：按画布记一份（cardId + 页码 + 层级），用于「新卡自动挂最近小节」。
+  const [tocMap, setTocMap] = useState<Record<string, TocSkeletonEntry[]>>({})
+  const [tocBuilding, setTocBuilding] = useState(false)
   // 挖空填空：在「整块遮挡」和「揭示」之间多一层，先补关键词再评分。
   const [clozeEnabled, setClozeEnabled] = useState(readClozePreference)
   const [clozeAnswers, setClozeAnswers] = useState<Record<string, string[]>>({})
@@ -251,11 +263,17 @@ export function PdfWorkspace({
   // 打开文档时读阶段与召回；读不到就按粗读处理，不打断文档加载。
   useEffect(() => {
     let active = true
+    setTocMap({})
     getReadingState(document.id)
       .then((state) => {
         if (!active) return
         setReadingPassState(state.pass === 2 ? 2 : 1)
         setRecallNote(state.recallNote)
+        try {
+          setTocMap(state.tocJson ? JSON.parse(state.tocJson) : {})
+        } catch {
+          setTocMap({})
+        }
       })
       .catch(() => undefined)
     return () => {
@@ -1049,10 +1067,13 @@ export function PdfWorkspace({
     try {
       // 从 PDF 划重点建卡时写入读者当前选中的画布，而不是永远塞进 main。
       const targetCanvasId = activeCanvasId
+      // 精读时点过「按目录建骨架」：新卡挂到当前页所属的最近小节下，脑图自己长结构。
+      const tocParent = parentIdForPage(tocMap[targetCanvasId] ?? [], page.pageNumber)
       // 落点 = 右栏画布此刻的视口中心：用户不用再缩小去找新卡。
       const insertPoint = nextMindmapInsertPoint()
       const card = await createCard({
         canvas_id: targetCanvasId,
+        parent_id: tocParent,
         ...(insertPoint ?? {}),
         source_ref: { document_id: document.id, page: page.pageNumber, bbox: rect },
         excerpt: finalExcerpt,
@@ -1105,7 +1126,7 @@ export function PdfWorkspace({
     } finally {
       setCreating(false)
     }
-  }, [activeCanvasId, aiReady, aiTimeoutSecs, createCard, creating, document.id, invalidateAnnotations, recallMode, tool])
+  }, [activeCanvasId, aiReady, aiTimeoutSecs, createCard, creating, document.id, invalidateAnnotations, recallMode, tocMap, tool])
 
   const handleMove = useCallback((annotation: Annotation, geometry: AnnotationGeometry, bbox: NormalizedBBox) => {
     const requestId = (moveRequestsRef.current.get(annotation.id) ?? 0) + 1
@@ -1350,6 +1371,54 @@ export function PdfWorkspace({
     }
   }
 
+  /** 按 PDF 内置目录建骨架：一层层建卡（父先于子），并把映射存进 document_readings。 */
+  const buildTocSkeleton = async () => {
+    if (!pdf || tocBuilding) return
+    const existing = tocMap[activeCanvasId] ?? []
+    if (existing.length > 0) {
+      setNotice('这张画布已经建过目录骨架；要重建请先在脑图里清空卡片。')
+      return
+    }
+    setTocBuilding(true)
+    setOperationError('')
+    try {
+      const entries = await readPdfOutline(pdf, { maxDepth: 2, maxEntries: 120 })
+      if (entries.length === 0) {
+        setOperationError('这个 PDF 没有可用的内置目录；可以先用「AI 拆书」，或手动建一层标题。')
+        return
+      }
+      const nodes = assignSkeletonParents(entries)
+      const createdIds: string[] = []
+      const saved: TocSkeletonEntry[] = []
+      for (const node of nodes) {
+        const card = await createCard({
+          canvas_id: activeCanvasId,
+          question: node.title,
+          parent_id: node.parentIndex === null ? undefined : createdIds[node.parentIndex],
+          sort_order: saved.length,
+          x: node.level * 340,
+          y: saved.length * 120,
+          source_ref: {
+            document_id: document.id,
+            page: node.page,
+            bbox: { x: 0.08, y: 0.08, width: 0.04, height: 0.02 },
+          },
+        })
+        createdIds.push(card.id)
+        saved.push({ cardId: card.id, page: node.page, title: node.title, level: node.level })
+      }
+      const nextMap = { ...tocMap, [activeCanvasId]: saved }
+      setTocMap(nextMap)
+      await saveTocJson(document.id, JSON.stringify(nextMap))
+      notifyMindmapChanged(activeCanvasId)
+      setNotice(`已按目录建了 ${saved.length} 个骨架节点；之后新建的卡片会自动挂到最近的小节。`)
+    } catch (reason) {
+      setOperationError(`按目录建骨架失败：${errorMessage(reason)}`)
+    } finally {
+      setTocBuilding(false)
+    }
+  }
+
   const handleRating = async (rating: Rating) => {
     if (!selectedAnnotation || !selectedCard || ratingBusy || ratedCardIds.has(selectedCard.id) || !sessionId) return
     setRatingBusy(true)
@@ -1412,9 +1481,14 @@ export function PdfWorkspace({
           </button>
         </>
       ) : (
-        <button type="button" className="pdf-pass-action" data-testid="pdf-pass-note" onClick={openRecall} disabled={readingBusy}>
-          {recallNote ? '看粗读笔记' : '补写三句话'}
-        </button>
+        <>
+          <button type="button" className="pdf-pass-action" data-testid="toc-skeleton" onClick={() => void buildTocSkeleton()} disabled={!pdf || tocBuilding}>
+            {tocBuilding ? '正在建…' : (tocMap[activeCanvasId]?.length ? '目录骨架已建' : '按目录建骨架')}
+          </button>
+          <button type="button" className="pdf-pass-action" data-testid="pdf-pass-note" onClick={openRecall} disabled={readingBusy}>
+            {recallNote ? '看粗读笔记' : '补写三句话'}
+          </button>
+        </>
       )}
     </div>
   )

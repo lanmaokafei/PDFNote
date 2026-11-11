@@ -69,6 +69,8 @@ function App() {
   const [updatePromptOpen, setUpdatePromptOpen] = useState(false)
   const [updatePromptInfo, setUpdatePromptInfo] = useState<UpdateInfo | null>(null)
   const [jumpTarget, setJumpTarget] = useState<{ documentId: string; page: number; token: number } | null>(null)
+  // 粗读精读里点页码不能跳回资料库工作区（那会连带把画布换成普通画布）。
+  const [closeJump, setCloseJump] = useState<{ documentId: string; page: number; token: number } | null>(null)
   const { menu, show, close } = useContextMenu()
   const loadCards = useCardStore((state) => state.loadCards)
   const cardsById = useCardStore((state) => state.cardsById)
@@ -92,6 +94,11 @@ function App() {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ documentId: string; page: number }>).detail
       if (!detail?.documentId || !detail.page) return
+      // 在粗读精读工作区里点页码：留在本工作区、保持专属画布，只换 PDF 的页。
+      if (view === 'closereading') {
+        setCloseJump({ ...detail, token: Date.now() })
+        return
+      }
       void (async () => {
         if (activeDocument?.id !== detail.documentId) {
           try {
@@ -108,7 +115,7 @@ function App() {
     }
     window.addEventListener('pdfnote:open-source', handler)
     return () => window.removeEventListener('pdfnote:open-source', handler)
-  }, [activeDocument?.id])
+  }, [activeDocument?.id, view])
 
   useEffect(() => {
     if (!desktop) return
@@ -353,7 +360,11 @@ function App() {
               )}
               {view === 'closereading' && (
                 <Suspense fallback={<ViewLoading label="正在准备粗读精读…" />}>
-                  <CloseReadingWorkspace onCardsChanged={() => void refreshStatus()} />
+                  <CloseReadingWorkspace
+                    jumpTarget={closeJump}
+                    onJumpHandled={() => setCloseJump(null)}
+                    onCardsChanged={() => void refreshStatus()}
+                  />
                 </Suspense>
               )}
               {view === 'backup' && (

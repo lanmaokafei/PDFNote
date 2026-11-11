@@ -90,3 +90,47 @@ export function outlineToMarkdown(forest: OutlineNode[], title = '知识脑图')
   walk(forest, 0)
   return `${lines.join('\n').trimEnd()}\n`
 }
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+/**
+ * 导出 OPML：MindManager / 幕布 / 大纲工具都能直接导入，用键盘分层展开背诵。
+ * 只保留标题与页码（_note），不塞摘录——背诵时需要的是层级，不是原文。
+ */
+export function outlineToOpml(forest: OutlineNode[], title = '知识脑图'): string {
+  const lines: string[] = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<opml version="2.0">',
+    '  <head>',
+    `    <title>${escapeXml(title)}</title>`,
+    `    <dateCreated>${new Date().toISOString()}</dateCreated>`,
+    '  </head>',
+    '  <body>',
+  ]
+
+  const walk = (nodes: OutlineNode[], depth: number) => {
+    const pad = '  '.repeat(depth + 2)
+    for (const node of nodes) {
+      const text = escapeXml(singleLine(outlineTitle(node.card)))
+      const page = node.card.source_ref ? ` _note="第 ${node.card.source_ref.page} 页"` : ''
+      if (node.children.length > 0) {
+        lines.push(`${pad}<outline text="${text}"${page}>`)
+        walk(node.children, depth + 1)
+        lines.push(`${pad}</outline>`)
+      } else {
+        lines.push(`${pad}<outline text="${text}"${page}/>`)
+      }
+    }
+  }
+
+  walk(forest, 0)
+  lines.push('  </body>', '</opml>')
+  return `${lines.join('\n')}\n`
+}

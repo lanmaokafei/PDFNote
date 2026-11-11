@@ -1,6 +1,6 @@
 [package]
 name = "pdfnote"
-version = "0.42.0"
+version = "0.43.0"
 description = "A local-first, card-centric PDF learning app"
 edition = "2021"
 rust-version = "1.77.2"

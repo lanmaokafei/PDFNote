@@ -171,6 +171,10 @@ export async function exportMarkdownFile(path: string, content: string): Promise
   desktopOnly()
   return invoke('export_markdown', { path, content })
 }
+export async function exportOpmlFile(path: string, content: string): Promise<void> {
+  desktopOnly()
+  return invoke('export_opml', { path, content })
+}
 export async function updateDocumentProgress(id: string, lastPage: number): Promise<number> {
   if (!isTauriRuntime()) return lastPage
   return invoke('update_document_progress', { id, lastPage })
@@ -327,11 +331,13 @@ export interface ReadingState {
   documentId: string
   pass: number
   recallNote: string
+  /** 目录骨架映射 JSON（按画布分组），由「按目录建骨架」写入。 */
+  tocJson: string
   updatedAt: string
 }
 
 export async function getReadingState(documentId: string): Promise<ReadingState> {
-  if (!isTauriRuntime()) return { documentId, pass: 1, recallNote: '', updatedAt: '' }
+  if (!isTauriRuntime()) return { documentId, pass: 1, recallNote: '', tocJson: '', updatedAt: '' }
   return invoke('get_reading_state', { input: { documentId } })
 }
 
@@ -343,6 +349,11 @@ export async function setReadingPass(documentId: string, pass: number): Promise<
 export async function saveRecallNote(documentId: string, note: string): Promise<ReadingState> {
   desktopOnly()
   return invoke('save_recall_note', { input: { documentId, note } })
+}
+
+export async function saveTocJson(documentId: string, tocJson: string): Promise<ReadingState> {
+  desktopOnly()
+  return invoke('save_toc_json', { input: { documentId, tocJson } })
 }
 
 export async function listNotebooks(): Promise<Notebook[]> {

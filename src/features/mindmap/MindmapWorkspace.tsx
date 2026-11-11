@@ -45,6 +45,7 @@ import {
   clearMindmapCards,
   createMindmapCanvas,
   exportMarkdownFile,
+  exportOpmlFile,
   isTauriRuntime,
   listCardLinks,
   listMindmapCanvases,
@@ -68,7 +69,7 @@ import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
 import { InkEdge } from './MindmapEdge'
-import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown } from './outline'
+import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown, outlineToOpml } from './outline'
 import {
   buildChildMap,
   collectDescendants,
@@ -1543,6 +1544,41 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     return () => window.cancelAnimationFrame(frame)
   }, [outlineEditing, outlineFocusTick])
 
+  const handleExportOpml = useCallback(async () => {
+    if (exporting) return
+    setExporting(true)
+    setError('')
+    setNotice('')
+    try {
+      const forest = buildOutlineForest(cards)
+      if (!forest.length) throw new Error('当前脑图没有可导出的卡片')
+      const opml = outlineToOpml(forest, canvasName ? `${canvasName}` : '知识脑图')
+      const filename = `知识脑图-${new Date().toISOString().slice(0, 10)}.opml`
+      if (isTauriRuntime()) {
+        const target = await saveDialog({
+          defaultPath: filename,
+          filters: [{ name: 'OPML', extensions: ['opml'] }],
+        })
+        if (!target) return
+        await exportOpmlFile(target, opml)
+        setNotice(`已导出 OPML：${target}`)
+      } else {
+        const blob = new Blob([opml], { type: 'text/x-opml;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = filename
+        link.click()
+        URL.revokeObjectURL(url)
+        setNotice('已下载 OPML 文件。')
+      }
+    } catch (reason) {
+      setError(`导出失败：${errorMessage(reason)}`)
+    } finally {
+      setExporting(false)
+    }
+  }, [cards, canvasName, exporting])
+
   const handleExportMarkdown = useCallback(async () => {
     if (exporting) return
     setExporting(true)
@@ -1667,6 +1703,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       sections.push({ id: 'workspace', title: '工作区', items: [
         { id: 'outline', label: '切换到大纲', icon: ListTree, onSelect: () => setViewMode('outline') },
         { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
+          { id: 'export-opml', label: '导出 OPML（分层背诵）', icon: Download, onSelect: () => void handleExportOpml() },
       ] })
     }
     return sections
@@ -1701,6 +1738,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
         { id: 'outline-view', title: '视图', items: [
           { id: 'canvas', label: '返回画布', icon: LayoutGrid, onSelect: () => setViewMode('canvas') },
           { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
+          { id: 'export-opml', label: '导出 OPML（分层背诵）', icon: Download, onSelect: () => void handleExportOpml() },
         ] },
       ],
     })
@@ -1722,6 +1760,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
         { id: 'view', title: '视图', items: [
           { id: 'outline', label: '切换到大纲', icon: ListTree, onSelect: () => setViewMode('outline') },
           { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
+          { id: 'export-opml', label: '导出 OPML（分层背诵）', icon: Download, onSelect: () => void handleExportOpml() },
           { id: 'recall', label: recallActive ? '结束主动回忆' : '开始主动回忆', icon: Sparkles, checked: recallActive, disabled: !recallActive && !cards.length, onSelect: recallActive ? stopRecall : startRecall },
         ] },
       ],
@@ -1735,6 +1774,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
         { id: 'canvas', label: '返回画布', icon: LayoutGrid, onSelect: () => setViewMode('canvas') },
         { id: 'new', label: '新建独立卡片', icon: Plus, disabled: busy, onSelect: () => setEditor('new') },
         { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
+          { id: 'export-opml', label: '导出 OPML（分层背诵）', icon: Download, onSelect: () => void handleExportOpml() },
       ] }],
     })
   }

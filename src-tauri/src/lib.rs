@@ -117,6 +117,8 @@ pub fn run() {
             commands::get_reading_state,
             commands::set_reading_pass,
             commands::save_recall_note,
+            commands::save_toc_json,
+            commands::export_opml,
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;

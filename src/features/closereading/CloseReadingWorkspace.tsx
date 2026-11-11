@@ -13,6 +13,9 @@ import './CloseReadingWorkspace.css'
 
 interface CloseReadingWorkspaceProps {
   onCardsChanged: () => void
+  /** 从脑图卡片点页码跳过来：留在本工作区，只换 PDF 的页。 */
+  jumpTarget?: { documentId: string; page: number; token: number } | null
+  onJumpHandled?: () => void
 }
 
 const ROUGH_STEPS = [
@@ -43,7 +46,7 @@ const CLOSE_STEPS = [
  * 这里给每本书建一张「精读 · 书名」画布，PDF 标注按画布过滤，
  * 所以进来看到的是一块新桌面，不会把资料库里的原有标记混进来。
  */
-export function CloseReadingWorkspace({ onCardsChanged }: CloseReadingWorkspaceProps) {
+export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandled }: CloseReadingWorkspaceProps) {
   const [documents, setDocuments] = useState<Document[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -51,6 +54,7 @@ export function CloseReadingWorkspace({ onCardsChanged }: CloseReadingWorkspaceP
   const [canvasId, setCanvasId] = useState<string | null>(null)
   const [preparing, setPreparing] = useState(false)
   const [methodOpen, setMethodOpen] = useState(false)
+  const [jump, setJump] = useState<{ documentId: string; page: number; token: number } | null>(null)
 
   useEffect(() => {
     let active = true
@@ -83,12 +87,39 @@ export function CloseReadingWorkspace({ onCardsChanged }: CloseReadingWorkspaceP
       setCanvasId(canvas.id)
       setSelected(document)
       setMethodOpen(false)
+      setJump(null)
     } catch (reason) {
       setError(`无法准备这本书的精读画布：${reason instanceof Error ? reason.message : String(reason)}`)
     } finally {
       setPreparing(false)
     }
   }
+
+  // 外部请求跳页：同一本书就直接交给 StudyWorkspace，换了书先切过去。
+  useEffect(() => {
+    if (!jumpTarget) return
+    let cancelled = false
+    void (async () => {
+      try {
+        if (selected?.id !== jumpTarget.documentId) {
+          const target = documents.find((item) => item.id === jumpTarget.documentId)
+            ?? (await listDocuments()).find((item) => item.id === jumpTarget.documentId)
+          if (!target || cancelled) return
+          await openDocument(target)
+          if (cancelled) return
+        }
+        setJump(jumpTarget)
+        onJumpHandled?.()
+      } catch {
+        onJumpHandled?.()
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // jumpTarget.token 保证同页重复点击也能触发。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpTarget?.token])
 
   const handlePageCount = async (count: number) => {
     if (!selected || selected.page_count === count) return
@@ -162,6 +193,8 @@ export function CloseReadingWorkspace({ onCardsChanged }: CloseReadingWorkspaceP
             document={selected}
             showMindmap
             canvasId={canvasId}
+            jumpTarget={jump}
+            onJumpHandled={() => setJump(null)}
             onPageCount={(count) => void handlePageCount(count)}
             onCardsChanged={onCardsChanged}
           />

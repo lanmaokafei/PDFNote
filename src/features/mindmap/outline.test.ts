@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Card } from '../../domain/card'
-import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown } from './outline'
+import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown, outlineToOpml, type OutlineNode } from './outline'
 
 const base = {
   source_ref: null,
@@ -80,5 +80,48 @@ describe('outline', () => {
     expect(outlineTitle(card({ id: 'x', question: '  ' }))).toBe('未命名卡片')
     expect(outlineTitle(card({ id: 'x', excerpt: '摘录' }))).toBe('摘录')
     expect(outlineTitle(card({ id: 'x', user_note: '笔记' }))).toBe('笔记')
+  })
+})
+
+describe('OPML 导出', () => {
+  const card = (id: string, question: string, page?: number, children: OutlineNode[] = []): OutlineNode => ({
+    card: {
+      id,
+      question,
+      excerpt: '',
+      user_note: '',
+      source_ref: page ? { document_id: 'doc1', page, bbox: { x: 0, y: 0, width: 0.1, height: 0.1 } } : null,
+      parent_id: null,
+      sort_order: 0,
+    } as never,
+    depth: 0,
+    children,
+  })
+
+  it('层级关系变成嵌套 outline，页码写进 _note', () => {
+    const forest = [
+      card('a', '第一章', 1, [card('b', '1.1 背景', 3)]),
+      card('c', '第二章', 20),
+    ]
+    const opml = outlineToOpml(forest, '测试书')
+    expect(opml).toContain('<title>测试书</title>')
+    expect(opml).toContain('<outline text="第一章" _note="第 1 页">')
+    expect(opml).toContain('<outline text="1.1 背景" _note="第 3 页"/>')
+    expect(opml).toContain('<outline text="第二章" _note="第 20 页"/>')
+    // 第二章必须是独立的 <outline>，不能落进第一章里
+    expect(opml.indexOf('</outline>\n    <outline text="第二章"')).toBeGreaterThan(0)
+  })
+
+  it('XML 特殊字符被转义，导出的文件不会破坏结构', () => {
+    const opml = outlineToOpml([card('a', 'A & B <c> "d"')])
+    expect(opml).toContain('A &amp; B &lt;c&gt; &quot;d&quot;')
+    expect(opml).not.toContain('text="A & B')
+  })
+
+  it('空脑图也给合法 OPML（只有 head/body）', () => {
+    const opml = outlineToOpml([])
+    expect(opml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true)
+    expect(opml).toContain('<body>')
+    expect(opml).toContain('</opml>')
   })
 })

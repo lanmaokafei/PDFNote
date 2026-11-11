@@ -13,10 +13,12 @@ pub struct ReadingState {
     pub document_id: String,
     pub pass: u32,
     pub recall_note: String,
+    /// 目录骨架映射：{"canvasId":[{cardId,page,title,level}]}，由「按目录建骨架」写入。
+    pub toc_json: String,
     pub updated_at: String,
 }
 
-const COLUMNS: &str = "document_id, pass, recall_note, updated_at";
+const COLUMNS: &str = "document_id, pass, recall_note, toc_json, updated_at";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,12 +40,20 @@ pub struct SaveRecallNoteInput {
     pub note: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveTocJsonInput {
+    pub document_id: String,
+    pub toc_json: String,
+}
+
 fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReadingState> {
     Ok(ReadingState {
         document_id: row.get(0)?,
         pass: row.get::<_, i64>(1)?.clamp(1, 2) as u32,
         recall_note: row.get(2)?,
-        updated_at: row.get(3)?,
+        toc_json: row.get(3)?,
+        updated_at: row.get(4)?,
     })
 }
 
@@ -84,6 +94,7 @@ pub fn get_reading_state(state: &AppState, document_id: &str) -> Result<ReadingS
         document_id: document_id.to_string(),
         pass: 1,
         recall_note: String::new(),
+        toc_json: String::new(),
         updated_at: String::new(),
     })
 }
@@ -101,6 +112,25 @@ pub fn set_reading_pass(state: &AppState, document_id: &str, pass: u32) -> Resul
              VALUES (?1, ?2, '', ?3, ?3)
              ON CONFLICT(document_id) DO UPDATE SET pass = excluded.pass, updated_at = excluded.updated_at",
             params![document_id, pass, timestamp],
+        )
+        .map_err(|error| error.to_string())?;
+    read_row(&database, document_id)?.ok_or_else(|| "reading state missing after write".into())
+}
+
+/** 目录骨架映射：一本书一份 JSON（按画布分组），只做「最近小节」查询，不进 cards 表。 */
+pub fn save_toc_json(state: &AppState, document_id: &str, toc_json: &str) -> Result<ReadingState, String> {
+    if toc_json.chars().count() > 200_000 {
+        return Err("toc map is too large".into());
+    }
+    let database = state.db()?;
+    ensure_document(&database, document_id)?;
+    let timestamp = now();
+    database
+        .execute(
+            "INSERT INTO document_readings (document_id, pass, recall_note, toc_json, created_at, updated_at)
+             VALUES (?1, 1, '', ?2, ?3, ?3)
+             ON CONFLICT(document_id) DO UPDATE SET toc_json = excluded.toc_json, updated_at = excluded.updated_at",
+            params![document_id, toc_json.trim(), timestamp],
         )
         .map_err(|error| error.to_string())?;
     read_row(&database, document_id)?.ok_or_else(|| "reading state missing after write".into())
@@ -186,6 +216,19 @@ mod tests {
         let stored = get_reading_state(&state, "doc1").unwrap();
         assert_eq!(stored.pass, 2);
         assert_eq!(stored.recall_note, "第一章讲了三个机制");
+    }
+
+    #[test]
+    fn toc_map_is_persisted_without_touching_stage_or_note() {
+        let state = state();
+        seed_document(&state, "doc1");
+        set_reading_pass(&state, "doc1", 2).unwrap();
+        save_recall_note(&state, "doc1", "三句话").unwrap();
+        let saved = save_toc_json(&state, "doc1", r#"{"canvas-1":[{"cardId":"c1","page":3}]}"#).unwrap();
+        assert_eq!(saved.pass, 2, "写目录不应该改阶段");
+        assert_eq!(saved.recall_note, "三句话", "写目录不应该清空笔记");
+        assert!(saved.toc_json.contains("canvas-1"));
+        assert!(save_toc_json(&state, "doc1", &"x".repeat(200_001)).is_err());
     }
 
     #[test]

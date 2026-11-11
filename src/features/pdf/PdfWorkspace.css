@@ -1696,3 +1696,8 @@
   border-color: #b8cbb4;
   outline: 2px solid rgba(79, 127, 92, .16);
 }
+
+/* 精读阶段有两个按钮（建骨架 / 看笔记），第二个不要也顶到最右。 */
+.pdf-pass-action + .pdf-pass-action {
+  margin-left: 0;
+}

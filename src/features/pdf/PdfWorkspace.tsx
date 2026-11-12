@@ -75,7 +75,8 @@ import { TitleLinkPopover } from './TitleLinkPopover'
 import { SizeControl } from '../ink/SizeControl'
 import { readSizePreference, saveSizePreference } from '../ink/size'
 import { ClozePanel } from './ClozePanel'
-import { assignSkeletonParents, parentIdForPage, readPdfOutline } from './pdfOutline'
+import { assignSkeletonParents, parentIdForPage, readPdfOutline, type TocEntry } from './pdfOutline'
+import { parseTocText } from './tocText'
 import {
   bumpClozeTurn,
   buildCloze,
@@ -213,6 +214,9 @@ export function PdfWorkspace({
   // 目录骨架：按画布记一份（cardId + 页码 + 层级），用于「新卡自动挂最近小节」。
   const [tocMap, setTocMap] = useState<Record<string, TocSkeletonEntry[]>>({})
   const [tocBuilding, setTocBuilding] = useState(false)
+  // 没有内置书签的扫描书：把目录页复制进来，走同一套建骨架 + 自动挂接。
+  const [tocPasteOpen, setTocPasteOpen] = useState(false)
+  const [tocPasteDraft, setTocPasteDraft] = useState('')
   // 挖空填空：在「整块遮挡」和「揭示」之间多一层，先补关键词再评分。
   const [clozeEnabled, setClozeEnabled] = useState(readClozePreference)
   const [clozeAnswers, setClozeAnswers] = useState<Record<string, string[]>>({})
@@ -1371,11 +1375,38 @@ export function PdfWorkspace({
     }
   }
 
-  /** 按 PDF 内置目录建骨架：一层层建卡（父先于子），并把映射存进 document_readings。 */
+  /** 把一批目录条目建成骨架卡片：父先子后，写完映射就通知脑图刷新。 */
+  const createSkeleton = async (entries: TocEntry[]) => {
+    const nodes = assignSkeletonParents(entries)
+    const createdIds: string[] = []
+    const saved: TocSkeletonEntry[] = []
+    for (const node of nodes) {
+      const card = await createCard({
+        canvas_id: activeCanvasId,
+        question: node.title,
+        parent_id: node.parentIndex === null ? undefined : createdIds[node.parentIndex],
+        sort_order: saved.length,
+        // 不给 x/y：留 (0,0) 占位，让脑图工作区跑 buildTreeLayout 排成正常的左右树。
+        source_ref: {
+          document_id: document.id,
+          page: node.page,
+          bbox: { x: 0.08, y: 0.08, width: 0.04, height: 0.02 },
+        },
+      })
+      createdIds.push(card.id)
+      saved.push({ cardId: card.id, page: node.page, title: node.title, level: node.level })
+    }
+    const nextMap = { ...tocMap, [activeCanvasId]: saved }
+    setTocMap(nextMap)
+    await saveTocJson(document.id, JSON.stringify(nextMap))
+    notifyMindmapChanged(activeCanvasId)
+    setNotice(`已按目录建了 ${saved.length} 个骨架节点；之后新建的卡片会自动挂到最近的小节。`)
+  }
+
+  /** 按 PDF 内置书签建骨架；没有书签就转到「粘贴目录」，不硬造节点。 */
   const buildTocSkeleton = async () => {
     if (!pdf || tocBuilding) return
-    const existing = tocMap[activeCanvasId] ?? []
-    if (existing.length > 0) {
+    if ((tocMap[activeCanvasId] ?? []).length > 0) {
       setNotice('这张画布已经建过目录骨架；要重建请先在脑图里清空卡片。')
       return
     }
@@ -1384,34 +1415,37 @@ export function PdfWorkspace({
     try {
       const entries = await readPdfOutline(pdf, { maxDepth: 2, maxEntries: 120 })
       if (entries.length === 0) {
-        setOperationError('这个 PDF 没有可用的内置目录；可以先用「AI 拆书」，或手动建一层标题。')
+        setTocPasteOpen(true)
+        setOperationError('这个 PDF 没有内置书签；把目录复制粘贴进来，一样能建骨架。')
         return
       }
-      const nodes = assignSkeletonParents(entries)
-      const createdIds: string[] = []
-      const saved: TocSkeletonEntry[] = []
-      for (const node of nodes) {
-        const card = await createCard({
-          canvas_id: activeCanvasId,
-          question: node.title,
-          parent_id: node.parentIndex === null ? undefined : createdIds[node.parentIndex],
-          sort_order: saved.length,
-          x: node.level * 340,
-          y: saved.length * 120,
-          source_ref: {
-            document_id: document.id,
-            page: node.page,
-            bbox: { x: 0.08, y: 0.08, width: 0.04, height: 0.02 },
-          },
-        })
-        createdIds.push(card.id)
-        saved.push({ cardId: card.id, page: node.page, title: node.title, level: node.level })
-      }
-      const nextMap = { ...tocMap, [activeCanvasId]: saved }
-      setTocMap(nextMap)
-      await saveTocJson(document.id, JSON.stringify(nextMap))
-      notifyMindmapChanged(activeCanvasId)
-      setNotice(`已按目录建了 ${saved.length} 个骨架节点；之后新建的卡片会自动挂到最近的小节。`)
+      await createSkeleton(entries)
+    } catch (reason) {
+      setOperationError(`按目录建骨架失败：${errorMessage(reason)}`)
+    } finally {
+      setTocBuilding(false)
+    }
+  }
+
+  /** 粘贴目录：解析成条目后走同一条建骨架路径。 */
+  const buildTocFromPaste = async () => {
+    if (tocBuilding) return
+    const { entries } = parseTocText(tocPasteDraft, { maxEntries: 200 })
+    if (entries.length === 0) {
+      setOperationError('没认出目录：一行一条，标题和页码之间用点线、Tab 或空格分隔。')
+      return
+    }
+    if ((tocMap[activeCanvasId] ?? []).length > 0) {
+      setTocPasteOpen(false)
+      setNotice('这张画布已经建过目录骨架；要重建请先在脑图里清空卡片。')
+      return
+    }
+    setTocBuilding(true)
+    setOperationError('')
+    try {
+      setTocPasteOpen(false)
+      await createSkeleton(entries)
+      setTocPasteDraft('')
     } catch (reason) {
       setOperationError(`按目录建骨架失败：${errorMessage(reason)}`)
     } finally {
@@ -1459,6 +1493,13 @@ export function PdfWorkspace({
   const largeDocument = document.file_size > 200 * 1024 * 1024
   const loadingMessage = document.file_status === 'importing' ? '文档正在导入，请稍候…' : largeDocument ? '正在按需读取大型 PDF…' : '正在打开 PDF 文档…'
 
+  /** 粘贴框的实时预览：认不出页码的行要当场告诉用户，而不是建完才发现少了几条。 */
+  const tocPastePreview = useMemo(() => parseTocText(tocPasteDraft, { maxEntries: 200 }), [tocPasteDraft])
+  const tocPasteLevels = useMemo(() => {
+    const root = tocPastePreview.entries.filter((entry) => entry.level === 0).length
+    return { root, child: tocPastePreview.entries.length - root }
+  }, [tocPastePreview])
+
   /** 阶段条：非嵌入模式贴在工具栏下方，嵌入模式浮在 PDF 左上角。 */
   const passBar = (
     <div className={`pdf-pass-bar${embedded ? ' is-floating' : ''}`} data-pass-bar data-pass={readingPass}>
@@ -1484,6 +1525,19 @@ export function PdfWorkspace({
         <>
           <button type="button" className="pdf-pass-action" data-testid="toc-skeleton" onClick={() => void buildTocSkeleton()} disabled={!pdf || tocBuilding}>
             {tocBuilding ? '正在建…' : (tocMap[activeCanvasId]?.length ? '目录骨架已建' : '按目录建骨架')}
+          </button>
+          <button
+            type="button"
+            className="pdf-pass-action"
+            data-testid="toc-paste-open"
+            onClick={() => {
+              setOperationError('')
+              setTocPasteOpen(true)
+            }}
+            disabled={!pdf || tocBuilding}
+            title="没有书签的扫描书：把目录页的文字复制进来"
+          >
+            粘贴目录
           </button>
           <button type="button" className="pdf-pass-action" data-testid="pdf-pass-note" onClick={openRecall} disabled={readingBusy}>
             {recallNote ? '看粗读笔记' : '补写三句话'}
@@ -1978,6 +2032,55 @@ export function PdfWorkspace({
             void loadCards()
           }}
         />
+      )}
+
+      {tocPasteOpen && (
+        <div className="pdf-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !tocBuilding) setTocPasteOpen(false)
+        }}>
+          <div className="pdf-modal pdf-toc-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-toc-title" data-testid="toc-paste-modal">
+            <small>CLOSE READING · SKELETON</small>
+            <h2 id="pdf-toc-title">粘贴目录建骨架</h2>
+            <p className="pdf-recall-tip">
+              从目录页或出版社网站复制过来，一行一条；标题和页码之间用点线、Tab 或空格分开都行。
+              只建前两级、最多 200 条，认不出页码的行会列在下面。
+            </p>
+            <textarea
+              data-testid="toc-paste-input"
+              value={tocPasteDraft}
+              onChange={(event) => setTocPasteDraft(event.target.value)}
+              rows={10}
+              placeholder={'第一章 绪论 ........ 1\n1.1 研究背景 ........ 3\n1.2 研究问题 ........ 6'}
+              disabled={tocBuilding}
+              autoFocus
+            />
+            <p className="pdf-toc-preview" data-testid="toc-paste-preview">
+              {tocPasteDraft.trim()
+                ? `识别到 ${tocPastePreview.entries.length} 条（一级 ${tocPasteLevels.root} / 二级 ${tocPasteLevels.child}）${tocPastePreview.skipped.length ? `，${tocPastePreview.skipped.length} 行没认出页码` : ''}`
+                : '把目录粘进来，这里会显示识别结果。'}
+            </p>
+            {tocPastePreview.skipped.length > 0 && (
+              <ul className="pdf-toc-skipped" data-testid="toc-paste-skipped">
+                {tocPastePreview.skipped.slice(0, 4).map((line, index) => (
+                  <li key={`${index}-${line.slice(0, 8)}`}>{line}</li>
+                ))}
+                {tocPastePreview.skipped.length > 4 && <li>…还有 {tocPastePreview.skipped.length - 4} 行</li>}
+              </ul>
+            )}
+            <div className="pdf-modal-actions">
+              <button type="button" onClick={() => setTocPasteOpen(false)} disabled={tocBuilding}>取消</button>
+              <button
+                type="button"
+                className="is-primary"
+                data-testid="toc-paste-build"
+                onClick={() => void buildTocFromPaste()}
+                disabled={tocBuilding || tocPastePreview.entries.length === 0}
+              >
+                {tocBuilding ? '正在建…' : `建 ${tocPastePreview.entries.length} 个骨架`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {recallOpen && (

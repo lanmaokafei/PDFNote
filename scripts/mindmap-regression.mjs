@@ -470,6 +470,11 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       storeReading()
       return readingState
     },
+    save_toc_json: (args) => {
+      readingState = { ...readingState, tocJson: args?.input?.tocJson ?? '', updatedAt: new Date().toISOString() }
+      storeReading()
+      return readingState
+    },
     list_annotations: () => [
       {
         id: 'ann-1',
@@ -2008,7 +2013,7 @@ if (process.env.STEP === 'closereading') {
   const pass = await page.getAttribute('[data-pass-bar]', 'data-pass')
   if (pass !== '1') problems.push(`新入口默认不是粗读：${pass}`)
 
-  // 精读阶段才有「按目录建骨架」；mini.pdf 没有内置目录时要老实报错，不造节点。
+  // 精读阶段才有「按目录建骨架」；mini.pdf 没有内置书签时要老实说明，并转去粘贴目录。
   await page.locator('[data-testid="pdf-pass-chip"]').click()
   await page.waitForTimeout(700)
   await page.waitForSelector('[data-testid="toc-skeleton"]', { timeout: 5000 })
@@ -2016,10 +2021,15 @@ if (process.env.STEP === 'closereading') {
   await page.waitForTimeout(800)
   const toc = await page.evaluate(() => ({
     message: document.querySelector('.pdf-operation-bar')?.textContent ?? '',
+    modal: document.querySelectorAll('[data-testid="toc-paste-modal"]').length,
     nodes: document.querySelectorAll('.mindmap-node').length,
     cardCount: Object.keys(window.__cardState ?? {}).length,
   }))
-  if (!toc.message.includes('没有可用的内置目录')) problems.push(`无目录时没有说明：${toc.message}`)
+  if (!toc.message.includes('没有内置书签')) problems.push(`无书签时没有说明：${toc.message}`)
+  if (toc.modal !== 1) problems.push('无书签时没有转到粘贴目录')
+  if (toc.cardCount !== 3) problems.push(`无书签时不该造节点：${toc.cardCount}`)
+  await page.locator('[data-testid="toc-paste-modal"] button', { hasText: '取消' }).click()
+  await page.waitForTimeout(300)
 
   // 在粗读精读里点页码（脑图卡片的来源跳转）不能跳回资料库工作区、也不能换画布。
   await page.evaluate(() => {
@@ -2046,6 +2056,88 @@ if (process.env.STEP === 'closereading') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'closereading', books, entered, toc, afterJump, normal }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=toc-text：粘贴目录文本建骨架（扫描书没有内置书签的兜底路径）。
+if (process.env.STEP === 'toc-text') {
+  await page.locator('.app-segment').filter({ hasText: '粗读精读' }).first().click()
+  await page.waitForSelector('.close-reading-list', { timeout: 10000 })
+  await page.locator('.close-reading-list button').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+
+  await page.locator('[data-testid="pdf-pass-chip"]').click()
+  await page.waitForTimeout(700)
+  await page.locator('[data-testid="toc-paste-open"]').click()
+  await page.waitForSelector('[data-testid="toc-paste-modal"]', { timeout: 5000 })
+
+  const tocText = [
+    '目 录',
+    '第一章 绪论 ........ 1',
+    '1.1 研究背景 ........ 3',
+    '1.2 研究问题 ........ 6',
+    '第二章 方法 20',
+    '这是一段说明文字',
+  ].join('\n')
+  await page.locator('[data-testid="toc-paste-input"]').fill(tocText)
+  await page.waitForTimeout(250)
+  const preview = await page.locator('[data-testid="toc-paste-preview"]').textContent()
+  const skippedText = await page.locator('[data-testid="toc-paste-skipped"]').textContent()
+  if (!preview.includes('识别到 4 条')) problems.push(`预览条数不对：${preview}`)
+  if (!preview.includes('一级 2 / 二级 2')) problems.push(`预览层级不对：${preview}`)
+  if (!preview.includes('1 行没认出页码')) problems.push(`预览没有提示没认出的行：${preview}`)
+  if (!skippedText.includes('这是一段说明文字')) problems.push(`没把认不出的行列出来：${skippedText}`)
+
+  await page.locator('[data-testid="toc-paste-build"]').click()
+  await page.waitForTimeout(1600)
+
+  const built = await page.evaluate(() => ({
+    cards: (window.__cardState ?? []).map((card) => ({
+      id: card.id,
+      question: card.question,
+      parent: card.parent_id ?? null,
+      page: card.source_ref?.page ?? null,
+      canvas: card.canvas_id ?? null,
+    })),
+    nodes: document.querySelectorAll('.mindmap-node').length,
+    notice: document.querySelector('.pdf-operation-bar')?.textContent ?? '',
+    toc: window.__readingState?.()?.tocJson ?? '',
+  }))
+  const skeleton = built.cards.filter((card) => card.page !== null && card.id.startsWith('new-card-'))
+  if (skeleton.length !== 4) problems.push(`骨架节点数量不对：${skeleton.length}`)
+  const [ch1, s11, s12, ch2] = skeleton
+  if (!ch1 || ch1.question !== '第一章 绪论' || ch1.page !== 1) problems.push(`第一章没建对：${JSON.stringify(ch1)}`)
+  if (!s11 || s11.parent !== ch1?.id) problems.push(`1.1 没有挂到第一章：${JSON.stringify(s11)}`)
+  if (!s12 || s12.parent !== ch1?.id) problems.push(`1.2 没有挂到第一章：${JSON.stringify(s12)}`)
+  if (!ch2 || ch2.parent !== null || ch2.page !== 20) problems.push(`第二章应是根节点：${JSON.stringify(ch2)}`)
+  if (built.nodes < 4) problems.push(`脑图没有渲染出骨架：${built.nodes}`)
+  if (!built.notice.includes('已按目录建了 4 个骨架节点')) problems.push(`缺少建骨架提示：${built.notice}`)
+
+  const tocMap = JSON.parse(built.toc || '{}')
+  const canvasIds = Object.keys(tocMap)
+  if (canvasIds.length !== 1) problems.push(`目录映射应按画布存一份：${canvasIds.length}`)
+  if ((tocMap[canvasIds[0]] ?? []).length !== 4) problems.push('目录映射条数不对')
+  if ((tocMap[canvasIds[0]] ?? [])[0]?.cardId !== ch1?.id) problems.push('目录映射没记住卡片 id')
+
+  // 已经建过：再粘一次不重复建，只给提示。
+  await page.locator('[data-testid="toc-paste-open"]').click()
+  await page.waitForSelector('[data-testid="toc-paste-modal"]', { timeout: 5000 })
+  await page.locator('[data-testid="toc-paste-input"]').fill(tocText)
+  await page.waitForTimeout(200)
+  await page.locator('[data-testid="toc-paste-build"]').click()
+  await page.waitForTimeout(900)
+  const again = await page.evaluate(() => ({
+    count: (window.__cardState ?? []).length,
+    notice: document.querySelector('.pdf-operation-bar')?.textContent ?? '',
+    modal: document.querySelectorAll('[data-testid="toc-paste-modal"]').length,
+  }))
+  if (again.count !== built.cards.length) problems.push(`重复粘贴又建了节点：${again.count}/${built.cards.length}`)
+  if (!again.notice.includes('已经建过')) problems.push(`重复粘贴没有提示：${again.notice}`)
+  if (again.modal !== 0) problems.push('重复粘贴后弹窗没有关掉')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'toc-text', preview, skeleton, built, again }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

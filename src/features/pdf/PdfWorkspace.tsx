@@ -75,7 +75,7 @@ import { TitleLinkPopover } from './TitleLinkPopover'
 import { SizeControl } from '../ink/SizeControl'
 import { readSizePreference, saveSizePreference } from '../ink/size'
 import { ClozePanel } from './ClozePanel'
-import { assignSkeletonParents, parentIdForPage, readPdfOutline, type TocEntry } from './pdfOutline'
+import { parentIdForPage, planSkeletonMerge, readPdfOutline, type TocEntry } from './pdfOutline'
 import { parseTocText } from './tocText'
 import {
   bumpClozeTurn,
@@ -1375,41 +1375,63 @@ export function PdfWorkspace({
     }
   }
 
-  /** 把一批目录条目建成骨架卡片：父先子后，写完映射就通知脑图刷新。 */
-  const createSkeleton = async (entries: TocEntry[]) => {
-    const nodes = assignSkeletonParents(entries)
-    const createdIds: string[] = []
+  /**
+   * 把一批目录条目落成骨架：已有骨架只补缺的（增量），没有就全量建。
+   * 父先子后建卡，写完映射就通知脑图刷新；已有卡片一律不动，删节只从映射掉出。
+   */
+  const applySkeleton = async (entries: TocEntry[]) => {
+    const existing = tocMap[activeCanvasId] ?? []
+    const plan = planSkeletonMerge(existing, entries)
+    if (plan.items.length === 0) {
+      setNotice('目录里没有可建的小节。')
+      return
+    }
+    const planCardIds: Array<string | undefined> = []
     const saved: TocSkeletonEntry[] = []
-    for (const node of nodes) {
-      const card = await createCard({
-        canvas_id: activeCanvasId,
-        question: node.title,
-        parent_id: node.parentIndex === null ? undefined : createdIds[node.parentIndex],
-        sort_order: saved.length,
-        // 不给 x/y：留 (0,0) 占位，让脑图工作区跑 buildTreeLayout 排成正常的左右树。
-        source_ref: {
-          document_id: document.id,
-          page: node.page,
-          bbox: { x: 0.08, y: 0.08, width: 0.04, height: 0.02 },
-        },
-      })
-      createdIds.push(card.id)
-      saved.push({ cardId: card.id, page: node.page, title: node.title, level: node.level })
+    for (const item of plan.items) {
+      let cardId = item.cardId
+      if (item.action === 'create') {
+        const parentId = item.parentIndex === null ? undefined : planCardIds[item.parentIndex]
+        const card = await createCard({
+          canvas_id: activeCanvasId,
+          question: item.title,
+          parent_id: parentId,
+          sort_order: item.index,
+          // 不给 x/y：留 (0,0) 占位，让脑图工作区跑 buildTreeLayout 排成正常的左右树。
+          source_ref: {
+            document_id: document.id,
+            page: item.page,
+            bbox: { x: 0.08, y: 0.08, width: 0.04, height: 0.02 },
+          },
+        })
+        cardId = card.id
+      }
+      planCardIds[item.index] = cardId
+      saved.push({ cardId: cardId as string, page: item.page, title: item.title, level: item.level })
     }
     const nextMap = { ...tocMap, [activeCanvasId]: saved }
     setTocMap(nextMap)
     await saveTocJson(document.id, JSON.stringify(nextMap))
     notifyMindmapChanged(activeCanvasId)
-    setNotice(`已按目录建了 ${saved.length} 个骨架节点；之后新建的卡片会自动挂到最近的小节。`)
-  }
 
-  /** 按 PDF 内置书签建骨架；没有书签就转到「粘贴目录」，不硬造节点。 */
-  const buildTocSkeleton = async () => {
-    if (!pdf || tocBuilding) return
-    if ((tocMap[activeCanvasId] ?? []).length > 0) {
-      setNotice('这张画布已经建过目录骨架；要重建请先在脑图里清空卡片。')
+    if (existing.length === 0) {
+      setNotice(`已按目录建了 ${saved.length} 个骨架节点；之后新建的卡片会自动挂到最近的小节。`)
       return
     }
+    const parts: string[] = []
+    if (plan.created > 0) parts.push(`新增 ${plan.created} 节`)
+    if (plan.kept > 0) parts.push(`保留 ${plan.kept} 节`)
+    if (plan.dropped.length > 0) parts.push(`${plan.dropped.length} 节不在新目录里（卡片保留）`)
+    if (plan.created === 0) {
+      setNotice(parts.length ? `目录没有新增小节：${parts.join('，')}。` : '目录没有可建的小节。')
+    } else {
+      setNotice(`${parts.join('，')}；画布已按新骨架重排，之后新建的卡片会自动挂到最近的小节。`)
+    }
+  }
+
+  /** 按 PDF 内置书签建/更新骨架；没有书签就转到「粘贴目录」，不硬造节点。 */
+  const buildTocSkeleton = async () => {
+    if (!pdf || tocBuilding) return
     setTocBuilding(true)
     setOperationError('')
     try {
@@ -1419,7 +1441,7 @@ export function PdfWorkspace({
         setOperationError('这个 PDF 没有内置书签；把目录复制粘贴进来，一样能建骨架。')
         return
       }
-      await createSkeleton(entries)
+      await applySkeleton(entries)
     } catch (reason) {
       setOperationError(`按目录建骨架失败：${errorMessage(reason)}`)
     } finally {
@@ -1435,16 +1457,11 @@ export function PdfWorkspace({
       setOperationError('没认出目录：一行一条，标题和页码之间用点线、Tab 或空格分隔。')
       return
     }
-    if ((tocMap[activeCanvasId] ?? []).length > 0) {
-      setTocPasteOpen(false)
-      setNotice('这张画布已经建过目录骨架；要重建请先在脑图里清空卡片。')
-      return
-    }
     setTocBuilding(true)
     setOperationError('')
     try {
       setTocPasteOpen(false)
-      await createSkeleton(entries)
+      await applySkeleton(entries)
       setTocPasteDraft('')
     } catch (reason) {
       setOperationError(`按目录建骨架失败：${errorMessage(reason)}`)
@@ -1524,7 +1541,7 @@ export function PdfWorkspace({
       ) : (
         <>
           <button type="button" className="pdf-pass-action" data-testid="toc-skeleton" onClick={() => void buildTocSkeleton()} disabled={!pdf || tocBuilding}>
-            {tocBuilding ? '正在建…' : (tocMap[activeCanvasId]?.length ? '目录骨架已建' : '按目录建骨架')}
+            {tocBuilding ? '正在更新…' : (tocMap[activeCanvasId]?.length ? '更新目录骨架' : '按目录建骨架')}
           </button>
           <button
             type="button"

@@ -2120,24 +2120,52 @@ if (process.env.STEP === 'toc-text') {
   if ((tocMap[canvasIds[0]] ?? []).length !== 4) problems.push('目录映射条数不对')
   if ((tocMap[canvasIds[0]] ?? [])[0]?.cardId !== ch1?.id) problems.push('目录映射没记住卡片 id')
 
-  // 已经建过：再粘一次不重复建，只给提示。
-  await page.locator('[data-testid="toc-paste-open"]').click()
-  await page.waitForSelector('[data-testid="toc-paste-modal"]', { timeout: 5000 })
-  await page.locator('[data-testid="toc-paste-input"]').fill(tocText)
-  await page.waitForTimeout(200)
-  await page.locator('[data-testid="toc-paste-build"]').click()
-  await page.waitForTimeout(900)
+  // 增量更新：目录多了一节、少了一节，只补新的，已有的卡片不动。
+  const updatedText = [
+    '第一章 绪论 ........ 1',
+    '1.1 研究背景 ........ 3',
+    '1.3 新增小节 ........ 9',
+    '第二章 方法 20',
+  ].join('\n')
+  const pasteAndBuild = async (text) => {
+    await page.locator('[data-testid="toc-paste-open"]').click()
+    await page.waitForSelector('[data-testid="toc-paste-modal"]', { timeout: 5000 })
+    await page.locator('[data-testid="toc-paste-input"]').fill(text)
+    await page.waitForTimeout(200)
+    await page.locator('[data-testid="toc-paste-build"]').click()
+    await page.waitForTimeout(1200)
+  }
+  await pasteAndBuild(updatedText)
+  const merged = await page.evaluate(() => ({
+    cards: (window.__cardState ?? []).map((card) => ({ id: card.id, question: card.question, parent: card.parent_id ?? null })),
+    notice: document.querySelector('.pdf-operation-bar')?.textContent ?? '',
+    modal: document.querySelectorAll('[data-testid="toc-paste-modal"]').length,
+    toc: window.__readingState?.()?.tocJson ?? '',
+  }))
+  const added = merged.cards.filter((card) => card.question === '1.3 新增小节')
+  if (added.length !== 1) problems.push(`新增小节没有建卡：${added.length}`)
+  if (added[0]?.parent !== ch1?.id) problems.push(`新增小节没挂到第一章：${JSON.stringify(added[0])}`)
+  if (merged.cards.length !== built.cards.length + 1) problems.push(`增量更新建多了卡：${merged.cards.length}/${built.cards.length + 1}`)
+  if (!merged.notice.includes('新增 1 节')) problems.push(`增量提示缺少新增数：${merged.notice}`)
+  if (!merged.notice.includes('保留 3 节')) problems.push(`增量提示缺少保留数：${merged.notice}`)
+  if (!merged.notice.includes('1 节不在新目录里')) problems.push(`没有提示被移除的节：${merged.notice}`)
+  if (merged.modal !== 0) problems.push('增量更新后弹窗没有关掉')
+  const mergedMap = JSON.parse(merged.toc || '{}')
+  const mergedEntries = mergedMap[Object.keys(mergedMap)[0]] ?? []
+  if (mergedEntries.length !== 4) problems.push(`更新后映射条数不对：${mergedEntries.length}`)
+  if (mergedEntries.some((entry) => entry.title === '1.2 研究问题')) problems.push('被移除的节还留在映射里')
+
+  // 再粘一次同样的目录：没有新增就不建卡。
+  await pasteAndBuild(updatedText)
   const again = await page.evaluate(() => ({
     count: (window.__cardState ?? []).length,
     notice: document.querySelector('.pdf-operation-bar')?.textContent ?? '',
-    modal: document.querySelectorAll('[data-testid="toc-paste-modal"]').length,
   }))
-  if (again.count !== built.cards.length) problems.push(`重复粘贴又建了节点：${again.count}/${built.cards.length}`)
-  if (!again.notice.includes('已经建过')) problems.push(`重复粘贴没有提示：${again.notice}`)
-  if (again.modal !== 0) problems.push('重复粘贴后弹窗没有关掉')
+  if (again.count !== merged.cards.length) problems.push(`重复更新又建了卡：${again.count}/${merged.cards.length}`)
+  if (!again.notice.includes('没有新增小节')) problems.push(`重复更新没有提示：${again.notice}`)
 
   await browser.close()
-  console.log(JSON.stringify({ problems, step: 'toc-text', preview, skeleton, built, again }, null, 2))
+  console.log(JSON.stringify({ problems, step: 'toc-text', preview, skeleton, built, merged, again }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

@@ -115,3 +115,84 @@ export function assignSkeletonParents(entries: readonly TocEntry[]): SkeletonNod
     return { ...entry, parentIndex }
   })
 }
+
+/** 已经建好的骨架条目：cardId + 页码 + 标题 + 层级。 */
+export interface SkeletonEntryLike {
+  cardId: string
+  page: number
+  title: string
+  level: number
+}
+
+export interface SkeletonMergeItem {
+  action: 'keep' | 'create'
+  title: string
+  page: number
+  level: number
+  /** keep 时复用这张卡；create 时为 undefined。 */
+  cardId?: string
+  /** 父节点在这一批条目里的下标（父可能是已有卡，也可能是本次新建的）。 */
+  parentIndex: number | null
+  index: number
+}
+
+export interface SkeletonMergePlan {
+  items: SkeletonMergeItem[]
+  created: number
+  kept: number
+  /** 旧骨架里有、新目录里没有的条目：卡片保留，只是不再参与自动挂接。 */
+  dropped: SkeletonEntryLike[]
+}
+
+/** 比较标题时忽略空白与大小写，避免「第一章 绪论」和「第一章绪论」被当成两节。 */
+function normalizeTitle(title: string): string {
+  return title.replace(/\s+/gu, '').toLowerCase()
+}
+
+/**
+ * 增量更新骨架：把新目录和已有骨架对齐，只给缺的条目建卡，已有的复用。
+ *
+ * 匹配顺序是「标题 + 层级」→「只按标题」（目录改版常把某一节提成章）；
+ * 旧的条目不会删卡、也不会被移动，只是不再出现在映射里。
+ * 复用已有卡时页码跟随新目录，这样「划重点挂最近小节」用的是最新页码。
+ */
+export function planSkeletonMerge(
+  existing: readonly SkeletonEntryLike[],
+  entries: readonly TocEntry[],
+): SkeletonMergePlan {
+  const used = new Set<string>()
+  const items: SkeletonMergeItem[] = []
+  const lastIndexByLevel: Array<number | null> = []
+  let created = 0
+  let kept = 0
+
+  entries.forEach((entry, index) => {
+    const key = normalizeTitle(entry.title)
+    const match = existing.find((item) => !used.has(item.cardId) && normalizeTitle(item.title) === key && item.level === entry.level)
+      ?? existing.find((item) => !used.has(item.cardId) && normalizeTitle(item.title) === key)
+
+    const parentIndex = entry.level > 0 ? lastIndexByLevel[entry.level - 1] ?? null : null
+    if (match) {
+      used.add(match.cardId)
+      kept += 1
+      items.push({
+        action: 'keep', title: entry.title, page: entry.page, level: entry.level, cardId: match.cardId, parentIndex, index,
+      })
+    } else {
+      created += 1
+      items.push({ action: 'create', title: entry.title, page: entry.page, level: entry.level, parentIndex, index })
+    }
+
+    lastIndexByLevel[entry.level] = index
+    for (let level = entry.level + 1; level < lastIndexByLevel.length; level += 1) {
+      lastIndexByLevel[level] = null
+    }
+  })
+
+  return {
+    items,
+    created,
+    kept,
+    dropped: existing.filter((item) => !used.has(item.cardId)),
+  }
+}

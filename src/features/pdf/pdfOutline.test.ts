@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { assignSkeletonParents, nearestTocEntry, parentIdForPage, readPdfOutline, type TocEntry } from './pdfOutline'
+import {
+  assignSkeletonParents,
+  nearestTocEntry,
+  parentIdForPage,
+  planSkeletonMerge,
+  readPdfOutline,
+  type TocEntry,
+} from './pdfOutline'
 
 const entries: TocEntry[] = [
   { title: '第一章 绪论', page: 1, level: 0 },
@@ -111,5 +118,92 @@ describe('读取 PDF 目录', () => {
     const many = Array.from({ length: 30 }, (_, index) => ({ title: `第 ${index} 节`, dest: [{ num: index }, { name: 'Fit' }] }))
     const result = await readPdfOutline(fakePdf(many), { maxEntries: 5 })
     expect(result).toHaveLength(5)
+  })
+})
+
+describe('增量更新骨架', () => {
+  const existing = [
+    { cardId: 'k1', page: 1, title: '第一章 绪论', level: 0 },
+    { cardId: 'k2', page: 3, title: '1.1 研究背景', level: 1 },
+    { cardId: 'k3', page: 6, title: '1.2 研究问题', level: 1 },
+    { cardId: 'k4', page: 20, title: '第二章 方法', level: 0 },
+  ]
+
+  it('目录没变时全部复用，不建新卡', () => {
+    const plan = planSkeletonMerge(existing, [
+      { title: '第一章 绪论', page: 1, level: 0 },
+      { title: '1.1 研究背景', page: 3, level: 1 },
+      { title: '1.2 研究问题', page: 6, level: 1 },
+      { title: '第二章 方法', page: 20, level: 0 },
+    ])
+    expect(plan.created).toBe(0)
+    expect(plan.kept).toBe(4)
+    expect(plan.dropped).toEqual([])
+  })
+
+  it('只给新增小节建卡，并挂到对应章下', () => {
+    const plan = planSkeletonMerge(existing, [
+      { title: '第一章 绪论', page: 1, level: 0 },
+      { title: '1.1 研究背景', page: 3, level: 1 },
+      { title: '1.3 新增小节', page: 9, level: 1 },
+      { title: '第二章 方法', page: 20, level: 0 },
+    ])
+    expect(plan.created).toBe(1)
+    expect(plan.kept).toBe(3)
+    const added = plan.items[2]
+    expect(added.action).toBe('create')
+    expect(added.parentIndex).toBe(0)
+    // 第二章仍复用原来那张卡
+    expect(plan.items[3].cardId).toBe('k4')
+  })
+
+  it('新目录里没有的条目只从映射掉出，不算删除', () => {
+    const plan = planSkeletonMerge(existing, [
+      { title: '第一章 绪论', page: 1, level: 0 },
+      { title: '1.1 研究背景', page: 3, level: 1 },
+      { title: '第二章 方法', page: 20, level: 0 },
+    ])
+    expect(plan.dropped.map((item) => item.cardId)).toEqual(['k3'])
+    expect(plan.created).toBe(0)
+  })
+
+  it('空白差异不算新条目，页码跟随新目录', () => {
+    const plan = planSkeletonMerge(existing, [
+      { title: '第一章  绪论', page: 2, level: 0 },
+      { title: '1.1研究背景', page: 4, level: 1 },
+    ])
+    expect(plan.created).toBe(0)
+    expect(plan.items[0]).toMatchObject({ action: 'keep', cardId: 'k1', page: 2 })
+    expect(plan.items[1]).toMatchObject({ action: 'keep', cardId: 'k2', page: 4 })
+  })
+
+  it('某一节被提成章时按标题复用，不会重复建卡', () => {
+    const plan = planSkeletonMerge(existing, [
+      { title: '1.1 研究背景', page: 3, level: 0 },
+    ])
+    expect(plan.created).toBe(0)
+    expect(plan.items[0]).toMatchObject({ action: 'keep', cardId: 'k2', level: 0 })
+  })
+
+  it('全新骨架（没有旧条目）等价于全量建卡', () => {
+    const plan = planSkeletonMerge([], [
+      { title: '第一章', page: 1, level: 0 },
+      { title: '1.1', page: 3, level: 1 },
+    ])
+    expect(plan.created).toBe(2)
+    expect(plan.kept).toBe(0)
+    expect(plan.items[1].parentIndex).toBe(0)
+  })
+
+  it('同名条目只复用一次，重复出现的新条目会各自建卡', () => {
+    const plan = planSkeletonMerge(
+      [{ cardId: 'k1', page: 1, title: '附录', level: 0 }],
+      [
+        { title: '附录', page: 1, level: 0 },
+        { title: '附录', page: 30, level: 0 },
+      ],
+    )
+    expect(plan.kept).toBe(1)
+    expect(plan.created).toBe(1)
   })
 })

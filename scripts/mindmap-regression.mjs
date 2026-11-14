@@ -520,6 +520,9 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     },
     create_card: (args) => {
       const input = args?.input ?? {}
+      // 记录建卡入参：用来断言「首次建骨架不给坐标、增量更新给定落点」。
+      window.__createInputs ??= []
+      window.__createInputs.push({ ...input })
       const created = {
         ...cards[0],
         id: `new-card-${cardState.length + 1}`,
@@ -2093,6 +2096,7 @@ if (process.env.STEP === 'toc-text') {
   await page.waitForTimeout(1600)
 
   const built = await page.evaluate(() => ({
+    createInputs: (window.__createInputs ?? []).map((input) => ({ x: input.x, y: input.y, question: input.question })),
     cards: (window.__cardState ?? []).map((card) => ({
       id: card.id,
       question: card.question,
@@ -2136,16 +2140,26 @@ if (process.env.STEP === 'toc-text') {
     await page.waitForTimeout(1200)
   }
   await pasteAndBuild(updatedText)
-  const merged = await page.evaluate(() => ({
+  const merged = await page.evaluate((countBefore) => ({
+    newInputs: (window.__createInputs ?? []).slice(countBefore),
     cards: (window.__cardState ?? []).map((card) => ({ id: card.id, question: card.question, parent: card.parent_id ?? null })),
     notice: document.querySelector('.pdf-operation-bar')?.textContent ?? '',
     modal: document.querySelectorAll('[data-testid="toc-paste-modal"]').length,
     toc: window.__readingState?.()?.tocJson ?? '',
-  }))
+  }), built.createInputs.length)
   const added = merged.cards.filter((card) => card.question === '1.3 新增小节')
   if (added.length !== 1) problems.push(`新增小节没有建卡：${added.length}`)
   if (added[0]?.parent !== ch1?.id) problems.push(`新增小节没挂到第一章：${JSON.stringify(added[0])}`)
   if (merged.cards.length !== built.cards.length + 1) problems.push(`增量更新建多了卡：${merged.cards.length}/${built.cards.length + 1}`)
+  // 首次建骨架不给坐标（交给树布局）；增量更新要给落点，否则会触发整张画布重排。
+  if (built.createInputs.some((input) => input.x !== undefined || input.y !== undefined)) {
+    problems.push(`首次建骨架不该手写坐标：${JSON.stringify(built.createInputs[0])}`)
+  }
+  const mergedInput = merged.newInputs[0]
+  if (!mergedInput) problems.push('增量更新没有记录建卡入参')
+  else if (typeof mergedInput.x !== 'number' || typeof mergedInput.y !== 'number') {
+    problems.push(`增量更新没有给落点：${JSON.stringify(mergedInput)}`)
+  }
   if (!merged.notice.includes('新增 1 节')) problems.push(`增量提示缺少新增数：${merged.notice}`)
   if (!merged.notice.includes('保留 3 节')) problems.push(`增量提示缺少保留数：${merged.notice}`)
   if (!merged.notice.includes('1 节不在新目录里')) problems.push(`没有提示被移除的节：${merged.notice}`)

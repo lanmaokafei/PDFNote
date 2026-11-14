@@ -76,6 +76,7 @@ import { SizeControl } from '../ink/SizeControl'
 import { readSizePreference, saveSizePreference } from '../ink/size'
 import { ClozePanel } from './ClozePanel'
 import { parentIdForPage, planSkeletonMerge, readPdfOutline, type TocEntry } from './pdfOutline'
+import { placeSkeletonNode } from './tocLayout'
 import { parseTocText } from './tocText'
 import {
   bumpClozeTurn,
@@ -1386,18 +1387,47 @@ export function PdfWorkspace({
       setNotice('目录里没有可建的小节。')
       return
     }
+    // 增量更新时读一次当前布局：新节点挂到父节点旁，已有卡片的位置完全不动，
+    // 不会因为出现 (0,0) 而触发整张画布重排。首次全量建卡仍留空坐标让树布局来排。
+    const positions = new Map<string, { x: number; y: number }>()
+    const siblingYs = new Map<string, number[]>()
+    const rootYs: number[] = []
+    if (existing.length > 0) {
+      const rows = await listMindmapLayout(activeCanvasId).catch(() => [])
+      for (const row of rows) positions.set(row.card_id, { x: row.x, y: row.y })
+      for (const card of Object.values(cardsById)) {
+        const point = positions.get(card.id)
+        if (!point) continue
+        if (card.parent_id && positions.has(card.parent_id)) {
+          const list = siblingYs.get(card.parent_id) ?? []
+          list.push(point.y)
+          siblingYs.set(card.parent_id, list)
+        } else {
+          rootYs.push(point.y)
+        }
+      }
+    }
+
     const planCardIds: Array<string | undefined> = []
     const saved: TocSkeletonEntry[] = []
     for (const item of plan.items) {
       let cardId = item.cardId
       if (item.action === 'create') {
         const parentId = item.parentIndex === null ? undefined : planCardIds[item.parentIndex]
+        const parentPoint = parentId ? positions.get(parentId) ?? null : null
+        const point = existing.length > 0
+          ? placeSkeletonNode({
+            parent: parentPoint,
+            siblingYs: parentId ? siblingYs.get(parentId) ?? [] : [],
+            rootYs,
+          })
+          : null
         const card = await createCard({
           canvas_id: activeCanvasId,
           question: item.title,
           parent_id: parentId,
           sort_order: item.index,
-          // 不给 x/y：留 (0,0) 占位，让脑图工作区跑 buildTreeLayout 排成正常的左右树。
+          ...(point ?? {}),
           source_ref: {
             document_id: document.id,
             page: item.page,
@@ -1405,6 +1435,16 @@ export function PdfWorkspace({
           },
         })
         cardId = card.id
+        if (point) {
+          positions.set(card.id, point)
+          if (parentId) {
+            const list = siblingYs.get(parentId) ?? []
+            list.push(point.y)
+            siblingYs.set(parentId, list)
+          } else {
+            rootYs.push(point.y)
+          }
+        }
       }
       planCardIds[item.index] = cardId
       saved.push({ cardId: cardId as string, page: item.page, title: item.title, level: item.level })
@@ -1425,7 +1465,7 @@ export function PdfWorkspace({
     if (plan.created === 0) {
       setNotice(parts.length ? `目录没有新增小节：${parts.join('，')}。` : '目录没有可建的小节。')
     } else {
-      setNotice(`${parts.join('，')}；画布已按新骨架重排，之后新建的卡片会自动挂到最近的小节。`)
+      setNotice(`${parts.join('，')}；新节点已挂到对应小节旁，原有布局保持不变。`)
     }
   }
 

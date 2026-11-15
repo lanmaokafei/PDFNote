@@ -77,6 +77,7 @@ import { readSizePreference, saveSizePreference } from '../ink/size'
 import { ClozePanel } from './ClozePanel'
 import { parentIdForPage, planSkeletonMerge, readPdfOutline, type TocEntry } from './pdfOutline'
 import { placeSkeletonNode } from './tocLayout'
+import { buildSectionProgress } from './sectionProgress'
 import { parseTocText } from './tocText'
 import {
   bumpClozeTurn,
@@ -218,6 +219,8 @@ export function PdfWorkspace({
   // 没有内置书签的扫描书：把目录页复制进来，走同一套建骨架 + 自动挂接。
   const [tocPasteOpen, setTocPasteOpen] = useState(false)
   const [tocPasteDraft, setTocPasteDraft] = useState('')
+  // 章节进度：目录骨架 + 当前画布卡片的复习情况，只读不落库。
+  const [progressOpen, setProgressOpen] = useState(false)
   // 挖空填空：在「整块遮挡」和「揭示」之间多一层，先补关键词再评分。
   const [clozeEnabled, setClozeEnabled] = useState(readClozePreference)
   const [clozeAnswers, setClozeAnswers] = useState<Record<string, string[]>>({})
@@ -1227,6 +1230,10 @@ export function PdfWorkspace({
   }, [annotationsByPage, canvasCardIds])
   const allAnnotations = useMemo(() => Object.values(scopedAnnotationsByPage).flat(), [scopedAnnotationsByPage])
   const cardList = useMemo(() => Object.values(cardsById), [cardsById])
+  const sectionProgress = useMemo(
+    () => buildSectionProgress(tocMap[activeCanvasId] ?? [], cardList, currentPage),
+    [tocMap, activeCanvasId, cardList, currentPage],
+  )
   const titleLinkIndex = useMemo(
     () => (titleLinkEnabled ? buildTitleLinkIndex(cardList) : null),
     [cardList, titleLinkEnabled],
@@ -1595,6 +1602,16 @@ export function PdfWorkspace({
             title="没有书签的扫描书：把目录页的文字复制进来"
           >
             粘贴目录
+          </button>
+          <button
+            type="button"
+            className="pdf-pass-action"
+            data-testid="section-progress-open"
+            onClick={() => setProgressOpen(true)}
+            disabled={sectionProgress.sections === 0}
+            title={sectionProgress.sections === 0 ? '先按目录建骨架，才有章节进度' : '看每一节写了多少卡、复习了多少'}
+          >
+            章节进度
           </button>
           <button type="button" className="pdf-pass-action" data-testid="pdf-pass-note" onClick={openRecall} disabled={readingBusy}>
             {recallNote ? '看粗读笔记' : '补写三句话'}
@@ -2089,6 +2106,64 @@ export function PdfWorkspace({
             void loadCards()
           }}
         />
+      )}
+
+      {progressOpen && (
+        <div className="pdf-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setProgressOpen(false)
+        }}>
+          <div className="pdf-modal pdf-progress-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-progress-title" data-testid="section-progress-modal">
+            <small>CLOSE READING · PROGRESS</small>
+            <h2 id="pdf-progress-title">章节精读进度</h2>
+            <p className="pdf-recall-tip">
+              按目录骨架统计每一节子树下写了多少张卡、复习了多少张；点任意一行跳到该节起始页。
+            </p>
+            <div className="pdf-progress-summary" data-testid="section-progress-summary">
+              <div className="pdf-progress-counts">
+                <strong>{sectionProgress.reviewed}/{sectionProgress.cards}</strong>
+                <span>张卡已复习</span>
+                <span className="pdf-progress-dot">·</span>
+                <span>{sectionProgress.sectionsWithCards}/{sectionProgress.sections} 节已写卡</span>
+              </div>
+              <div className="pdf-progress-track">
+                <span
+                  className="pdf-progress-fill"
+                  style={{ width: `${sectionProgress.cards === 0 ? 0 : Math.round((sectionProgress.reviewed / sectionProgress.cards) * 100)}%` }}
+                  data-testid="section-progress-fill"
+                />
+              </div>
+            </div>
+            <ul className="pdf-progress-list">
+              {sectionProgress.flat.map((node) => (
+                <li key={node.cardId}>
+                  <button
+                    type="button"
+                    className={`pdf-progress-row${node.cardId === sectionProgress.currentCardId ? ' is-current' : ''}`}
+                    style={{ paddingLeft: 10 + node.level * 18 }}
+                    data-testid="section-progress-row"
+                    data-section-id={node.cardId}
+                    data-level={node.level}
+                    onClick={() => {
+                      goToPage(node.page)
+                      setProgressOpen(false)
+                    }}
+                  >
+                    <span className="pdf-progress-title">{node.title}</span>
+                    <span className="pdf-progress-page">
+                      第 {node.page}{node.endPage && node.endPage > node.page ? `–${node.endPage}` : ''} 页
+                    </span>
+                    <span className={`pdf-progress-stats${node.cardCount === 0 ? ' is-empty' : ''}${node.cardCount > 0 && node.reviewedCount === node.cardCount ? ' is-done' : ''}`}>
+                      {node.cardCount === 0 ? '还没写卡' : `${node.cardCount} 张 · 已复习 ${node.reviewedCount}`}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="pdf-modal-actions">
+              <button type="button" onClick={() => setProgressOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {tocPasteOpen && (

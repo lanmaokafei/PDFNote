@@ -2183,6 +2183,72 @@ if (process.env.STEP === 'toc-text') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=section-progress：章节精读进度的空态、层级缩进、当前小节与跳页入口。
+if (process.env.STEP === 'section-progress') {
+  await page.locator('.app-segment').filter({ hasText: '粗读精读' }).first().click()
+  await page.waitForSelector('.close-reading-list', { timeout: 10000 })
+  await page.locator('.close-reading-list button').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+
+  await page.locator('[data-testid="pdf-pass-chip"]').click()
+  await page.waitForTimeout(700)
+  const beforeBuild = await page.locator('[data-testid="section-progress-open"]').isDisabled()
+  if (!beforeBuild) problems.push('没有骨架时「章节进度」应该是禁用态')
+
+  await page.locator('[data-testid="toc-paste-open"]').click()
+  await page.waitForSelector('[data-testid="toc-paste-modal"]', { timeout: 5000 })
+  await page.locator('[data-testid="toc-paste-input"]').fill([
+    '第一章 绪论 ........ 1',
+    '1.1 研究背景 ........ 3',
+    '1.2 研究问题 ........ 6',
+    '第二章 方法 20',
+  ].join('\n'))
+  await page.waitForTimeout(200)
+  await page.locator('[data-testid="toc-paste-build"]').click()
+  await page.waitForTimeout(1500)
+
+  await page.locator('[data-testid="section-progress-open"]').click()
+  await page.waitForSelector('[data-testid="section-progress-modal"]', { timeout: 5000 })
+  const progress = await page.evaluate(() => ({
+    summary: document.querySelector('[data-testid="section-progress-summary"]')?.textContent ?? '',
+    rows: [...document.querySelectorAll('[data-testid="section-progress-row"]')].map((row) => ({
+      title: row.querySelector('.pdf-progress-title')?.textContent ?? '',
+      level: row.getAttribute('data-level'),
+      current: row.classList.contains('is-current'),
+      stats: row.querySelector('.pdf-progress-stats')?.textContent ?? '',
+    })),
+    fill: document.querySelector('[data-testid="section-progress-fill"]')?.style.width ?? '',
+  }))
+  if (progress.rows.length !== 4) problems.push(`章节行数不对：${progress.rows.length}`)
+  if (progress.rows.map((row) => row.title).join('|') !== '第一章 绪论|1.1 研究背景|1.2 研究问题|第二章 方法') {
+    problems.push(`章节顺序不对：${progress.rows.map((row) => row.title).join('|')}`)
+  }
+  if (progress.rows.map((row) => row.level).join('|') !== '0|1|1|0') {
+    problems.push(`章节层级不对：${progress.rows.map((row) => row.level).join('|')}`)
+  }
+  if (!progress.summary.includes('0/0')) problems.push(`空画布进度不对：${progress.summary}`)
+  if (!progress.summary.includes('0/4 节已写卡')) problems.push(`已写卡节数不对：${progress.summary}`)
+  if (progress.rows.some((row) => !row.stats.includes('还没写卡'))) problems.push('没有卡片时每行应写「还没写卡」')
+  if (progress.fill !== '0%') problems.push(`空进度条不该有宽度：${progress.fill}`)
+  const currentRows = progress.rows.filter((row) => row.current)
+  if (currentRows.length !== 1 || currentRows[0].title !== '第一章 绪论') {
+    problems.push(`当前小节标记不对：${JSON.stringify(currentRows)}`)
+  }
+
+  // 点一行跳到该节起始页，弹窗收起。
+  await page.locator('[data-testid="section-progress-row"]').nth(3).click()
+  await page.waitForTimeout(700)
+  const afterJump = await page.evaluate(() => ({
+    modal: document.querySelectorAll('[data-testid="section-progress-modal"]').length,
+  }))
+  if (afterJump.modal !== 0) problems.push('点章节后弹窗没有关闭')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'section-progress', beforeBuild, progress, afterJump }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // STEP=notebook：手写本创建、无限页、多图层、隐藏、橡皮、纸样切换、删除。
 if (process.env.STEP === 'notebook') {
   await page.locator('.app-segment', { hasText: '笔记本' }).click()

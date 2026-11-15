@@ -1751,3 +1751,122 @@
 .pdf-toc-skipped li {
   list-style: disc;
 }
+
+/* ---------- 章节精读进度（0.47.0） ---------- */
+
+.pdf-progress-modal {
+  width: min(580px, 100%);
+}
+
+.pdf-progress-summary {
+  margin: 12px 0 10px;
+  padding: 12px 14px;
+  border: 1px solid #e4eadf;
+  border-radius: 10px;
+  background: #f8fbf5;
+}
+
+.pdf-progress-counts {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: #5c6a5b;
+  font-size: 12px;
+}
+
+.pdf-progress-counts strong {
+  color: #38503c;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+.pdf-progress-dot {
+  color: #b6c0b4;
+}
+
+.pdf-progress-track {
+  height: 6px;
+  margin-top: 10px;
+  border-radius: 999px;
+  background: #e7ede2;
+  overflow: hidden;
+}
+
+.pdf-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7aa683, #4f7f5c);
+  transition: width .25s ease;
+}
+
+.pdf-progress-list {
+  max-height: 320px;
+  margin: 0 0 12px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.pdf-progress-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 7px;
+  color: #46544a;
+  background: transparent;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pdf-progress-row:hover {
+  background: #f3f7ef;
+}
+
+.pdf-progress-row.is-current {
+  border-left-color: #4f7f5c;
+  background: #f1f7ed;
+}
+
+.pdf-progress-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pdf-progress-page {
+  flex: 0 0 auto;
+  color: #97a295;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-progress-stats {
+  flex: 0 0 auto;
+  color: #7b877a;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-progress-stats.is-empty {
+  color: #b0b9ae;
+}
+
+.pdf-progress-stats.is-done {
+  color: #3f7350;
+  font-weight: 600;
+}
+
+/* 精读阶段按钮变多（建骨架 / 粘贴 / 进度 / 笔记），窄窗口下允许换行，别溢出 PDF 面板。 */
+.pdf-pass-bar.is-floating {
+  flex-wrap: wrap;
+  max-width: calc(100% - 28px);
+  row-gap: 6px;
+}

@@ -50,3 +50,13 @@
 - 有 `source_ref` 的节点带 `_note="第 N 页"`，方便回原文核对；
 - XML 特殊字符（`& < > " '`）会转义，导出的文件可直接被 MindManager、幕布、OmniOutliner 等导入；
 - 与 Markdown 导出不同，OPML **不写摘录正文**——它的用途是分层展开背诵，不是阅读。
+
+## AnkiDroid txt（0.50.0）
+
+脑图右键新增「导出 AnkiDroid txt」：
+
+- 标准 4 列：`正面 / 背面 / 牌组 / 标签`，表头写 `#separator:tab`、`#html:true`、`#deck column:3`、`#tags column:4`；
+- 正面取问题，没有问题时取摘录首行（最多 80 字）；背面是摘录 + 空行 + 个人笔记；
+- 换行转成 `<br>`，`& < > "` 做 HTML 转义；牌组用书名，标签用卡片标签空格连接；
+- 只导出当前画布、`surface_review = 1` 的卡片，最多 5000 张；不含图片与音频；
+- 与 OPML 的分工：OPML 是层级背诵，Anki 是间隔重复队列。

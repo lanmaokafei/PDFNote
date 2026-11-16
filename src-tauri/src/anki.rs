@@ -478,11 +478,181 @@ pub fn import_anki_txt(state: &AppState, input: AnkiImportInput) -> Result<AnkiI
     Ok(AnkiImportResult { imported, groups: group_count, skipped, canvas_id })
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiExportInput {
+    pub path: String,
+    /// None = 全库；Some = 只导出这张画布上的卡片。
+    pub canvas_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnkiExportRow {
+    pub front: String,
+    pub back: String,
+    pub deck: String,
+    pub tags: String,
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// 生成 AnkiDroid 可直接导入的 txt：标准 4 列（正面 / 背面 / 牌组 / 标签）。
+///
+/// 背面允许换行（转成 `<br>` 并打开 `#html:true`），正面压成单行；
+/// 牌组用 `::` 表示层级，这里直接用书名，不做额外分层。
+pub fn build_anki_txt(rows: &[AnkiExportRow]) -> String {
+    let mut lines = vec![
+        "#separator:tab".to_string(),
+        "#html:true".to_string(),
+        "#deck column:3".to_string(),
+        "#tags column:4".to_string(),
+    ];
+    for row in rows {
+        let front = escape_html(&row.front).replace(['\r', '\n'], "<br>");
+        let back = escape_html(&row.back).replace("\r\n", "<br>").replace(['\r', '\n'], "<br>");
+        let deck = row.deck.replace(['\t', '\r', '\n'], " ").trim().to_string();
+        let tags = row.tags.replace(['\t', '\r', '\n'], " ").trim().to_string();
+        lines.push(format!("{front}\t{back}\t{deck}\t{tags}"));
+    }
+    format!("{}\n", lines.join("\n"))
+}
+
+fn first_line(value: &str, limit: usize) -> String {
+    let line = value.lines().find(|line| !line.trim().is_empty()).unwrap_or("").trim();
+    line.chars().take(limit).collect()
+}
+
+pub fn export_anki_txt(state: &AppState, input: AnkiExportInput) -> Result<u32, String> {
+    let target = Path::new(input.path.trim());
+    if target.as_os_str().is_empty() {
+        return Err("导出路径为空".into());
+    }
+    if !target.extension().and_then(|value| value.to_str()).map(|value| value.eq_ignore_ascii_case("txt")).unwrap_or(false) {
+        return Err("导出文件必须使用 .txt 扩展名".into());
+    }
+    let database = state.db()?;
+    let mut statement = database
+        .prepare(
+            "SELECT c.question, c.excerpt, c.user_note,
+                    COALESCE((SELECT group_concat(tag, ' ') FROM card_tags WHERE card_id = c.id), ''),
+                    COALESCE((SELECT d.title FROM documents d WHERE d.id = c.document_id), 'PDFNote')
+             FROM cards c
+             WHERE c.surface_review = 1
+               AND (?1 IS NULL OR c.id IN (SELECT card_id FROM mindmap_layout WHERE canvas_id = ?1))
+             ORDER BY c.sort_order, c.created_at
+             LIMIT 5000",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![input.canvas_id], |row| {
+            let question: String = row.get(0)?;
+            let excerpt: String = row.get(1)?;
+            let note: String = row.get(2)?;
+            let tags: String = row.get(3)?;
+            let deck: String = row.get(4)?;
+            Ok((question, excerpt, note, tags, deck))
+        })
+        .map_err(|error| error.to_string())?;
+
+    let mut exported = Vec::new();
+    for row in rows {
+        let (question, excerpt, note, tags, deck) = row.map_err(|error| error.to_string())?;
+        let trimmed_question = question.trim();
+        let trimmed_excerpt = excerpt.trim();
+        if trimmed_question.is_empty() && trimmed_excerpt.is_empty() && note.trim().is_empty() {
+            continue;
+        }
+        let front = if !trimmed_question.is_empty() {
+            trimmed_question.to_string()
+        } else {
+            first_line(trimmed_excerpt, 80)
+        };
+        let mut back = trimmed_excerpt.to_string();
+        if !note.trim().is_empty() {
+            if !back.is_empty() {
+                back.push_str("\n\n");
+            }
+            back.push_str(note.trim());
+        }
+        exported.push(AnkiExportRow { front, back, deck, tags });
+    }
+    if exported.is_empty() {
+        return Err("当前范围没有可导出的卡片".into());
+    }
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|error| format!("无法创建导出目录: {error}"))?;
+        }
+    }
+    fs::write(target, build_anki_txt(&exported)).map_err(|error| format!("写入 txt 失败: {error}"))?;
+    Ok(exported.len() as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::CreateMindmapCanvasInput;
     use crate::state::test_state;
+
+    #[test]
+    fn builds_anki_txt_with_header_and_escaping() {
+        let rows = vec![AnkiExportRow {
+            front: "A & B <c>".into(),
+            back: "第一行\n第二行".into(),
+            deck: "书::章".into(),
+            tags: "tag1 tag2".into(),
+        }];
+        let text = build_anki_txt(&rows);
+        assert!(text.starts_with("#separator:tab\n#html:true\n#deck column:3\n#tags column:4\n"));
+        assert!(text.contains("A &amp; B &lt;c&gt;\t第一行<br>第二行\t书::章\ttag1 tag2"));
+        assert!(text.ends_with('\n'));
+        assert_eq!(build_anki_txt(&[]).lines().count(), 4, "没有卡片时只有表头");
+    }
+
+    #[test]
+    fn exports_anki_txt_from_cards_and_rejects_bad_path() {
+        let (_directory, state) = test_state();
+        crate::cards::create_card(
+            &state,
+            crate::models::CreateCardInput {
+                source_ref: None,
+                excerpt: "摘录".into(),
+                user_note: "笔记".into(),
+                question: String::new(),
+                parent_id: None,
+                sort_order: 0,
+                annotation: None,
+                excerpt_image: None,
+                link_aliases: None,
+                canvas_id: None,
+                x: None,
+                y: None,
+            },
+        )
+        .unwrap();
+        let path = std::env::temp_dir().join(format!("pdfnote-anki-export-{}.txt", Uuid::new_v4()));
+        let count = export_anki_txt(
+            &state,
+            AnkiExportInput { path: path.to_string_lossy().to_string(), canvas_id: None },
+        )
+        .unwrap();
+        assert_eq!(count, 1);
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("摘录<br><br>笔记"), "背面应保留摘录与笔记：{content}");
+        fs::remove_file(&path).ok();
+
+        assert!(export_anki_txt(
+            &state,
+            AnkiExportInput { path: "/tmp/pdfnote-anki.md".into(), canvas_id: None },
+        )
+        .is_err(), "必须使用 .txt");
+    }
 
     fn write_temp(content: &str) -> String {
         let path = std::env::temp_dir().join(format!("pdfnote-anki-{}.txt", Uuid::new_v4()));

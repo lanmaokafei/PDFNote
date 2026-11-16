@@ -60,6 +60,7 @@ pub fn run() {
             commands::delete_mindmap_canvas,
             commands::preview_anki_txt,
             commands::import_anki_txt,
+            commands::export_anki_txt,
             commands::list_annotations,
             commands::update_annotation_geometry,
             commands::remove_annotation,

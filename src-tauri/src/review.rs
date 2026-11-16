@@ -12,19 +12,46 @@ pub fn list_due_cards(
     state: &AppState,
     now: String,
     limit: Option<u32>,
+    card_ids: Option<Vec<String>>,
 ) -> Result<Vec<Card>, String> {
     DateTime::parse_from_rfc3339(&now).map_err(|_| "now must be an RFC 3339 timestamp")?;
+    // Some(ids) = 只复习这一组卡（学习报告的「卡住清单」）；Some(空) 表示没有可复习的卡。
+    let filtered = card_ids.map(|ids| {
+        let mut seen = std::collections::HashSet::new();
+        ids.into_iter()
+            .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+            .take(500)
+            .collect::<Vec<_>>()
+    });
+    if matches!(&filtered, Some(ids) if ids.is_empty()) {
+        return Ok(Vec::new());
+    }
     let database = state.db()?;
-    let query = format!(
+    let mut query = format!(
         "SELECT {CARD_COLUMNS} FROM cards
-         WHERE surface_review = 1 AND due <= ?1 ORDER BY due, id LIMIT ?2"
+         WHERE surface_review = 1 AND due <= ?1"
     );
+    if let Some(ids) = &filtered {
+        let placeholders = vec!["?"; ids.len()].join(", ");
+        query.push_str(&format!(" AND id IN ({placeholders})"));
+    }
+    let limit_index = filtered.as_ref().map(|ids| ids.len()).unwrap_or(0) + 2;
+    query.push_str(&format!(" ORDER BY due, id LIMIT ?{limit_index}"));
+
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(now.clone())];
+    if let Some(ids) = &filtered {
+        for id in ids {
+            values.push(Box::new(id.clone()));
+        }
+    }
+    values.push(Box::new(limit.unwrap_or(200).clamp(1, 500)));
+
     let mut statement = database
         .prepare(&query)
         .map_err(|error| error.to_string())?;
     let mut cards = statement
         .query_map(
-            params![now, limit.unwrap_or(200).clamp(1, 500)],
+            rusqlite::params_from_iter(values.iter().map(|value| value.as_ref())),
             card_from_row,
         )
         .map_err(|error| error.to_string())?
@@ -349,6 +376,42 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM review_logs", [], |row| row.get(0))
             .unwrap();
         assert_eq!(logs, 1);
+    }
+
+    #[test]
+    fn due_cards_can_be_filtered_by_card_ids() {
+        let (_directory, state) = test_state();
+        let make = |text: &str| {
+            create_card(
+                &state,
+                CreateCardInput {
+                    source_ref: None,
+                    excerpt: text.into(),
+                    user_note: String::new(),
+                    question: String::new(),
+                    parent_id: None,
+                    sort_order: 0,
+                    annotation: None,
+                    excerpt_image: None,
+                    link_aliases: None,
+                    canvas_id: None,
+                    x: None,
+                    y: None,
+                },
+            )
+            .unwrap()
+        };
+        let first = make("第一张");
+        let _second = make("第二张");
+        let now = "2030-01-01T00:00:00.000Z".to_string();
+
+        assert_eq!(list_due_cards(&state, now.clone(), None, None).unwrap().len(), 2);
+
+        let only = list_due_cards(&state, now.clone(), None, Some(vec![first.id.clone(), first.id.clone()])).unwrap();
+        assert_eq!(only.len(), 1, "重复 id 只算一次");
+        assert_eq!(only[0].id, first.id);
+
+        assert!(list_due_cards(&state, now, None, Some(Vec::new())).unwrap().is_empty(), "空集合表示没有卡可复习");
     }
 
     #[test]

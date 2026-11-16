@@ -306,11 +306,54 @@ export interface BuildClozeOptions {
  * 从摘录生成挖空练习。
  * 挑不出空时 `reason` 非空，调用方应退回「整句回忆」。
  */
+/** 手动挖空：卡片文本里写 `{{词}}`，就用这些词当空（最多 12 个）。 */
+export function parseManualBlanks(raw: string): ClozeExercise | null {
+  const matches: Array<{ start: number; end: number; answer: string }> = []
+  const pattern = /\{\{([^{}]*)\}\}/gu
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(raw)) !== null) {
+    if (matches.length >= 12) break
+    const answer = (match[1] ?? '').trim()
+    if (!answer) continue
+    matches.push({ start: match.index, end: match.index + match[0].length, answer })
+  }
+  if (matches.length === 0) return null
+
+  const segments: ClozeSegment[] = []
+  const blanks: ClozeBlank[] = []
+  let cursor = 0
+  for (const item of matches) {
+    if (item.start > cursor) segments.push({ kind: 'text', text: raw.slice(cursor, item.start) })
+    const length = Array.from(item.answer).length
+    const blank: ClozeBlank = {
+      id: `b${blanks.length}`,
+      answer: item.answer,
+      hint: `${Array.from(item.answer)[0]}…（${length} 字）`,
+      length,
+    }
+    blanks.push(blank)
+    segments.push({ kind: 'blank', blank })
+    cursor = item.end
+  }
+  if (cursor < raw.length) segments.push({ kind: 'text', text: raw.slice(cursor) })
+
+  return {
+    excerpt: raw.replace(/\{\{([^{}]*)\}\}/gu, (_, inner: string) => (inner ?? '').trim()),
+    segments,
+    blanks,
+    reason: '',
+  }
+}
+
 export function buildCloze(excerpt: string, options: BuildClozeOptions = {}): ClozeExercise {
   const maxBlanks = Math.max(1, Math.min(4, options.maxBlanks ?? 2))
   const raw = (excerpt ?? '').replace(/\r/g, '').replace(/[ \t]+/g, ' ').trim()
   const empty: ClozeExercise = { excerpt: raw, segments: [], blanks: [], reason: '没有可挖空的文字摘录' }
   if (!raw) return empty
+
+  // 手写 `{{词}}` 优先：读者指定挖哪里，就不再自动挑词，也不受公式/长度限制。
+  const manual = parseManualBlanks(raw)
+  if (manual) return manual
 
   const pieces = parsePieces(raw)
   // 没有 $ 包裹的裸 LaTeX（\sum、x_i、^{n}）同样是公式，挖空只会变成猜字符；

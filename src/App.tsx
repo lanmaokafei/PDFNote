@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import {
   BookOpen,
   BookOpenCheck,
@@ -71,6 +71,8 @@ function App() {
   const [jumpTarget, setJumpTarget] = useState<{ documentId: string; page: number; token: number } | null>(null)
   // 粗读精读里点页码不能跳回资料库工作区（那会连带把画布换成普通画布）。
   const [closeJump, setCloseJump] = useState<{ documentId: string; page: number; token: number } | null>(null)
+  // 学习报告「开始复习这些卡」：把卡片集合交给复习工作区，进入时只看这一组。
+  const [reviewCardIds, setReviewCardIds] = useState<string[] | null>(null)
   const { menu, show, close } = useContextMenu()
   const loadCards = useCardStore((state) => state.loadCards)
   const cardsById = useCardStore((state) => state.cardsById)
@@ -116,6 +118,23 @@ function App() {
     window.addEventListener('pdfnote:open-source', handler)
     return () => window.removeEventListener('pdfnote:open-source', handler)
   }, [activeDocument?.id, view])
+
+  // goTo 每次渲染都是新函数，用 ref 拿最新版本，避免事件监听反复重绑。
+  const goToRef = useRef(goTo)
+  useEffect(() => {
+    goToRef.current = goTo
+  })
+  // 学习报告里点「开始复习这些卡」：切到复习视图并只看这一组到期卡片。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ cardIds?: string[] }>).detail
+      if (!detail?.cardIds?.length) return
+      setReviewCardIds(detail.cardIds)
+      goToRef.current('review')
+    }
+    window.addEventListener('pdfnote:review-cards', handler)
+    return () => window.removeEventListener('pdfnote:review-cards', handler)
+  }, [])
 
   useEffect(() => {
     if (!desktop) return
@@ -203,7 +222,7 @@ function App() {
       label: '复习',
       hint: `${status?.card_count ?? cardCount} 张卡片`,
       active: !documentOpen && view === 'review',
-      onClick: () => goTo('review'),
+      onClick: () => { setReviewCardIds(null); goTo('review') },
     },
     {
       key: 'closereading' as const,
@@ -264,7 +283,7 @@ function App() {
           { id: 'board', label: '卡片盒', icon: LayoutGrid, checked: !documentOpen && view === 'board', onSelect: () => goTo('board') },
           { id: 'notebook', label: '笔记本', icon: NotebookPen, checked: !documentOpen && view === 'notebook', onSelect: () => goTo('notebook') },
           { id: 'mindmap', label: '知识脑图', icon: Network, checked: !documentOpen && view === 'mindmap', onSelect: () => goTo('mindmap') },
-          { id: 'review', label: '复习', icon: Sparkles, checked: !documentOpen && view === 'review', onSelect: () => goTo('review') },
+          { id: 'review', label: '复习', icon: Sparkles, checked: !documentOpen && view === 'review', onSelect: () => { setReviewCardIds(null); goTo('review') } },
           { id: 'closereading', label: '粗读精读', icon: BookOpenCheck, checked: !documentOpen && view === 'closereading', onSelect: () => goTo('closereading') },
           { id: 'backup', label: '备份与恢复', icon: ShieldCheck, checked: !documentOpen && view === 'backup', onSelect: () => goTo('backup') },
         ] },
@@ -355,7 +374,11 @@ function App() {
               )}
               {view === 'review' && (
                 <Suspense fallback={<ViewLoading label="正在加载复习队列…" />}>
-                  <ReviewWorkspace onCardsChanged={() => void refreshStatus()} />
+                  <ReviewWorkspace
+                    onCardsChanged={() => void refreshStatus()}
+                    cardIds={reviewCardIds}
+                    onClearFilter={() => setReviewCardIds(null)}
+                  />
                 </Suspense>
               )}
               {view === 'closereading' && (

@@ -171,6 +171,12 @@ export async function exportMarkdownFile(path: string, content: string): Promise
   desktopOnly()
   return invoke('export_markdown', { path, content })
 }
+/** 导出当前画布的卡片为 AnkiDroid 可导入的 txt（标准 4 列）。 */
+export async function exportAnkiTxt(path: string, canvasId: string | null): Promise<number> {
+  desktopOnly()
+  return invoke('export_anki_txt', { input: { path, canvasId } })
+}
+
 export async function exportOpmlFile(path: string, content: string): Promise<void> {
   desktopOnly()
   return invoke('export_opml', { path, content })
@@ -197,9 +203,10 @@ export async function listCards(limit = 10000): Promise<Card[]> {
   if (!isTauriRuntime()) return []
   return invoke('list_cards', { limit })
 }
-export async function listDueCards(now: string, limit = 200): Promise<Card[]> {
+export async function listDueCards(now: string, limit = 200, cardIds?: string[]): Promise<Card[]> {
   if (!isTauriRuntime()) return []
-  return invoke('list_due_cards', { now, limit })
+  // cardIds 有值 = 只复习这一组卡（学习报告里的「卡住清单」）；空数组表示没有卡。
+  return invoke('list_due_cards', { now, limit, cardIds: cardIds ?? null })
 }
 export async function createCard(input: CreateCardInput): Promise<Card> {
   desktopOnly()

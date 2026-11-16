@@ -21,6 +21,9 @@ import './ReviewWorkspace.css'
 
 interface ReviewWorkspaceProps {
   onCardsChanged: () => void
+  /** 只复习这一组卡片（学习报告的「卡住清单」）；null / 空 = 正常到期队列。 */
+  cardIds?: string[] | null
+  onClearFilter?: () => void
 }
 
 interface DraftContent {
@@ -86,7 +89,7 @@ function buildFourteenDayTrend(stats: ReviewStats | null) {
   })
 }
 
-export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
+export function ReviewWorkspace({ onCardsChanged, cardIds = null, onClearFilter }: ReviewWorkspaceProps) {
   const loadCards = useCardStore((state) => state.loadCards)
   const [queue, setQueue] = useState<Card[]>([])
   const [stats, setStats] = useState<ReviewStats | null>(null)
@@ -118,13 +121,14 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
   const current = queue[0]
   const busy = savingContent || ratingCardId !== null
 
+  const filterKey = cardIds ? cardIds.join(',') : ''
   const loadWorkspace = useCallback(async () => {
     const requestId = ++loadRequestRef.current
     setLoading(true)
     setError('')
     try {
       const [cards, nextStats] = await Promise.all([
-        listDueCards(new Date().toISOString(), 200),
+        listDueCards(new Date().toISOString(), 200, filterKey ? filterKey.split(',') : undefined),
         getReviewStats(dayStartIso()),
       ])
       if (!mountedRef.current || requestId !== loadRequestRef.current) return
@@ -143,7 +147,8 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
     } finally {
       if (mountedRef.current && requestId === loadRequestRef.current) setLoading(false)
     }
-  }, [])
+    // filterKey 用字符串做依赖：数组每次渲染都是新引用，会把队列反复重载。
+  }, [filterKey])
 
   useEffect(() => {
     mountedRef.current = true
@@ -210,6 +215,33 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
       }
     }
   }
+
+  // 键盘评分：空格揭示，1–4 对应 Again/Hard/Good/Easy；输入框里不抢键。
+  const ratingHandlerRef = useRef(handleRating)
+  useEffect(() => {
+    ratingHandlerRef.current = handleRating
+  })
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      if (!revealed) {
+        if (event.key === ' ' || event.key === 'Enter') {
+          if (busy || editing) return
+          event.preventDefault()
+          setRevealed(true)
+        }
+        return
+      }
+      const rating = ({ '1': 1, '2': 2, '3': 3, '4': 4 } as Record<string, Rating>)[event.key]
+      if (!rating || busy || editing) return
+      event.preventDefault()
+      ratingHandlerRef.current(rating)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [revealed, busy, editing])
 
   const beginEditing = () => {
     if (!current || busy) return
@@ -356,6 +388,15 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
           </button>
         </div>
       </header>
+
+      {cardIds && cardIds.length > 0 && (
+        <div className="review-filter-banner" data-testid="review-filter-banner">
+          <span>只复习「卡住的小节」里的 {cardIds.length} 张卡；复习完会自动回到正常队列。</span>
+          {onClearFilter && (
+            <button type="button" onClick={onClearFilter} disabled={busy || loading}>清除筛选</button>
+          )}
+        </div>
+      )}
 
       <div className="review-layout">
         <section className="review-session" aria-label="到期复习队列" aria-busy={busy || loading}>
@@ -581,7 +622,7 @@ export function ReviewWorkspace({ onCardsChanged }: ReviewWorkspaceProps) {
                       </button>
                     ) : (
                       <div className="review-rating-area">
-                        <p>对比结果见上方，评分仍由你决定；提交后立即保存并进入下一张。</p>
+                        <p>对比结果见上方，评分仍由你决定；提交后立即保存并进入下一张。<span className="review-key-hint">键盘 1–4 评分 · 空格揭示</span></p>
                         <div className="review-rating-grid">
                           {RATING_OPTIONS.map((option) => (
                             <button

@@ -189,3 +189,38 @@ describe('填空判定', () => {
     expect(blank.items.every((item) => item.verdict === 'empty')).toBe(true)
   })
 })
+
+describe('手动挖空 {{词}}', () => {
+  it('只挖标记里的词，段落文本原样保留', () => {
+    const exercise = buildCloze('患者出现{{急性左心衰竭}}，需要立即给予{{利尿治疗}}。')
+    expect(exercise.reason).toBe('')
+    expect(exercise.blanks.map((blank) => blank.answer)).toEqual(['急性左心衰竭', '利尿治疗'])
+    expect(exercise.segments.map((segment) => (segment.kind === 'text' ? segment.text : '【】')).join(''))
+      .toBe('患者出现【】，需要立即给予【】。')
+    expect(exercise.excerpt).toBe('患者出现急性左心衰竭，需要立即给予利尿治疗。')
+  })
+
+  it('手动标记优先于自动规则：公式摘录也能挖', () => {
+    const exercise = buildCloze('熵的定义是 $H = -\\sum p \\log p$，单位 {{bit}}。')
+    expect(exercise.reason).toBe('')
+    expect(exercise.blanks.map((blank) => blank.answer)).toEqual(['bit'])
+  })
+
+  it('空的 {{ }} 忽略；全是空标记时退回自动/整句', () => {
+    const exercise = buildCloze('{{ }} {{  }}')
+    expect(exercise.blanks).toHaveLength(0)
+    expect(exercise.reason).not.toBe('')
+
+    // 空标记旁边的正文仍按自动规则处理，不会因为「有花括号」就当成手动挖空。
+    const mixed = buildCloze('患者出现急性左心衰竭，需要立即给予利尿治疗。{{ }}')
+    expect(mixed.blanks.length).toBeGreaterThan(0)
+    expect(mixed.blanks.every((blank) => blank.answer.trim().length > 0)).toBe(true)
+  })
+
+  it('标记可以出现在句首句尾，不会丢字符', () => {
+    const exercise = buildCloze('{{甲}}中间{{乙}}')
+    expect(exercise.blanks.map((blank) => blank.answer)).toEqual(['甲', '乙'])
+    expect(exercise.segments[0]).toEqual({ kind: 'blank', blank: expect.objectContaining({ answer: '甲' }) })
+    expect(exercise.segments.at(-1)).toEqual({ kind: 'blank', blank: expect.objectContaining({ answer: '乙' }) })
+  })
+})

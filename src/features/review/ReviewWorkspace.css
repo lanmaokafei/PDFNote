@@ -252,3 +252,39 @@
   font-size: 11px;
   line-height: 1.6;
 }
+
+/* 只复习指定卡片（学习报告的「卡住清单」）。 */
+.review-filter-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid #e6d9c9;
+  border-radius: 9px;
+  color: #7a5c39;
+  background: #fbf6ee;
+  font-size: 12px;
+}
+
+.review-filter-banner button {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid #e0cfb8;
+  border-radius: 7px;
+  color: #7a5c39;
+  background: #fff;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.review-filter-banner button:hover:not(:disabled) {
+  background: #f6efe3;
+}
+
+.review-key-hint {
+  margin-left: 8px;
+  color: #97a295;
+  font-size: 11px;
+}

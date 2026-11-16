@@ -80,7 +80,11 @@ await page.addInitScript(({ cards }) => {
     }),
     list_documents: () => [],
     list_cards: () => state,
-    list_due_cards: () => state,
+    // cardIds 有值 = 学习报告的「只复习这一组卡」。
+    list_due_cards: (args) => {
+      const ids = args?.cardIds
+      return ids ? state.filter((card) => ids.includes(card.id)) : state
+    },
     get_review_stats: () => stats,
     update_card_content: (args) => {
       const input = args?.input ?? {}
@@ -186,6 +190,31 @@ try {
   check(await score.count() === 0, '无文字答案不应显示匹配度')
 
   await page.screenshot({ path: '/tmp/pdfnote-review-answer.png', fullPage: true })
+
+  // 键盘评分：第二张卡已揭示，按 4（Easy）应直接提交并清空队列。
+  await page.keyboard.press('4')
+  await page.waitForTimeout(900)
+  const callsAfterKey = await page.evaluate(() => window.__reviewCalls.length)
+  check(callsAfterKey === 2, `键盘评分没有提交：${callsAfterKey}`)
+  check(await page.locator('.review-card').count() === 0, '键盘评分后没有进入空队列')
+
+  // 只复习指定卡片：派发学习报告的事件，队列应只剩 r1。
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent('pdfnote:review-cards', { detail: { cardIds: ['r1'] } }))
+  })
+  await page.waitForTimeout(900)
+  check(await page.locator('[data-testid="review-filter-banner"]').count() === 1, '没有渲染筛选横幅')
+  const banner = await page.locator('[data-testid="review-filter-banner"]').innerText()
+  check(banner.includes('1 张卡'), `筛选横幅数量不对：${banner}`)
+  const filteredHeading = await page.locator('.review-session-heading').innerText()
+  check(filteredHeading.includes('/ 1 已完成'), `筛选后队列数量不对：${filteredHeading}`)
+  check((await page.locator('.review-question h2').innerText()).includes('线粒体'), '筛选后显示的不是指定卡片')
+
+  await page.getByRole('button', { name: '清除筛选' }).click()
+  await page.waitForTimeout(700)
+  check(await page.locator('[data-testid="review-filter-banner"]').count() === 0, '清除筛选后横幅仍在')
+  const clearedHeading = await page.locator('.review-session-heading').innerText()
+  check(clearedHeading.includes('/ 2 已完成'), `清除筛选后应回到 2 张队列：${clearedHeading}`)
 } catch (error) {
   problems.push(`smoke aborted: ${error.stack ?? error.message}`)
 }

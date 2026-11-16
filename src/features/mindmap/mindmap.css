@@ -1287,3 +1287,11 @@ button.mindmap-field-label:hover { color: #456c43; }
 }
 .mindmap-style-foot button:hover { background: #f2f5ee; }
 .mindmap-style-foot span { color: #a3ab9d; font-size: 8px; }
+
+/* 卡片编辑器里的字段提示（手动挖空语法）。 */
+.card-editor-hint {
+  margin-top: 4px;
+  color: #97a295;
+  font-size: 11px;
+  line-height: 1.5;
+}

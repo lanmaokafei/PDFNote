@@ -74,6 +74,7 @@ export function CardEditor({ card, busy, onClose, onSave }: CardEditorProps) {
               onChange={(event) => setDraft((current) => ({ ...current, excerpt: event.target.value }))}
               placeholder="保留与问题相关的原文或上下文"
             />
+            <small className="card-editor-hint">用 {"{{词}}"} 可指定挖空；不写就按规则自动挑关键词。</small>
           </label>
           <label>
             <span>个人笔记</span>

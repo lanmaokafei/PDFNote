@@ -44,6 +44,7 @@ import {
   applyCardOrder,
   clearMindmapCards,
   createMindmapCanvas,
+  exportAnkiTxt,
   exportMarkdownFile,
   exportOpmlFile,
   isTauriRuntime,
@@ -1544,6 +1545,29 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     return () => window.cancelAnimationFrame(frame)
   }, [outlineEditing, outlineFocusTick])
 
+  /** 导出 AnkiDroid txt：只导当前画布的卡片，牌组用书名。 */
+  const handleExportAnki = useCallback(async () => {
+    if (exporting) return
+    setExporting(true)
+    setError('')
+    setNotice('')
+    try {
+      if (!isTauriRuntime()) throw new Error('导出 Anki 卡片需要在桌面应用中使用')
+      const filename = `Anki-${new Date().toISOString().slice(0, 10)}.txt`
+      const target = await saveDialog({
+        defaultPath: filename,
+        filters: [{ name: 'AnkiDroid txt', extensions: ['txt'] }],
+      })
+      if (!target) return
+      const count = await exportAnkiTxt(target, canvasId || null)
+      setNotice(`已导出 ${count} 张卡片到 ${target}`)
+    } catch (reason) {
+      setError(`导出失败：${errorMessage(reason)}`)
+    } finally {
+      setExporting(false)
+    }
+  }, [canvasId, exporting])
+
   const handleExportOpml = useCallback(async () => {
     if (exporting) return
     setExporting(true)
@@ -1704,6 +1728,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
         { id: 'outline', label: '切换到大纲', icon: ListTree, onSelect: () => setViewMode('outline') },
         { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
           { id: 'export-opml', label: '导出 OPML（分层背诵）', icon: Download, onSelect: () => void handleExportOpml() },
+          { id: 'export-anki', label: '导出 AnkiDroid txt', icon: Download, onSelect: () => void handleExportAnki() },
       ] })
     }
     return sections
@@ -1739,6 +1764,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
           { id: 'canvas', label: '返回画布', icon: LayoutGrid, onSelect: () => setViewMode('canvas') },
           { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
           { id: 'export-opml', label: '导出 OPML（分层背诵）', icon: Download, onSelect: () => void handleExportOpml() },
+          { id: 'export-anki', label: '导出 AnkiDroid txt', icon: Download, onSelect: () => void handleExportAnki() },
         ] },
       ],
     })
@@ -1761,6 +1787,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
           { id: 'outline', label: '切换到大纲', icon: ListTree, onSelect: () => setViewMode('outline') },
           { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
           { id: 'export-opml', label: '导出 OPML（分层背诵）', icon: Download, onSelect: () => void handleExportOpml() },
+          { id: 'export-anki', label: '导出 AnkiDroid txt', icon: Download, onSelect: () => void handleExportAnki() },
           { id: 'recall', label: recallActive ? '结束主动回忆' : '开始主动回忆', icon: Sparkles, checked: recallActive, disabled: !recallActive && !cards.length, onSelect: recallActive ? stopRecall : startRecall },
         ] },
       ],
@@ -1775,6 +1802,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
         { id: 'new', label: '新建独立卡片', icon: Plus, disabled: busy, onSelect: () => setEditor('new') },
         { id: 'export', label: '导出 Markdown', icon: Download, onSelect: () => void handleExportMarkdown() },
           { id: 'export-opml', label: '导出 OPML（分层背诵）', icon: Download, onSelect: () => void handleExportOpml() },
+          { id: 'export-anki', label: '导出 AnkiDroid txt', icon: Download, onSelect: () => void handleExportAnki() },
       ] }],
     })
   }

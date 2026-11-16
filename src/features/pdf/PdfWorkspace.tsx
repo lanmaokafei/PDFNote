@@ -56,7 +56,6 @@ import {
   MoreHorizontal,
   MousePointer2,
   PenLine,
-  Scissors,
   Sparkles,
   Square,
   Tag,
@@ -2063,7 +2062,6 @@ export function PdfWorkspace({
           )}
 
           <div className="pdf-dock" role="toolbar" aria-label="标注与阅读工具">
-            <button type="button" disabled title="剪切（暂未支持）"><Scissors size={17} /><span>剪切</span></button>
             <button type="button" className={tool === 'select' ? 'is-active' : ''} onClick={() => setTool('select')} disabled={recallMode} aria-pressed={tool === 'select'} title="套索选择"><MousePointer2 size={17} /><span>套索</span></button>
             <button type="button" className={tool === 'text' ? 'is-active' : ''} onClick={() => setTool('text')} disabled={recallMode || firstPass} aria-pressed={tool === 'text'} title={firstPass ? '粗读只标关键词，精读再拖选文字' : '文字选择：像 Word 一样拖选文字，可复制或建卡'}><Type size={17} /><span>文字</span></button>
             <button type="button" className={tool === 'highlight' ? 'is-active' : ''} onClick={() => setTool('highlight')} disabled={recallMode} aria-pressed={tool === 'highlight'} title="高亮颜色"><Highlighter size={17} /><span>颜色</span></button>
@@ -2402,9 +2400,23 @@ export function PdfWorkspace({
                       生成复习清单
                     </button>
                     {stuckList && stuckList.length > 0 && (
-                      <button type="button" data-testid="report-stuck-copy" onClick={copyStuckList}>
-                        {reportCopied ? '已复制' : '复制清单'}
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          data-testid="report-stuck-start"
+                          onClick={() => {
+                            window.dispatchEvent(new CustomEvent('pdfnote:review-cards', {
+                              detail: { cardIds: stuckList.map((item) => item.id) },
+                            }))
+                            setProgressOpen(false)
+                          }}
+                        >
+                          开始复习这 {stuckList.length} 张
+                        </button>
+                        <button type="button" data-testid="report-stuck-copy" onClick={copyStuckList}>
+                          {reportCopied ? '已复制' : '复制清单'}
+                        </button>
+                      </>
                     )}
                   </div>
                 )}

@@ -201,8 +201,9 @@ pub fn list_due_cards(
     state: State<'_, AppState>,
     now: String,
     limit: Option<u32>,
+    card_ids: Option<Vec<String>>,
 ) -> Result<Vec<models::Card>, String> {
-    review::list_due_cards(&state, now, limit)
+    review::list_due_cards(&state, now, limit, card_ids)
 }
 
 #[tauri::command]
@@ -377,6 +378,14 @@ pub fn get_review_stats(
     day_start: String,
 ) -> Result<models::ReviewStats, String> {
     review::get_review_stats(&state, day_start)
+}
+
+#[tauri::command(async)]
+pub fn export_anki_txt(
+    state: State<'_, AppState>,
+    input: anki::AnkiExportInput,
+) -> Result<u32, String> {
+    anki::export_anki_txt(&state, input)
 }
 
 #[tauri::command(async)]

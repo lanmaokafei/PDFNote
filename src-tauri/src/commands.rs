@@ -364,6 +364,14 @@ pub fn record_review(
 }
 
 #[tauri::command]
+pub fn get_card_review_stats(
+    state: State<'_, AppState>,
+    since: String,
+) -> Result<Vec<review::CardReviewStat>, String> {
+    review::get_card_review_stats(&state, &since)
+}
+
+#[tauri::command]
 pub fn get_review_stats(
     state: State<'_, AppState>,
     day_start: String,

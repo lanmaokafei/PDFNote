@@ -4,6 +4,7 @@ use crate::{
     state::AppState,
 };
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
+use serde::Serialize;
 use rusqlite::{params, OptionalExtension};
 use uuid::Uuid;
 
@@ -231,6 +232,52 @@ pub fn get_review_stats(state: &AppState, day_start: String) -> Result<ReviewSta
     })
 }
 
+/// 某张卡在一段时间内的复习明细（学习报告用）：总次数 + 四档评分分布。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardReviewStat {
+    pub card_id: String,
+    pub reviews: i64,
+    pub again: i64,
+    pub hard: i64,
+    pub good: i64,
+    pub easy: i64,
+    pub last_reviewed_at: String,
+}
+
+pub fn get_card_review_stats(state: &AppState, since: &str) -> Result<Vec<CardReviewStat>, String> {
+    DateTime::parse_from_rfc3339(since).map_err(|_| "since must be an RFC 3339 timestamp")?;
+    let database = state.db()?;
+    let mut statement = database
+        .prepare(
+            "SELECT card_id, COUNT(*),
+                    COALESCE(SUM(rating = 1), 0), COALESCE(SUM(rating = 2), 0),
+                    COALESCE(SUM(rating = 3), 0), COALESCE(SUM(rating = 4), 0),
+                    MAX(reviewed_at)
+             FROM review_logs
+             WHERE reviewed_at >= ?1
+             GROUP BY card_id
+             ORDER BY COUNT(*) DESC, card_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let stats = statement
+        .query_map(params![since], |row| {
+            Ok(CardReviewStat {
+                card_id: row.get(0)?,
+                reviews: row.get(1)?,
+                again: row.get(2)?,
+                hard: row.get(3)?,
+                good: row.get(4)?,
+                easy: row.get(5)?,
+                last_reviewed_at: row.get(6)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(stats)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +349,52 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM review_logs", [], |row| row.get(0))
             .unwrap();
         assert_eq!(logs, 1);
+    }
+
+    #[test]
+    fn card_review_stats_group_by_rating_and_respect_since() {
+        let (_directory, state) = test_state();
+        let card = create_card(
+            &state,
+            CreateCardInput {
+                source_ref: None,
+                excerpt: "excerpt".into(),
+                user_note: String::new(),
+                question: String::new(),
+                parent_id: None,
+                sort_order: 0,
+                annotation: None,
+                excerpt_image: None,
+                link_aliases: None,
+                canvas_id: None,
+                x: None,
+                y: None,
+            },
+        )
+        .unwrap();
+
+        for (index, rating) in [1, 2, 4].iter().enumerate() {
+            let current = {
+                let database = state.db().unwrap();
+                get_card(&database, &card.id).unwrap()
+            };
+            let mut input = review(&current, &format!("event-{index}"));
+            input.rating = *rating;
+            input.reviewed_at = format!("2026-01-0{}T00:00:00.000Z", index + 1);
+            record_review(&state, input).unwrap();
+        }
+
+        let stats = get_card_review_stats(&state, "2026-01-01T00:00:00.000Z").unwrap();
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].card_id, card.id);
+        assert_eq!(
+            (stats[0].reviews, stats[0].again, stats[0].hard, stats[0].good, stats[0].easy),
+            (3, 1, 1, 0, 1)
+        );
+        assert_eq!(stats[0].last_reviewed_at, "2026-01-03T00:00:00.000Z");
+
+        // since 之后没有复习记录就返回空；时间格式错误直接报错。
+        assert!(get_card_review_stats(&state, "2026-02-01T00:00:00.000Z").unwrap().is_empty());
+        assert!(get_card_review_stats(&state, "not-a-time").is_err());
     }
 }

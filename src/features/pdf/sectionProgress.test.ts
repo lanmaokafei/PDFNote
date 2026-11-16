@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildSectionProgress, type ProgressCardLike } from './sectionProgress'
+import {
+  buildSectionProgress,
+  countSectionFilters,
+  filterSections,
+  type ProgressCardLike,
+} from './sectionProgress'
 
 const entries = [
   { cardId: 'ch1', page: 1, title: '第一章', level: 0 },
@@ -67,5 +72,35 @@ describe('章节进度', () => {
   it('卡片挂在不存在的父节点下时不会崩', () => {
     const progress = buildSectionProgress(entries, [card('orphan', 'missing', 1)], 1)
     expect(progress.cards).toBe(0)
+  })
+})
+
+describe('进度筛选', () => {
+  const nodes = [
+    { cardId: 'a', title: 'A', page: 1, level: 0, endPage: null, cardCount: 0, reviewedCount: 0, children: [] },
+    { cardId: 'b', title: 'B', page: 2, level: 0, endPage: null, cardCount: 3, reviewedCount: 1, children: [] },
+    { cardId: 'c', title: 'C', page: 3, level: 0, endPage: null, cardCount: 2, reviewedCount: 2, children: [] },
+  ]
+
+  it('按「没写卡 / 没复习完 / 已完成」筛出对应小节', () => {
+    expect(filterSections(nodes, 'empty').map((node) => node.cardId)).toEqual(['a'])
+    expect(filterSections(nodes, 'pending').map((node) => node.cardId)).toEqual(['b'])
+    expect(filterSections(nodes, 'done').map((node) => node.cardId)).toEqual(['c'])
+    expect(filterSections(nodes, 'all')).toHaveLength(3)
+  })
+
+  it('筛选计数和实际筛出的条数一致', () => {
+    const counts = countSectionFilters(nodes)
+    expect(counts).toEqual({ all: 3, empty: 1, pending: 1, done: 1 })
+    for (const filter of ['empty', 'pending', 'done'] as const) {
+      expect(filterSections(nodes, filter)).toHaveLength(counts[filter])
+    }
+  })
+
+  it('全空或全满时不会把另一类误算进来', () => {
+    const emptyOnly = countSectionFilters([nodes[0]])
+    expect(emptyOnly).toEqual({ all: 1, empty: 1, pending: 0, done: 0 })
+    const doneOnly = countSectionFilters([nodes[2]])
+    expect(doneOnly).toEqual({ all: 1, empty: 0, pending: 0, done: 1 })
   })
 })

@@ -79,6 +79,7 @@ pub fn run() {
             commands::merge_cards,
             commands::record_review,
             commands::get_review_stats,
+            commands::get_card_review_stats,
             commands::import_document,
             commands::list_documents,
             commands::resolve_document_path,

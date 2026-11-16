@@ -470,6 +470,11 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       storeReading()
       return readingState
     },
+    // 学习报告：模拟「第一章骨架卡复习 4 次（重来 2）、1.1 复习 3 次」。
+    get_card_review_stats: () => [
+      { cardId: 'new-card-4', reviews: 4, again: 2, hard: 1, good: 1, easy: 0, lastReviewedAt: '2026-11-15T10:00:00.000Z' },
+      { cardId: 'new-card-5', reviews: 3, again: 1, hard: 0, good: 2, easy: 0, lastReviewedAt: '2026-11-15T11:00:00.000Z' },
+    ],
     save_toc_json: (args) => {
       readingState = { ...readingState, tocJson: args?.input?.tocJson ?? '', updatedAt: new Date().toISOString() }
       storeReading()
@@ -2236,8 +2241,41 @@ if (process.env.STEP === 'section-progress') {
     problems.push(`当前小节标记不对：${JSON.stringify(currentRows)}`)
   }
 
-  // 点一行跳到该节起始页，弹窗收起。
-  await page.locator('[data-testid="section-progress-row"]').nth(3).click()
+  // 筛选：空画布时「没写卡」是 4 条、「已完成」是 0 条并给提示。
+  await page.locator('[data-testid="section-filter-empty"]').click()
+  await page.waitForTimeout(200)
+  const emptyFiltered = await page.locator('[data-testid="section-progress-row"]').count()
+  if (emptyFiltered !== 4) problems.push(`没写卡筛选应 4 条：${emptyFiltered}`)
+  await page.locator('[data-testid="section-filter-done"]').click()
+  await page.waitForTimeout(200)
+  const doneFiltered = await page.locator('[data-testid="section-progress-row"]').count()
+  const doneEmpty = await page.locator('[data-testid="section-progress-empty"]').textContent()
+  if (doneFiltered !== 0) problems.push(`已完成筛选应为空：${doneFiltered}`)
+  if (!doneEmpty.includes('复习完')) problems.push(`空筛选提示不对：${doneEmpty}`)
+  await page.locator('[data-testid="section-filter-all"]').click()
+  await page.waitForTimeout(200)
+  const allFiltered = await page.locator('[data-testid="section-progress-row"]').count()
+  if (allFiltered !== 4) problems.push(`全部筛选应 4 条：${allFiltered}`)
+
+  // 本周复盘：mock 里第一章骨架卡 4 次（重来 2）、1.1 三次 → 7 次复习，第一章卡住。
+  await page.locator('[data-testid="report-tab-weekly"]').click()
+  await page.waitForTimeout(600)
+  const weekly = await page.evaluate(() => ({
+    metrics: [...document.querySelectorAll('[data-testid="report-metrics"] > div')].map((item) => item.textContent ?? ''),
+    stuck: [...document.querySelectorAll('[data-testid="report-stuck-row"]')].map((item) => item.textContent ?? ''),
+    empty: document.querySelector('[data-testid="report-empty"]')?.textContent ?? '',
+  }))
+  const metricsText = weekly.metrics.join('|')
+  if (!metricsText.includes('0本周写卡')) problems.push(`本周写卡不该算骨架：${metricsText}`)
+  if (!metricsText.includes('7复习次数')) problems.push(`复习次数不对：${metricsText}`)
+  if (!metricsText.includes('2复习卡片')) problems.push(`复习卡片数不对：${metricsText}`)
+  if (!metricsText.includes('43%记得率')) problems.push(`记得率不对：${metricsText}`)
+  if (weekly.stuck.length !== 1) problems.push(`卡住小节应只有第一章：${weekly.stuck.length}`)
+  if (!weekly.stuck[0]?.includes('第一章 绪论')) problems.push(`卡住小节不对：${weekly.stuck[0]}`)
+  if (!weekly.stuck[0]?.includes('复习 7 次')) problems.push(`卡住明细不对：${weekly.stuck[0]}`)
+
+  // 点卡住的小节回到 PDF 并收起弹窗。
+  await page.locator('[data-testid="report-stuck-row"]').click()
   await page.waitForTimeout(700)
   const afterJump = await page.evaluate(() => ({
     modal: document.querySelectorAll('[data-testid="section-progress-modal"]').length,
@@ -2245,7 +2283,7 @@ if (process.env.STEP === 'section-progress') {
   if (afterJump.modal !== 0) problems.push('点章节后弹窗没有关闭')
 
   await browser.close()
-  console.log(JSON.stringify({ problems, step: 'section-progress', beforeBuild, progress, afterJump }, null, 2))
+  console.log(JSON.stringify({ problems, step: 'section-progress', beforeBuild, progress, emptyFiltered, doneFiltered, allFiltered, weekly, afterJump }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

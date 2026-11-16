@@ -1870,3 +1870,127 @@
   max-width: calc(100% - 28px);
   row-gap: 6px;
 }
+
+/* ---------- 学习报告：tab / 筛选 / 本周复盘（0.48.0） ---------- */
+
+.pdf-report-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0 8px;
+  border-bottom: 1px solid #e8ece4;
+}
+
+.pdf-report-tab {
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: #7b877a;
+  background: transparent;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.pdf-report-tab:hover {
+  color: #4f6350;
+}
+
+.pdf-report-tab.is-active {
+  border-bottom-color: #4f7f5c;
+  color: #33503c;
+  font-weight: 600;
+}
+
+.pdf-section-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+
+.pdf-section-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid #e0e6db;
+  border-radius: 999px;
+  color: #6b776a;
+  background: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pdf-section-filter span {
+  color: #a3ada0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-section-filter:hover {
+  background: #f4f8f0;
+}
+
+.pdf-section-filter.is-active {
+  border-color: #4f7f5c;
+  color: #2f4a37;
+  background: #eef6ea;
+}
+
+.pdf-section-filter.is-active span {
+  color: #4f7f5c;
+}
+
+.pdf-progress-empty {
+  margin: 8px 0 12px;
+  padding: 14px;
+  border: 1px dashed #dfe6da;
+  border-radius: 9px;
+  color: #8b9689;
+  font-size: 12px;
+  text-align: center;
+}
+
+.pdf-week-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 10px 0 6px;
+}
+
+.pdf-week-metrics > div {
+  padding: 10px 8px;
+  border: 1px solid #e6ece0;
+  border-radius: 9px;
+  background: #f8fbf5;
+  text-align: center;
+}
+
+.pdf-week-metrics strong {
+  display: block;
+  color: #33503c;
+  font-size: 20px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-week-metrics span {
+  color: #8b9689;
+  font-size: 11px;
+}
+
+.pdf-week-range {
+  margin: 0 0 10px;
+  color: #9aa496;
+  font-size: 11px;
+}
+
+.pdf-week-subtitle {
+  margin: 6px 0 4px;
+  color: #556253;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.pdf-progress-stats.is-stuck {
+  color: #a2543f;
+  font-weight: 600;
+}

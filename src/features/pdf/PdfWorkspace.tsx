@@ -31,6 +31,8 @@ import {
   listPageInks,
   listPageNotes,
   readPdfChunk,
+  getCardReviewStats,
+  type CardReviewStat,
   getReadingState,
   removeAnnotation,
   saveRecallNote,
@@ -77,7 +79,13 @@ import { readSizePreference, saveSizePreference } from '../ink/size'
 import { ClozePanel } from './ClozePanel'
 import { parentIdForPage, planSkeletonMerge, readPdfOutline, type TocEntry } from './pdfOutline'
 import { placeSkeletonNode } from './tocLayout'
-import { buildSectionProgress } from './sectionProgress'
+import {
+  buildSectionProgress,
+  countSectionFilters,
+  filterSections,
+  type SectionFilter,
+} from './sectionProgress'
+import { buildWeeklyReport, weekStartIso } from './weeklyReport'
 import { parseTocText } from './tocText'
 import {
   bumpClozeTurn,
@@ -219,8 +227,12 @@ export function PdfWorkspace({
   // 没有内置书签的扫描书：把目录页复制进来，走同一套建骨架 + 自动挂接。
   const [tocPasteOpen, setTocPasteOpen] = useState(false)
   const [tocPasteDraft, setTocPasteDraft] = useState('')
-  // 章节进度：目录骨架 + 当前画布卡片的复习情况，只读不落库。
+  // 学习报告：章节进度 + 本周复盘，只读不落库。
   const [progressOpen, setProgressOpen] = useState(false)
+  const [reportTab, setReportTab] = useState<'sections' | 'weekly'>('sections')
+  const [sectionFilter, setSectionFilter] = useState<SectionFilter>('all')
+  const [reviewStats, setReviewStats] = useState<CardReviewStat[]>([])
+  const [reportLoading, setReportLoading] = useState(false)
   // 挖空填空：在「整块遮挡」和「揭示」之间多一层，先补关键词再评分。
   const [clozeEnabled, setClozeEnabled] = useState(readClozePreference)
   const [clozeAnswers, setClozeAnswers] = useState<Record<string, string[]>>({})
@@ -1234,6 +1246,29 @@ export function PdfWorkspace({
     () => buildSectionProgress(tocMap[activeCanvasId] ?? [], cardList, currentPage),
     [tocMap, activeCanvasId, cardList, currentPage],
   )
+  const sectionFilterCounts = useMemo(() => countSectionFilters(sectionProgress.flat), [sectionProgress])
+  const visibleSections = useMemo(
+    () => filterSections(sectionProgress.flat, sectionFilter),
+    [sectionProgress, sectionFilter],
+  )
+  const weekStart = useMemo(() => weekStartIso(new Date()), [])
+  const weeklyReport = useMemo(
+    () => buildWeeklyReport({
+      entries: tocMap[activeCanvasId] ?? [],
+      cards: cardList,
+      stats: reviewStats,
+      weekStart,
+    }),
+    [tocMap, activeCanvasId, cardList, reviewStats, weekStart],
+  )
+  /** 拉本周复习统计：只在打开报告/切到本周 tab 时请求，失败就当没有记录。 */
+  const refreshReviewStats = useCallback(() => {
+    setReportLoading(true)
+    getCardReviewStats(weekStartIso(new Date()))
+      .then(setReviewStats)
+      .catch(() => setReviewStats([]))
+      .finally(() => setReportLoading(false))
+  }, [])
   const titleLinkIndex = useMemo(
     () => (titleLinkEnabled ? buildTitleLinkIndex(cardList) : null),
     [cardList, titleLinkEnabled],
@@ -1607,11 +1642,16 @@ export function PdfWorkspace({
             type="button"
             className="pdf-pass-action"
             data-testid="section-progress-open"
-            onClick={() => setProgressOpen(true)}
+            onClick={() => {
+              setProgressOpen(true)
+              setReportTab('sections')
+              setSectionFilter('all')
+              refreshReviewStats()
+            }}
             disabled={sectionProgress.sections === 0}
-            title={sectionProgress.sections === 0 ? '先按目录建骨架，才有章节进度' : '看每一节写了多少卡、复习了多少'}
+            title={sectionProgress.sections === 0 ? '先按目录建骨架，才有学习报告' : '章节进度与本周复盘'}
           >
-            章节进度
+            学习报告
           </button>
           <button type="button" className="pdf-pass-action" data-testid="pdf-pass-note" onClick={openRecall} disabled={readingBusy}>
             {recallNote ? '看粗读笔记' : '补写三句话'}
@@ -2113,52 +2153,148 @@ export function PdfWorkspace({
           if (event.target === event.currentTarget) setProgressOpen(false)
         }}>
           <div className="pdf-modal pdf-progress-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-progress-title" data-testid="section-progress-modal">
-            <small>CLOSE READING · PROGRESS</small>
-            <h2 id="pdf-progress-title">章节精读进度</h2>
-            <p className="pdf-recall-tip">
-              按目录骨架统计每一节子树下写了多少张卡、复习了多少张；点任意一行跳到该节起始页。
-            </p>
-            <div className="pdf-progress-summary" data-testid="section-progress-summary">
-              <div className="pdf-progress-counts">
-                <strong>{sectionProgress.reviewed}/{sectionProgress.cards}</strong>
-                <span>张卡已复习</span>
-                <span className="pdf-progress-dot">·</span>
-                <span>{sectionProgress.sectionsWithCards}/{sectionProgress.sections} 节已写卡</span>
-              </div>
-              <div className="pdf-progress-track">
-                <span
-                  className="pdf-progress-fill"
-                  style={{ width: `${sectionProgress.cards === 0 ? 0 : Math.round((sectionProgress.reviewed / sectionProgress.cards) * 100)}%` }}
-                  data-testid="section-progress-fill"
-                />
-              </div>
+            <small>CLOSE READING · REPORT</small>
+            <h2 id="pdf-progress-title">学习报告</h2>
+            <div className="pdf-report-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={reportTab === 'sections'}
+                className={`pdf-report-tab${reportTab === 'sections' ? ' is-active' : ''}`}
+                data-testid="report-tab-sections"
+                onClick={() => setReportTab('sections')}
+              >
+                章节进度
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={reportTab === 'weekly'}
+                className={`pdf-report-tab${reportTab === 'weekly' ? ' is-active' : ''}`}
+                data-testid="report-tab-weekly"
+                onClick={() => {
+                  setReportTab('weekly')
+                  if (reviewStats.length === 0 && !reportLoading) refreshReviewStats()
+                }}
+              >
+                本周复盘
+              </button>
             </div>
-            <ul className="pdf-progress-list">
-              {sectionProgress.flat.map((node) => (
-                <li key={node.cardId}>
-                  <button
-                    type="button"
-                    className={`pdf-progress-row${node.cardId === sectionProgress.currentCardId ? ' is-current' : ''}`}
-                    style={{ paddingLeft: 10 + node.level * 18 }}
-                    data-testid="section-progress-row"
-                    data-section-id={node.cardId}
-                    data-level={node.level}
-                    onClick={() => {
-                      goToPage(node.page)
-                      setProgressOpen(false)
-                    }}
-                  >
-                    <span className="pdf-progress-title">{node.title}</span>
-                    <span className="pdf-progress-page">
-                      第 {node.page}{node.endPage && node.endPage > node.page ? `–${node.endPage}` : ''} 页
-                    </span>
-                    <span className={`pdf-progress-stats${node.cardCount === 0 ? ' is-empty' : ''}${node.cardCount > 0 && node.reviewedCount === node.cardCount ? ' is-done' : ''}`}>
-                      {node.cardCount === 0 ? '还没写卡' : `${node.cardCount} 张 · 已复习 ${node.reviewedCount}`}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+
+            {reportTab === 'sections' ? (
+              <>
+                <div className="pdf-progress-summary" data-testid="section-progress-summary">
+                  <div className="pdf-progress-counts">
+                    <strong>{sectionProgress.reviewed}/{sectionProgress.cards}</strong>
+                    <span>张卡已复习</span>
+                    <span className="pdf-progress-dot">·</span>
+                    <span>{sectionProgress.sectionsWithCards}/{sectionProgress.sections} 节已写卡</span>
+                  </div>
+                  <div className="pdf-progress-track">
+                    <span
+                      className="pdf-progress-fill"
+                      style={{ width: `${sectionProgress.cards === 0 ? 0 : Math.round((sectionProgress.reviewed / sectionProgress.cards) * 100)}%` }}
+                      data-testid="section-progress-fill"
+                    />
+                  </div>
+                </div>
+                <div className="pdf-section-filters">
+                  {([
+                    ['all', '全部'],
+                    ['empty', '没写卡'],
+                    ['pending', '没复习完'],
+                    ['done', '已完成'],
+                  ] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`pdf-section-filter${sectionFilter === key ? ' is-active' : ''}`}
+                      data-testid={`section-filter-${key}`}
+                      onClick={() => setSectionFilter(key)}
+                    >
+                      {label}<span>{sectionFilterCounts[key]}</span>
+                    </button>
+                  ))}
+                </div>
+                {visibleSections.length === 0 ? (
+                  <p className="pdf-progress-empty" data-testid="section-progress-empty">
+                    {sectionFilter === 'done' ? '还没有复习完的小节，继续精读吧。' : '这一类现在没有小节。'}
+                  </p>
+                ) : (
+                  <ul className="pdf-progress-list">
+                    {visibleSections.map((node) => (
+                      <li key={node.cardId}>
+                        <button
+                          type="button"
+                          className={`pdf-progress-row${node.cardId === sectionProgress.currentCardId ? ' is-current' : ''}`}
+                          style={{ paddingLeft: 10 + node.level * 18 }}
+                          data-testid="section-progress-row"
+                          data-section-id={node.cardId}
+                          data-level={node.level}
+                          onClick={() => {
+                            goToPage(node.page)
+                            setProgressOpen(false)
+                          }}
+                        >
+                          <span className="pdf-progress-title">{node.title}</span>
+                          <span className="pdf-progress-page">
+                            第 {node.page}{node.endPage && node.endPage > node.page ? `–${node.endPage}` : ''} 页
+                          </span>
+                          <span className={`pdf-progress-stats${node.cardCount === 0 ? ' is-empty' : ''}${node.cardCount > 0 && node.reviewedCount === node.cardCount ? ' is-done' : ''}`}>
+                            {node.cardCount === 0 ? '还没写卡' : `${node.cardCount} 张 · 已复习 ${node.reviewedCount}`}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : reportLoading ? (
+              <p className="pdf-progress-empty" data-testid="report-loading">正在统计本周复习…</p>
+            ) : (
+              <>
+                <div className="pdf-week-metrics" data-testid="report-metrics">
+                  <div><strong>{weeklyReport.cardsWritten}</strong><span>本周写卡</span></div>
+                  <div><strong>{weeklyReport.reviews}</strong><span>复习次数</span></div>
+                  <div><strong>{weeklyReport.reviewedCards}</strong><span>复习卡片</span></div>
+                  <div><strong>{Math.round(weeklyReport.correctRate * 100)}%</strong><span>记得率</span></div>
+                </div>
+                <p className="pdf-week-range">
+                  统计区间：本周一 00:00 起（{new Date(weekStart).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}），只算挂在骨架下的卡片。
+                </p>
+                <h3 className="pdf-week-subtitle">卡住的小节</h3>
+                {weeklyReport.stuck.length > 0 ? (
+                  <ul className="pdf-progress-list">
+                    {weeklyReport.stuck.map((section) => (
+                      <li key={section.cardId}>
+                        <button
+                          type="button"
+                          className="pdf-progress-row"
+                          style={{ paddingLeft: 10 + section.level * 18 }}
+                          data-testid="report-stuck-row"
+                          data-section-id={section.cardId}
+                          onClick={() => {
+                            goToPage(section.page)
+                            setProgressOpen(false)
+                          }}
+                        >
+                          <span className="pdf-progress-title">{section.title}</span>
+                          <span className="pdf-progress-stats is-stuck">
+                            复习 {section.reviews} 次 · 重来 {section.again} · 困难 {section.hard}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="pdf-progress-empty" data-testid="report-empty">这周没有卡住的小节。</p>
+                )}
+                {weeklyReport.reviews === 0 && (
+                  <p className="pdf-progress-empty">本周还没有复习记录；复习过的卡片会出现在这里。</p>
+                )}
+              </>
+            )}
+
             <div className="pdf-modal-actions">
               <button type="button" onClick={() => setProgressOpen(false)}>关闭</button>
             </div>

@@ -286,6 +286,22 @@ export async function recordReview(input: ReviewInput): Promise<Card> {
   desktopOnly()
   return invoke('record_review', { input })
 }
+/** 学习报告：按卡片聚合一段时间的复习次数与四档评分分布。 */
+export interface CardReviewStat {
+  cardId: string
+  reviews: number
+  again: number
+  hard: number
+  good: number
+  easy: number
+  lastReviewedAt: string
+}
+
+export async function getCardReviewStats(since: string): Promise<CardReviewStat[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('get_card_review_stats', { since })
+}
+
 export async function getReviewStats(dayStart: string): Promise<ReviewStats> {
   if (!isTauriRuntime()) return { due_now: 0, completed_today: 0, correct_today: 0, backlog: 0, daily: [] }
   return invoke('get_review_stats', { dayStart })

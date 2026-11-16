@@ -132,3 +132,35 @@ export function buildSectionProgress(
     currentCardId: nearestTocEntry(entries, currentPage)?.cardId ?? null,
   }
 }
+
+/** 进度表的筛选：全部 / 还没写卡 / 有卡但没复习完 / 已复习完。 */
+export type SectionFilter = 'all' | 'empty' | 'pending' | 'done'
+
+export function matchesSectionFilter(node: SectionProgressNode, filter: SectionFilter): boolean {
+  switch (filter) {
+    case 'empty':
+      return node.cardCount === 0
+    case 'pending':
+      return node.cardCount > 0 && node.reviewedCount < node.cardCount
+    case 'done':
+      return node.cardCount > 0 && node.reviewedCount === node.cardCount
+    default:
+      return true
+  }
+}
+
+export function filterSections(
+  nodes: readonly SectionProgressNode[],
+  filter: SectionFilter,
+): SectionProgressNode[] {
+  return filter === 'all' ? [...nodes] : nodes.filter((node) => matchesSectionFilter(node, filter))
+}
+
+export function countSectionFilters(nodes: readonly SectionProgressNode[]): Record<SectionFilter, number> {
+  return {
+    all: nodes.length,
+    empty: nodes.filter((node) => matchesSectionFilter(node, 'empty')).length,
+    pending: nodes.filter((node) => matchesSectionFilter(node, 'pending')).length,
+    done: nodes.filter((node) => matchesSectionFilter(node, 'done')).length,
+  }
+}

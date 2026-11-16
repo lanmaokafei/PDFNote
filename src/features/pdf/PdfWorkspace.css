@@ -2160,3 +2160,25 @@
 .pdf-week-bars {
   gap: 4px;
 }
+
+/* 选中卡片：表格识别 + 删除标注并排。 */
+.pdf-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.pdf-inspector-actions > button:not(.pdf-delete-button) {
+  padding: 7px 12px;
+  border: 1px solid #cfdcc8;
+  border-radius: 8px;
+  color: #3f5a44;
+  background: #f3f7f1;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pdf-inspector-actions > button:not(.pdf-delete-button):hover:not(:disabled) {
+  background: #e9f2e4;
+}

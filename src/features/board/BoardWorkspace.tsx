@@ -55,6 +55,7 @@ function errorMessage(reason: unknown): string {
 }
 
 export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspaceProps) {
+  const searchRef = useRef<HTMLInputElement>(null)
   const [cards, setCards] = useState<Card[]>([])
   const [documents, setDocuments] = useState<Document[]>([])
   const [tags, setTags] = useState<string[]>([])
@@ -99,6 +100,16 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
       setLoading(false)
     }
   }, [desktop])
+
+  // ⌘K：聚焦卡片盒搜索。
+  useEffect(() => {
+    const handler = () => {
+      searchRef.current?.focus()
+      searchRef.current?.select()
+    }
+    window.addEventListener('pdfnote:focus-search', handler)
+    return () => window.removeEventListener('pdfnote:focus-search', handler)
+  }, [])
 
   useEffect(() => {
     void refresh()
@@ -223,6 +234,7 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
         <label className="board-search">
           <Search size={14} strokeWidth={1.8} />
           <input
+            ref={searchRef}
             type="search"
             value={filters.query}
             placeholder="搜索问题、摘录、笔记或标签"

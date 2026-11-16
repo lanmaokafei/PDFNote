@@ -73,6 +73,7 @@ function App() {
   const [closeJump, setCloseJump] = useState<{ documentId: string; page: number; token: number } | null>(null)
   // 学习报告「开始复习这些卡」：把卡片集合交给复习工作区，进入时只看这一组。
   const [reviewCardIds, setReviewCardIds] = useState<string[] | null>(null)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const { menu, show, close } = useContextMenu()
   const loadCards = useCardStore((state) => state.loadCards)
   const cardsById = useCardStore((state) => state.cardsById)
@@ -124,6 +125,37 @@ function App() {
   useEffect(() => {
     goToRef.current = goTo
   })
+  // 全局快捷键：⌘1–6 切视图、⌘K 聚焦搜索、? 看键位表。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      if (event.metaKey || event.ctrlKey) {
+        if (event.altKey || event.shiftKey) return
+        const views: View[] = ['library', 'mindmap', 'board', 'notebook', 'review', 'closereading']
+        const index = Number(event.key)
+        if (Number.isInteger(index) && index >= 1 && index <= views.length) {
+          event.preventDefault()
+          goToRef.current(views[index - 1])
+          return
+        }
+        if (event.key.toLowerCase() === 'k') {
+          event.preventDefault()
+          window.dispatchEvent(new Event('pdfnote:focus-search'))
+          return
+        }
+      }
+      if (event.key === '?' || (event.key === '/' && event.shiftKey)) {
+        event.preventDefault()
+        setShortcutsOpen((open) => !open)
+        return
+      }
+      if (event.key === 'Escape') setShortcutsOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   // 学习报告里点「开始复习这些卡」：切到复习视图并只看这一组到期卡片。
   useEffect(() => {
     const handler = (event: Event) => {
@@ -418,6 +450,27 @@ function App() {
         </Suspense>
       )}
       <ContextMenu state={menu} onClose={close} />
+      {shortcutsOpen && (
+        <div className="app-shortcuts-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setShortcutsOpen(false)
+        }}>
+          <div className="app-shortcuts" role="dialog" aria-modal="true" aria-label="键盘快捷键" data-testid="shortcuts-modal">
+            <h2>键盘快捷键</h2>
+            <dl>
+              <dt>⌘1 / ⌘2 / ⌘3</dt><dd>资料库 / 脑图 / 卡片盒</dd>
+              <dt>⌘4 / ⌘5 / ⌘6</dt><dd>笔记本 / 复习 / 粗读精读</dd>
+              <dt>⌘K</dt><dd>聚焦当前视图的搜索框</dd>
+              <dt>? </dt><dd>显示或关闭这张键位表</dd>
+              <dt>← / →</dt><dd>PDF 上一页 / 下一页</dd>
+              <dt>空格</dt><dd>复习页揭示答案</dd>
+              <dt>1 – 4</dt><dd>复习页评分：重来 / 困难 / 良好 / 简单</dd>
+              <dt>Enter / Shift+Enter</dt><dd>脑图搜索：下一个 / 上一个命中</dd>
+            </dl>
+            <p>输入框聚焦时快捷键不生效，避免和打字冲突。</p>
+            <button type="button" onClick={() => setShortcutsOpen(false)}>知道了</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

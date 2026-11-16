@@ -1295,3 +1295,56 @@ button.mindmap-field-label:hover { color: #456c43; }
   font-size: 11px;
   line-height: 1.5;
 }
+
+/* 画布搜索：定位命中卡片，不改数据。 */
+.mindmap-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #dfe6d9;
+  border-radius: 8px;
+  color: #8b9689;
+  background: #fff;
+}
+
+.mindmap-search:focus-within {
+  border-color: #b9cdb2;
+  box-shadow: 0 0 0 2px rgba(79, 127, 92, .12);
+}
+
+.mindmap-search input {
+  width: 140px;
+  border: 0;
+  outline: none;
+  color: #3f4f42;
+  background: transparent;
+  font-size: 12px;
+}
+
+.mindmap-search.is-compact input {
+  width: 72px;
+}
+
+.mindmap-search-count {
+  color: #8b9689;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mindmap-search button {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  color: #6d7a6c;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mindmap-search button:hover {
+  background: #eef4e9;
+}

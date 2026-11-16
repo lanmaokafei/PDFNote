@@ -2336,6 +2336,58 @@ if (process.env.STEP === 'section-progress') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=search：脑图搜索定位、全局快捷键与键位表。
+if (process.env.STEP === 'search') {
+  await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()
+  await page.waitForSelector('[data-testid="mindmap-search"]', { timeout: 15000 })
+  const input = page.locator('[data-testid="mindmap-search"] input').first()
+  await input.fill('概念卡片')
+  await page.waitForTimeout(300)
+  const first = await page.locator('[data-testid="mindmap-search-count"]').first().innerText()
+  if (!/^1\/\d+$/.test(first)) problems.push(`搜索计数不对：${first}`)
+
+  await page.getByRole('button', { name: '下一个匹配' }).first().click()
+  await page.waitForTimeout(300)
+  const second = await page.locator('[data-testid="mindmap-search-count"]').first().innerText()
+  if (second === first) problems.push(`下一个匹配没有前进：${first} -> ${second}`)
+
+  await input.focus()
+  await page.keyboard.press('Shift+Enter')
+  await page.waitForTimeout(250)
+  const backToFirst = await page.locator('[data-testid="mindmap-search-count"]').first().innerText()
+  if (backToFirst !== first) problems.push(`Shift+Enter 没有回到上一个：${backToFirst}`)
+
+  await input.fill('不存在的关键词')
+  await page.waitForTimeout(250)
+  const emptyCount = await page.locator('[data-testid="mindmap-search-count"]').first().innerText()
+  if (emptyCount !== '0/0') problems.push(`无结果计数不对：${emptyCount}`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  if ((await input.inputValue()) !== '') problems.push('Escape 没有清空搜索')
+
+  // ⌘1 回资料库，⌘K 聚焦搜索，? 打开键位表。
+  await page.locator('body').click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press('Meta+1')
+  await page.waitForTimeout(500)
+  if (await page.locator('[data-testid="mindmap-search"]').count() !== 0) problems.push('⌘1 没有切回资料库')
+  await page.keyboard.press('Meta+k')
+  await page.waitForTimeout(300)
+  const focused = await page.evaluate(() => document.activeElement?.closest('.library-search') !== null)
+  if (!focused) problems.push('⌘K 没有聚焦资料库搜索')
+
+  await page.locator('body').click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press('Shift+/')
+  await page.waitForTimeout(300)
+  if (await page.locator('[data-testid="shortcuts-modal"]').count() !== 1) problems.push('? 没有打开键位表')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  if (await page.locator('[data-testid="shortcuts-modal"]').count() !== 0) problems.push('Escape 没有关闭键位表')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'search', first, second, emptyCount }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // STEP=notebook：手写本创建、无限页、多图层、隐藏、橡皮、纸样切换、删除。
 if (process.env.STEP === 'notebook') {
   await page.locator('.app-segment', { hasText: '笔记本' }).click()

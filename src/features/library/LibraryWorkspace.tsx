@@ -95,6 +95,16 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
     void refresh()
   }, [refresh])
 
+  // ⌘K：从任何视图聚焦资料库搜索。
+  useEffect(() => {
+    const handler = () => {
+      searchRef.current?.focus()
+      searchRef.current?.select()
+    }
+    window.addEventListener('pdfnote:focus-search', handler)
+    return () => window.removeEventListener('pdfnote:focus-search', handler)
+  }, [])
+
   useEffect(() => {
     if (focusSearchToken > 0) searchRef.current?.focus()
   }, [focusSearchToken])

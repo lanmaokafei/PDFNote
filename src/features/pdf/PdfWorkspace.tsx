@@ -284,6 +284,8 @@ export function PdfWorkspace({
   const [titleLinkPreview, setTitleLinkPreview] = useState<TitleLinkHit | null>(null)
   // 只有用户配置了视觉模型才尝试公式识别；否则保持原图 + 手动补录。
   const [aiReady, setAiReady] = useState(false)
+  // 表格识别：把选中卡片的摘录图片转成 Markdown 表格。
+  const [tableBusy, setTableBusy] = useState(false)
   const [aiTimeoutSecs, setAiTimeoutSecs] = useState(120)
 
   const firstPass = readingPass === 1
@@ -908,6 +910,27 @@ export function PdfWorkspace({
     root.scrollTo({ top: Math.max(0, element.offsetTop - 20), behavior: 'smooth' })
   }
 
+  // goToPage 每次渲染都是新函数，用 ref 让键盘监听不必反复重绑。
+  const goToPageRef = useRef(goToPage)
+  useEffect(() => {
+    goToPageRef.current = goToPage
+  })
+
+  // ← / → 翻页；输入框聚焦、回忆态或没打开 PDF 时不抢键。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      if (recallMode || !pdf || pageCount <= 0) return
+      event.preventDefault()
+      goToPageRef.current(currentPage + (event.key === 'ArrowRight' ? 1 : -1))
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [currentPage, pageCount, pdf, recallMode])
+
   // 脑图卡片点击页码：文档加载完成、页面占位元素注册后跳到目标页。
   // 与「恢复阅读进度」一致，用短时多次重试等待元素与尺寸稳定；直接调 goToPage
   // 会因为元素尚未注册而静默失败（尤其是刚切到另一份文档时）。
@@ -1332,6 +1355,27 @@ export function PdfWorkspace({
   const selectedCard = selectedAnnotation
     ? reviewedCards[selectedAnnotation.card_id] ?? cardsById[selectedAnnotation.card_id] ?? null
     : null
+
+  /** 把选中卡片的摘录图片识别成 Markdown 表格，写回摘录（需要配置视觉模型）。 */
+  const recognizeSelectedTable = async () => {
+    const card = selectedCard
+    if (!card?.excerpt_image || tableBusy) return
+    setTableBusy(true)
+    setOperationError('')
+    setNotice('')
+    try {
+      const markdown = (await recognizeSelection(card.excerpt_image, 'table')).trim()
+      if (!markdown) throw new Error('模型返回了空内容')
+      await updateCardContent({ id: card.id, question: card.question, excerpt: markdown, user_note: card.user_note })
+      if (selectedAnnotation) invalidateAnnotations(selectedAnnotation.page)
+      callbacksRef.current.onCardsChanged()
+      setNotice('表格已识别为 Markdown，请核对表头与单元格。')
+    } catch (reason) {
+      setOperationError(`表格识别失败：${errorMessage(reason)}`)
+    } finally {
+      setTableBusy(false)
+    }
+  }
 
   const excerpts = useMemo(() => {
     const result: Record<string, string> = {}
@@ -1996,7 +2040,19 @@ export function PdfWorkspace({
                   />
                 ) : <p className="pdf-inspector-hint">点击页面上的遮挡块后再评分。</p>
               ) : (
-                <button type="button" className="pdf-delete-button" onClick={() => setDeleteTarget(selectedAnnotation)}>删除标注</button>
+                <div className="pdf-inspector-actions">
+                  {selectedCard?.excerpt_image && aiReady && (
+                    <button
+                      type="button"
+                      data-testid="recognize-table"
+                      onClick={() => void recognizeSelectedTable()}
+                      disabled={tableBusy}
+                    >
+                      {tableBusy ? '识别中…' : '识别表格'}
+                    </button>
+                  )}
+                  <button type="button" className="pdf-delete-button" onClick={() => setDeleteTarget(selectedAnnotation)}>删除标注</button>
+                </div>
               )}
             </div>
           ) : (
@@ -2340,7 +2396,7 @@ export function PdfWorkspace({
 
                 <div className="pdf-week-rank" data-testid="report-ranking">
                   <div className="pdf-week-subtitle-row">
-                    <h3 className="pdf-week-subtitle">今年读过的图书</h3>
+                    <h3 className="pdf-week-subtitle">今年读过的图书（按阅读时长）</h3>
                     <span>{formatReadingClock(readingStats?.yearSeconds ?? 0)}</span>
                   </div>
                   {topBooks.length > 0 ? (

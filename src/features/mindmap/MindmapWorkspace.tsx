@@ -34,6 +34,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Tag,
   Trash2,
 } from 'lucide-react'
@@ -96,6 +97,7 @@ import {
   readCanvasPreference,
   saveCanvasId,
 } from './canvas'
+import { searchCards } from './search'
 import {
   nextMindmapInsertPoint,
   readMindmapViewportCenter,
@@ -218,6 +220,10 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
    * 短暂闪出全局画布（例如上一本书的 AI 拆书内容）。
    */
   const [canvasResolved, setCanvasResolved] = useState(() => !documentId)
+  // 搜索：只做定位，不改画布数据；命中按问题 > 摘录 > 笔记排序。
+  const [searchText, setSearchText] = useState('')
+  const [searchIndex, setSearchIndex] = useState(0)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const canvasResolvedRef = useRef(!documentId)
   /** 当前画布的 mindmap_layout 成员；surface_mindmap 只是「在任意画布出现」的派生开关。 */
   const [layoutCardIds, setLayoutCardIds] = useState<ReadonlySet<string>>(new Set())
@@ -416,6 +422,31 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       : { ...FIT_VIEW_OPTIONS, duration }
     void fitViewInstance(options)
   }, [fitViewInstance])
+  const searchHits = useMemo(() => searchCards(orderedVisibleCards, searchText), [orderedVisibleCards, searchText])
+  useEffect(() => {
+    setSearchIndex(0)
+  }, [searchText])
+  const jumpToSearchHit = useCallback((index: number) => {
+    if (searchHits.length === 0) return
+    const next = ((index % searchHits.length) + searchHits.length) % searchHits.length
+    setSearchIndex(next)
+    void fitViewInstance({
+      nodes: [{ id: searchHits[next].id }],
+      duration: 260,
+      maxZoom: 1.3,
+      padding: 1.8,
+    })
+  }, [searchHits, fitViewInstance])
+  // ⌘K 由 App 统一派发，聚焦到这里的搜索框。
+  useEffect(() => {
+    const handler = () => {
+      searchInputRef.current?.focus()
+      searchInputRef.current?.select()
+    }
+    window.addEventListener('pdfnote:focus-search', handler)
+    return () => window.removeEventListener('pdfnote:focus-search', handler)
+  }, [])
+
   /** 点击页码标签：切到该文档并跳到对应页。 */
   const openSource = useCallback((cardId: string) => {
     const card = cardsById[cardId]
@@ -1871,6 +1902,37 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
 
       {!compact && (
       <div className="mindmap-canvas-bar">
+        <div className="mindmap-search" data-testid="mindmap-search">
+          <Search size={13} />
+          <input
+            ref={searchInputRef}
+            value={searchText}
+            placeholder="搜索卡片（⌘K）"
+            aria-label="搜索画布卡片"
+            onChange={(event) => setSearchText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                if (searchHits.length > 0) jumpToSearchHit(searchIndex + (event.shiftKey ? -1 : 0))
+              } else if (event.key === 'Escape') {
+                setSearchText('')
+                searchInputRef.current?.blur()
+              }
+            }}
+          />
+          {searchText.trim() !== '' && (
+            <span className="mindmap-search-count" data-testid="mindmap-search-count">
+              {searchHits.length === 0 ? '0/0' : `${searchIndex + 1}/${searchHits.length}`}
+            </span>
+          )}
+          {searchHits.length > 0 && (
+            <>
+              <button type="button" aria-label="上一个匹配" onClick={() => jumpToSearchHit(searchIndex - 1)}>‹</button>
+              <button type="button" aria-label="下一个匹配" onClick={() => jumpToSearchHit(searchIndex + 1)}>›</button>
+            </>
+          )}
+        </div>
+
         {!fixedCanvasId && (
           <CanvasSwitcher
             documentId={documentId}
@@ -1902,6 +1964,36 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
               onError={setError}
             />
           )}
+          <div className="mindmap-search is-compact" data-testid="mindmap-search">
+            <Search size={13} />
+            <input
+              ref={searchInputRef}
+              value={searchText}
+              placeholder="搜索"
+              aria-label="搜索画布卡片"
+              onChange={(event) => setSearchText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  if (searchHits.length > 0) jumpToSearchHit(searchIndex + (event.shiftKey ? -1 : 0))
+                } else if (event.key === 'Escape') {
+                  setSearchText('')
+                  searchInputRef.current?.blur()
+                }
+              }}
+            />
+            {searchText.trim() !== '' && (
+              <span className="mindmap-search-count" data-testid="mindmap-search-count">
+                {searchHits.length === 0 ? '0/0' : `${searchIndex + 1}/${searchHits.length}`}
+              </span>
+            )}
+            {searchHits.length > 0 && (
+              <>
+                <button type="button" aria-label="上一个匹配" onClick={() => jumpToSearchHit(searchIndex - 1)}>‹</button>
+                <button type="button" aria-label="下一个匹配" onClick={() => jumpToSearchHit(searchIndex + 1)}>›</button>
+              </>
+            )}
+          </div>
           <button type="button" className="mindmap-import-button" data-testid="anki-open" onClick={() => setAnkiOpen(true)} disabled={busy || switching}>
             导入 Anki
           </button>

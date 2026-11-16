@@ -249,3 +249,72 @@
   .app-view { padding: 66px 12px 32px; }
   .app-view.is-library { padding: 20px 0 32px; }
 }
+
+/* 键盘键位表（? 打开）。 */
+.app-shortcuts-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(24, 32, 26, .34);
+}
+
+.app-shortcuts {
+  width: min(460px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 24px 26px;
+  border: 1px solid #e2e6e0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(24, 32, 26, .22);
+}
+
+.app-shortcuts h2 {
+  margin: 0 0 12px;
+  color: #2f3e33;
+  font-size: 17px;
+}
+
+.app-shortcuts dl {
+  display: grid;
+  gap: 8px 16px;
+  grid-template-columns: auto 1fr;
+  margin: 0 0 12px;
+}
+
+.app-shortcuts dt {
+  color: #3b5a44;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.app-shortcuts dd {
+  margin: 0;
+  color: #6d7a6c;
+  font-size: 12px;
+}
+
+.app-shortcuts p {
+  margin: 0 0 14px;
+  color: #97a295;
+  font-size: 11.5px;
+}
+
+.app-shortcuts button {
+  padding: 8px 16px;
+  border: 1px solid #d7e0d2;
+  border-radius: 8px;
+  color: #3b5a44;
+  background: #f3f7f1;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.app-shortcuts button:hover {
+  background: #e9f2e4;
+}

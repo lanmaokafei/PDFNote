@@ -160,6 +160,22 @@ AI 拆书解决的是「没有目录的扫描书」，和两遍法不冲突：**
 
 没有复习记录时给空态提示，不显示 0 分报告。
 
+### 0.49.0 · 阅读计时与报告增强
+
+**阅读目标（书单页）**
+
+- 打开一本书就在后台计时：页面可见时按秒累计，每 15 秒写一次库，切书 / 隐藏窗口 / 关闭时也会 flush。
+- 计时按「书 + 本地日期」存 `reading_daily`（schema v13），所以书单页能显示今日总时长、今年总书数与总时长。
+- 目标分钟数（5 / 10 / 15 / 20 / 30）存 `pdfnote.reading.goalMinutes`；「继续阅读」按上次打开的书一键回到精读。
+- 只统计 PDF 阅读；回忆态算复习，不计入阅读时长。
+
+**本周复盘三个补充**
+
+- **趋势条**：最近 14 天每天的复习次数（来自 `get_review_stats` 的 `daily`），柱高按区间最大值归一。
+- **年度排行**：今年读过的书按时长排前三（`get_reading_stats.books`），下面写「再读 N 本达成今年 12 本目标」。
+- **一键复习清单**：把「卡住的小节」子树下**已到期**的卡片列成清单（最多 20 张，按到期时间排序），
+  可复制成 Markdown 待办；点某一行直接跳到那页。清单只读，不会批量改卡或新建复习会话。
+
 ## 五、数据模型（schema v12）
 
 ```sql
@@ -167,9 +183,18 @@ document_readings(
   document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
   pass INTEGER NOT NULL DEFAULT 1,      -- 1 粗读 / 2 精读
   recall_note TEXT NOT NULL DEFAULT '', -- 「我记得的」
-  toc_json TEXT NOT NULL DEFAULT '',    -- 0.42 的目录映射，本期只写入空串
+  toc_json TEXT NOT NULL DEFAULT '',    -- 目录骨架映射（按画布分组）
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+)
+
+-- 0.49：阅读计时，按「书 + 本地日期」累计
+reading_daily(
+  document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,                    -- YYYY-MM-DD（用户时区）
+  seconds INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (document_id, day)
 )
 ```
 

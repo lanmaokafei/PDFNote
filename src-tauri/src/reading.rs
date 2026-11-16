@@ -47,6 +47,40 @@ pub struct SaveTocJsonInput {
     pub toc_json: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddReadingTimeInput {
+    pub document_id: String,
+    /// 本地日期 `YYYY-MM-DD`：由前端按用户时区算好，避免后端猜时区。
+    pub day: String,
+    pub seconds: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingStatsInput {
+    pub day: String,
+    pub year_start: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingBookStat {
+    pub document_id: String,
+    pub title: String,
+    pub year_seconds: i64,
+    pub today_seconds: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingStats {
+    pub today_seconds: i64,
+    pub year_seconds: i64,
+    /// 今年有阅读记录的书，按时长从多到少。
+    pub books: Vec<ReadingBookStat>,
+}
+
 fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReadingState> {
     Ok(ReadingState {
         document_id: row.get(0)?,
@@ -115,6 +149,96 @@ pub fn set_reading_pass(state: &AppState, document_id: &str, pass: u32) -> Resul
         )
         .map_err(|error| error.to_string())?;
     read_row(&database, document_id)?.ok_or_else(|| "reading state missing after write".into())
+}
+
+fn validate_day(day: &str) -> Result<(), String> {
+    let bytes = day.as_bytes();
+    let shaped = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes.iter().enumerate().all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit());
+    if shaped {
+        Ok(())
+    } else {
+        Err("day must be YYYY-MM-DD".into())
+    }
+}
+
+/// 累加阅读时长：按「书 + 本地日期」一行；单次最多记 1 小时，防止异常计时值污染统计。
+pub fn add_reading_time(
+    state: &AppState,
+    document_id: &str,
+    day: &str,
+    seconds: u32,
+) -> Result<(), String> {
+    validate_day(day)?;
+    if seconds == 0 {
+        return Ok(());
+    }
+    if seconds > 3600 {
+        return Err("seconds per flush cannot exceed 3600".into());
+    }
+    let database = state.db()?;
+    ensure_document(&database, document_id)?;
+    let timestamp = now();
+    database
+        .execute(
+            "INSERT INTO reading_daily (document_id, day, seconds, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(document_id, day) DO UPDATE SET
+                seconds = seconds + excluded.seconds,
+                updated_at = excluded.updated_at",
+            params![document_id, day, seconds, timestamp],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// 阅读目标与年度排行：今日总时长、今年总时长、今年每本书的时长。
+pub fn get_reading_stats(state: &AppState, day: &str, year_start: &str) -> Result<ReadingStats, String> {
+    validate_day(day)?;
+    validate_day(year_start)?;
+    let database = state.db()?;
+    let today_seconds: i64 = database
+        .query_row(
+            "SELECT COALESCE(SUM(seconds), 0) FROM reading_daily WHERE day = ?1",
+            params![day],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let year_seconds: i64 = database
+        .query_row(
+            "SELECT COALESCE(SUM(seconds), 0) FROM reading_daily WHERE day >= ?1 AND day <= ?2",
+            params![year_start, day],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let mut statement = database
+        .prepare(
+            "SELECT r.document_id, d.title,
+                    SUM(r.seconds) AS year_seconds,
+                    SUM(CASE WHEN r.day = ?2 THEN r.seconds ELSE 0 END) AS today_seconds
+             FROM reading_daily r JOIN documents d ON d.id = r.document_id
+             WHERE r.day >= ?1 AND r.day <= ?2
+             GROUP BY r.document_id, d.title
+             HAVING year_seconds > 0
+             ORDER BY year_seconds DESC, d.title
+             LIMIT 50",
+        )
+        .map_err(|error| error.to_string())?;
+    let books = statement
+        .query_map(params![year_start, day], |row| {
+            Ok(ReadingBookStat {
+                document_id: row.get(0)?,
+                title: row.get(1)?,
+                year_seconds: row.get(2)?,
+                today_seconds: row.get(3)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(ReadingStats { today_seconds, year_seconds, books })
 }
 
 /** 目录骨架映射：一本书一份 JSON（按画布分组），只做「最近小节」查询，不进 cards 表。 */
@@ -229,6 +353,46 @@ mod tests {
         assert_eq!(saved.recall_note, "三句话", "写目录不应该清空笔记");
         assert!(saved.toc_json.contains("canvas-1"));
         assert!(save_toc_json(&state, "doc1", &"x".repeat(200_001)).is_err());
+    }
+
+    #[test]
+    fn reading_time_accumulates_and_ranks_books() {
+        let state = state();
+        seed_document(&state, "doc1");
+        {
+            // seed_document 的 content_hash 固定，第二本书要换一个哈希。
+            let database = state.db().unwrap();
+            database
+                .execute(
+                    "INSERT INTO documents (id, title, stored_path, content_hash, created_at, updated_at)
+                     VALUES ('doc2', '第二本', 'pdfs/b.pdf', 'hash-2', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                    [],
+                )
+                .unwrap();
+        }
+        add_reading_time(&state, "doc1", "2026-11-16", 300).unwrap();
+        add_reading_time(&state, "doc1", "2026-11-16", 120).unwrap();
+        add_reading_time(&state, "doc2", "2026-11-16", 60).unwrap();
+        add_reading_time(&state, "doc2", "2026-11-15", 900).unwrap();
+
+        let stats = get_reading_stats(&state, "2026-11-16", "2026-01-01").unwrap();
+        assert_eq!(stats.today_seconds, 480, "同一天多次累加");
+        assert_eq!(stats.year_seconds, 1380, "今年累计含昨天");
+        assert_eq!(stats.books.len(), 2);
+        assert_eq!(stats.books[0].document_id, "doc2", "按时长从多到少");
+        assert_eq!(stats.books[0].year_seconds, 960);
+        assert_eq!(stats.books[1].today_seconds, 420);
+
+        // 只统计今年：去年那笔不计入。
+        let last_year = get_reading_stats(&state, "2027-01-01", "2027-01-01").unwrap();
+        assert_eq!(last_year.today_seconds, 0);
+        assert!(last_year.books.is_empty());
+
+        // 参数校验：日期格式、单次上限。
+        assert!(add_reading_time(&state, "doc1", "2026/11/16", 60).is_err());
+        assert!(add_reading_time(&state, "doc1", "2026-11-16", 3601).is_err());
+        assert!(get_reading_stats(&state, "bad", "2026-01-01").is_err());
+        assert!(add_reading_time(&state, "missing", "2026-11-16", 60).is_err());
     }
 
     #[test]

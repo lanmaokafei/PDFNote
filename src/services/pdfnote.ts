@@ -362,6 +362,30 @@ export async function setReadingPass(documentId: string, pass: number): Promise<
   return invoke('set_reading_pass', { input: { documentId, pass } })
 }
 
+/** 阅读计时与年度排行（按「书 + 本地日期」累计）。 */
+export interface ReadingBookStat {
+  documentId: string
+  title: string
+  yearSeconds: number
+  todaySeconds: number
+}
+
+export interface ReadingStats {
+  todaySeconds: number
+  yearSeconds: number
+  books: ReadingBookStat[]
+}
+
+export async function addReadingTime(documentId: string, day: string, seconds: number): Promise<void> {
+  if (!isTauriRuntime()) return
+  return invoke('add_reading_time', { input: { documentId, day, seconds } })
+}
+
+export async function getReadingStats(day: string, yearStart: string): Promise<ReadingStats> {
+  if (!isTauriRuntime()) return { todaySeconds: 0, yearSeconds: 0, books: [] }
+  return invoke('get_reading_stats', { input: { day, yearStart } })
+}
+
 export async function saveRecallNote(documentId: string, note: string): Promise<ReadingState> {
   desktopOnly()
   return invoke('save_recall_note', { input: { documentId, note } })

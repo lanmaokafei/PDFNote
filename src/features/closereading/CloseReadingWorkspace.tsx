@@ -3,10 +3,21 @@ import { BookOpenCheck, ChevronRight, Repeat } from 'lucide-react'
 import type { Document } from '../../domain/card'
 import {
   createMindmapCanvas,
+  getReadingStats,
   listDocuments,
   listMindmapCanvases,
   updateDocumentMetadata,
+  type ReadingStats,
 } from '../../services/pdfnote'
+import {
+  formatReadingClock,
+  localDayKey,
+  readGoalMinutes,
+  readingGoalPercent,
+  saveGoalMinutes,
+  yearStartKey,
+  GOAL_CHOICES,
+} from '../reading/readingStats'
 import { closeReadingCanvasName } from '../mindmap/canvas'
 import { StudyWorkspace } from '../study/StudyWorkspace'
 import './CloseReadingWorkspace.css'
@@ -55,6 +66,16 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
   const [preparing, setPreparing] = useState(false)
   const [methodOpen, setMethodOpen] = useState(false)
   const [jump, setJump] = useState<{ documentId: string; page: number; token: number } | null>(null)
+  // 阅读目标：今日累计时长来自 reading_daily，目标分钟数存 localStorage。
+  const [readingStats, setReadingStats] = useState<ReadingStats | null>(null)
+  const [goalMinutes, setGoalMinutes] = useState(readGoalMinutes)
+  const [lastDocId, setLastDocId] = useState<string | null>(() => {
+    try {
+      return globalThis.localStorage?.getItem('pdfnote.reading.lastDocument') ?? null
+    } catch {
+      return null
+    }
+  })
 
   useEffect(() => {
     let active = true
@@ -74,6 +95,21 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
     }
   }, [])
 
+  // 回到书单页就刷新今日阅读时长（刚读完一本书时数字要立刻变）。
+  useEffect(() => {
+    if (selected) return
+    let active = true
+    const now = new Date()
+    getReadingStats(localDayKey(now), yearStartKey(now))
+      .then((stats) => {
+        if (active) setReadingStats(stats)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [selected, documents.length])
+
   /** 进入一本书：确保「精读 · 书名」画布存在，把它钉给 PDF 与脑图。 */
   const openDocument = async (document: Document) => {
     if (preparing) return
@@ -88,6 +124,12 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
       setSelected(document)
       setMethodOpen(false)
       setJump(null)
+      setLastDocId(document.id)
+      try {
+        globalThis.localStorage?.setItem('pdfnote.reading.lastDocument', document.id)
+      } catch {
+        // 隐私模式下不记住上次读的书。
+      }
     } catch (reason) {
       setError(`无法准备这本书的精读画布：${reason instanceof Error ? reason.message : String(reason)}`)
     } finally {
@@ -136,6 +178,11 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
     () => documents.slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
     [documents],
   )
+
+  const sortedList = sorted
+  const continueTarget = sortedList.find((document) => document.id === lastDocId) ?? sortedList[0] ?? null
+  const todaySeconds = readingStats?.todaySeconds ?? 0
+  const goalPercent = readingGoalPercent(todaySeconds, goalMinutes)
 
   return (
     <div className="close-reading">
@@ -210,6 +257,54 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
           <p>先到资料库导入一本书，再回来做粗读精读。</p>
         </div>
       ) : (
+        <>
+        <section className="close-reading-goal" aria-label="阅读目标" data-testid="reading-goal">
+          <div className="close-reading-goal-head">
+            <div>
+              <strong>今日阅读</strong>
+              <span>{goalPercent >= 100 ? '目标已完成，继续保持' : `目标 ${goalMinutes} 分钟`}</span>
+            </div>
+            <select
+              aria-label="每日阅读目标"
+              data-testid="reading-goal-select"
+              value={goalMinutes}
+              onChange={(event) => {
+                const next = Number(event.target.value)
+                setGoalMinutes(next)
+                saveGoalMinutes(next)
+              }}
+            >
+              {GOAL_CHOICES.map((choice) => (
+                <option key={choice} value={choice}>{choice} 分钟</option>
+              ))}
+            </select>
+          </div>
+          <div className="close-reading-goal-body">
+            <p className="close-reading-goal-clock" data-testid="reading-goal-clock">
+              {formatReadingClock(todaySeconds)}
+            </p>
+            <div className="close-reading-goal-track">
+              <span style={{ width: `${goalPercent}%` }} data-testid="reading-goal-fill" />
+            </div>
+            <div className="close-reading-goal-meta">
+              <span>目标 {goalMinutes} 分钟 · 完成 {goalPercent}%</span>
+              <span>
+                {readingStats
+                  ? `今年 ${readingStats.books.length} 本 · ${formatReadingClock(readingStats.yearSeconds)}`
+                  : '今年还没有阅读记录'}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="close-reading-goal-cta"
+            data-testid="reading-goal-continue"
+            onClick={() => { if (continueTarget) void openDocument(continueTarget) }}
+            disabled={preparing || !continueTarget}
+          >
+            {continueTarget ? `继续阅读：${continueTarget.title}` : '先导入一本书'}
+          </button>
+        </section>
         <ul className="close-reading-list" aria-label="选择要粗读精读的书">
           {sorted.map((document) => (
             <li key={document.id}>
@@ -223,6 +318,7 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
             </li>
           ))}
         </ul>
+        </>
       )}
     </div>
   )

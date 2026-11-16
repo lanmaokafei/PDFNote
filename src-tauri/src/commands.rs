@@ -833,6 +833,22 @@ pub fn save_toc_json(
 }
 
 #[tauri::command]
+pub fn add_reading_time(
+    state: State<'_, AppState>,
+    input: reading::AddReadingTimeInput,
+) -> Result<(), String> {
+    reading::add_reading_time(&state, &input.document_id, &input.day, input.seconds)
+}
+
+#[tauri::command]
+pub fn get_reading_stats(
+    state: State<'_, AppState>,
+    input: reading::ReadingStatsInput,
+) -> Result<reading::ReadingStats, String> {
+    reading::get_reading_stats(&state, &input.day, &input.year_start)
+}
+
+#[tauri::command]
 pub fn save_recall_note(
     state: State<'_, AppState>,
     input: reading::SaveRecallNoteInput,

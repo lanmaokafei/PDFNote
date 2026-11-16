@@ -470,6 +470,27 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       storeReading()
       return readingState
     },
+    // 阅读计时：记录每次 flush，统计接口返回固定值，方便断言目标卡。
+    add_reading_time: (args) => {
+      window.__readingFlushes ??= []
+      window.__readingFlushes.push(args?.input)
+      return null
+    },
+    get_reading_stats: () => ({
+      todaySeconds: 420,
+      yearSeconds: 3600,
+      books: [{ documentId: 'doc1', title: '测试教材：心肌梗死与再灌注策略', yearSeconds: 3600, todaySeconds: 420 }],
+    }),
+    get_review_stats: () => ({
+      due_now: 0,
+      completed_today: 0,
+      correct_today: 0,
+      backlog: 0,
+      daily: [
+        { day: '2026-11-15', reviews: 3, correct: 2 },
+        { day: '2026-11-16', reviews: 7, correct: 5 },
+      ],
+    }),
     // 学习报告：模拟「第一章骨架卡复习 4 次（重来 2）、1.1 复习 3 次」。
     get_card_review_stats: () => [
       { cardId: 'new-card-4', reviews: 4, again: 2, hard: 1, good: 1, easy: 0, lastReviewedAt: '2026-11-15T10:00:00.000Z' },
@@ -1998,6 +2019,20 @@ if (process.env.STEP === 'two-pass') {
 if (process.env.STEP === 'closereading') {
   await page.locator('.app-segment', { hasText: '粗读精读' }).click()
   await page.waitForSelector('.close-reading-list', { timeout: 10000 })
+  const goal = await page.evaluate(() => ({
+    clock: document.querySelector('[data-testid="reading-goal-clock"]')?.textContent ?? '',
+    meta: document.querySelector('.close-reading-goal-meta')?.textContent ?? '',
+    cta: document.querySelector('[data-testid="reading-goal-continue"]')?.textContent ?? '',
+    fill: document.querySelector('[data-testid="reading-goal-fill"]')?.style.width ?? '',
+  }))
+  if (goal.clock !== '7:00') problems.push(`今日阅读时长不对：${goal.clock}`)
+  if (!goal.meta.includes('今年 1 本')) problems.push(`年度阅读统计不对：${goal.meta}`)
+  if (!goal.cta.includes('继续阅读')) problems.push(`缺少继续阅读入口：${goal.cta}`)
+  if (goal.fill !== '100%') problems.push(`5 分钟目标下 420 秒应满格：${goal.fill}`)
+  await page.locator('[data-testid="reading-goal-select"]').selectOption('10')
+  await page.waitForTimeout(200)
+  const goalSaved = await page.evaluate(() => localStorage.getItem('pdfnote.reading.goalMinutes'))
+  if (goalSaved !== '10') problems.push(`阅读目标没有记住：${goalSaved}`)
   const books = await page.locator('.close-reading-list button').count()
   if (books < 1) problems.push(`粗读精读书单为空：${books}`)
 
@@ -2264,6 +2299,9 @@ if (process.env.STEP === 'section-progress') {
     metrics: [...document.querySelectorAll('[data-testid="report-metrics"] > div')].map((item) => item.textContent ?? ''),
     stuck: [...document.querySelectorAll('[data-testid="report-stuck-row"]')].map((item) => item.textContent ?? ''),
     empty: document.querySelector('[data-testid="report-empty"]')?.textContent ?? '',
+    trend: [...document.querySelectorAll('[data-testid="report-trend-bar"]')].map((bar) => Number(bar.getAttribute('data-reviews') ?? 0)),
+    rank: [...document.querySelectorAll('[data-testid="report-rank-slot"]')].map((slot) => slot.textContent ?? ''),
+    rankGoal: document.querySelector('.pdf-rank-goal')?.textContent ?? '',
   }))
   const metricsText = weekly.metrics.join('|')
   if (!metricsText.includes('0本周写卡')) problems.push(`本周写卡不该算骨架：${metricsText}`)
@@ -2271,8 +2309,19 @@ if (process.env.STEP === 'section-progress') {
   if (!metricsText.includes('2复习卡片')) problems.push(`复习卡片数不对：${metricsText}`)
   if (!metricsText.includes('43%记得率')) problems.push(`记得率不对：${metricsText}`)
   if (weekly.stuck.length !== 1) problems.push(`卡住小节应只有第一章：${weekly.stuck.length}`)
+  if (weekly.trend.length !== 2) problems.push(`趋势条应有 2 天：${weekly.trend.length}`)
+  if (weekly.trend.join('|') !== '3|7') problems.push(`趋势条数值不对：${weekly.trend.join('|')}`)
+  if (weekly.rank.length !== 3) problems.push(`排行应有 3 格：${weekly.rank.length}`)
+  if (!weekly.rank[0]?.includes('测试教材')) problems.push(`排行第一本不对：${weekly.rank[0]}`)
+  if (!weekly.rankGoal.includes('再读 11 本')) problems.push(`年度目标提示不对：${weekly.rankGoal}`)
   if (!weekly.stuck[0]?.includes('第一章 绪论')) problems.push(`卡住小节不对：${weekly.stuck[0]}`)
   if (!weekly.stuck[0]?.includes('复习 7 次')) problems.push(`卡住明细不对：${weekly.stuck[0]}`)
+
+  // 一键生成复习清单：本画布只有骨架卡，没有到期知识卡 → 空态提示。
+  await page.locator('[data-testid="report-stuck-list"]').click()
+  await page.waitForTimeout(300)
+  const stuckEmpty = await page.locator('[data-testid="report-stuck-empty"]').count()
+  if (stuckEmpty !== 1) problems.push('空清单没有给提示')
 
   // 点卡住的小节回到 PDF 并收起弹窗。
   await page.locator('[data-testid="report-stuck-row"]').click()

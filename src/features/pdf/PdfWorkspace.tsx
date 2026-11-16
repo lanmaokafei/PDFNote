@@ -32,7 +32,10 @@ import {
   listPageNotes,
   readPdfChunk,
   getCardReviewStats,
+  getReadingStats,
+  getReviewStats,
   type CardReviewStat,
+  type ReadingStats,
   getReadingState,
   removeAnnotation,
   saveRecallNote,
@@ -85,7 +88,16 @@ import {
   filterSections,
   type SectionFilter,
 } from './sectionProgress'
-import { buildWeeklyReport, weekStartIso } from './weeklyReport'
+import { buildWeeklyReport, collectStuckCards, weekStartIso, type StuckCard } from './weeklyReport'
+import { useReadingTimer } from '../reading/useReadingTimer'
+import {
+  booksToGoal,
+  formatReadingClock,
+  localDayKey,
+  topReadingBooks,
+  yearStartKey,
+  YEARLY_BOOK_GOAL,
+} from '../reading/readingStats'
 import { parseTocText } from './tocText'
 import {
   bumpClozeTurn,
@@ -232,6 +244,10 @@ export function PdfWorkspace({
   const [reportTab, setReportTab] = useState<'sections' | 'weekly'>('sections')
   const [sectionFilter, setSectionFilter] = useState<SectionFilter>('all')
   const [reviewStats, setReviewStats] = useState<CardReviewStat[]>([])
+  const [readingStats, setReadingStats] = useState<ReadingStats | null>(null)
+  const [reviewDaily, setReviewDaily] = useState<Array<{ day: string; reviews: number }>>([])
+  const [stuckList, setStuckList] = useState<StuckCard[] | null>(null)
+  const [reportCopied, setReportCopied] = useState(false)
   const [reportLoading, setReportLoading] = useState(false)
   // 挖空填空：在「整块遮挡」和「揭示」之间多一层，先补关键词再评分。
   const [clozeEnabled, setClozeEnabled] = useState(readClozePreference)
@@ -272,6 +288,9 @@ export function PdfWorkspace({
   const [aiTimeoutSecs, setAiTimeoutSecs] = useState(120)
 
   const firstPass = readingPass === 1
+
+  // 阅读计时：PDF 打开且不在回忆态时累计（回忆算复习，不算阅读）。
+  useReadingTimer(document.id, Boolean(pdf) && !recallMode)
 
   // 操作提示只停留几秒：否则它会一直浮在页面上，挡住阶段条等控件。
   useEffect(() => {
@@ -1252,6 +1271,11 @@ export function PdfWorkspace({
     [sectionProgress, sectionFilter],
   )
   const weekStart = useMemo(() => weekStartIso(new Date()), [])
+  const topBooks = useMemo(() => topReadingBooks(readingStats?.books ?? [], 3), [readingStats])
+  const trendMax = useMemo(
+    () => reviewDaily.reduce((max, item) => Math.max(max, item.reviews), 0),
+    [reviewDaily],
+  )
   const weeklyReport = useMemo(
     () => buildWeeklyReport({
       entries: tocMap[activeCanvasId] ?? [],
@@ -1261,12 +1285,44 @@ export function PdfWorkspace({
     }),
     [tocMap, activeCanvasId, cardList, reviewStats, weekStart],
   )
-  /** 拉本周复习统计：只在打开报告/切到本周 tab 时请求，失败就当没有记录。 */
-  const refreshReviewStats = useCallback(() => {
+  /** 把「卡住的小节」展开成到期卡片清单；只读，不建卡也不改标签。 */
+  const generateStuckList = () => {
+    const list = collectStuckCards({
+      entries: tocMap[activeCanvasId] ?? [],
+      cards: cardList,
+      stuckCardIds: weeklyReport.stuck.map((section) => section.cardId),
+      now: new Date().toISOString(),
+      limit: 20,
+    })
+    setStuckList(list)
+    setReportCopied(false)
+  }
+
+  const copyStuckList = () => {
+    if (!stuckList || stuckList.length === 0) return
+    const lines = stuckList.map((item) => `- [ ] ${item.title}${item.page ? `（第 ${item.page} 页）` : ''}`)
+    const text = `## 卡住的复习清单（${stuckList.length} 张）\n\n${lines.join('\n')}\n`
+    void navigator.clipboard?.writeText(text).then(() => {
+      setReportCopied(true)
+      window.setTimeout(() => setReportCopied(false), 2000)
+    }).catch(() => undefined)
+  }
+
+  /** 拉本周复盘要用的三份数据：按卡复习、阅读时长、最近 14 天复习趋势。 */
+  const refreshReport = useCallback(() => {
     setReportLoading(true)
-    getCardReviewStats(weekStartIso(new Date()))
-      .then(setReviewStats)
-      .catch(() => setReviewStats([]))
+    const now = new Date()
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).toISOString()
+    Promise.all([
+      getCardReviewStats(weekStartIso(now)).catch(() => [] as CardReviewStat[]),
+      getReadingStats(localDayKey(now), yearStartKey(now)).catch(() => null),
+      getReviewStats(dayStart).catch(() => null),
+    ])
+      .then(([stats, reading, review]) => {
+        setReviewStats(stats)
+        setReadingStats(reading)
+        setReviewDaily(review?.daily?.map((item) => ({ day: item.day, reviews: item.reviews })) ?? [])
+      })
       .finally(() => setReportLoading(false))
   }, [])
   const titleLinkIndex = useMemo(
@@ -1646,7 +1702,7 @@ export function PdfWorkspace({
               setProgressOpen(true)
               setReportTab('sections')
               setSectionFilter('all')
-              refreshReviewStats()
+              refreshReport()
             }}
             disabled={sectionProgress.sections === 0}
             title={sectionProgress.sections === 0 ? '先按目录建骨架，才有学习报告' : '章节进度与本周复盘'}
@@ -2174,13 +2230,14 @@ export function PdfWorkspace({
                 data-testid="report-tab-weekly"
                 onClick={() => {
                   setReportTab('weekly')
-                  if (reviewStats.length === 0 && !reportLoading) refreshReviewStats()
+                  if (reviewStats.length === 0 && !reportLoading) refreshReport()
                 }}
               >
                 本周复盘
               </button>
             </div>
 
+            <div className="pdf-report-body">
             {reportTab === 'sections' ? (
               <>
                 <div className="pdf-progress-summary" data-testid="section-progress-summary">
@@ -2262,6 +2319,53 @@ export function PdfWorkspace({
                 <p className="pdf-week-range">
                   统计区间：本周一 00:00 起（{new Date(weekStart).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}），只算挂在骨架下的卡片。
                 </p>
+
+                <div className="pdf-week-trend" data-testid="report-trend">
+                  <div className="pdf-week-subtitle-row">
+                    <h3 className="pdf-week-subtitle">最近 14 天复习</h3>
+                    <span>{reviewDaily.reduce((total, item) => total + item.reviews, 0)} 次</span>
+                  </div>
+                  <div className="pdf-week-bars">
+                    {reviewDaily.map((item) => (
+                      <div key={item.day} className="pdf-week-bar" title={`${item.day}：${item.reviews} 次`}>
+                        <span
+                          data-testid="report-trend-bar"
+                          data-day={item.day}
+                          data-reviews={item.reviews}
+                          style={{ height: `${trendMax === 0 ? 0 : Math.max(4, Math.round((item.reviews / trendMax) * 100))}%` }}
+                        />
+                      </div>
+                    ))}
+                    {reviewDaily.length === 0 && <span className="pdf-week-bars-empty">还没有复习趋势。</span>}
+                  </div>
+                </div>
+
+                <div className="pdf-week-rank" data-testid="report-ranking">
+                  <div className="pdf-week-subtitle-row">
+                    <h3 className="pdf-week-subtitle">今年读过的图书</h3>
+                    <span>{formatReadingClock(readingStats?.yearSeconds ?? 0)}</span>
+                  </div>
+                  {topBooks.length > 0 ? (
+                    <div className="pdf-rank-grid">
+                      {[0, 1, 2].map((index) => {
+                        const book = topBooks[index]
+                        return (
+                          <div key={index} className={`pdf-rank-slot${book ? '' : ' is-empty'}`} data-testid="report-rank-slot">
+                            <strong>{index + 1}</strong>
+                            <span className="pdf-rank-title">{book ? book.title : '—'}</span>
+                            <span className="pdf-rank-minutes">{book ? formatReadingClock(book.yearSeconds) : ''}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="pdf-progress-empty" data-testid="report-rank-empty">今年还没有阅读记录，打开一本书就会开始计时。</p>
+                  )}
+                  <p className="pdf-rank-goal">
+                    再读 {booksToGoal(readingStats?.books.length ?? 0)} 本即可达成今年 {YEARLY_BOOK_GOAL} 本的目标。
+                  </p>
+                </div>
+
                 <h3 className="pdf-week-subtitle">卡住的小节</h3>
                 {weeklyReport.stuck.length > 0 ? (
                   <ul className="pdf-progress-list">
@@ -2292,8 +2396,45 @@ export function PdfWorkspace({
                 {weeklyReport.reviews === 0 && (
                   <p className="pdf-progress-empty">本周还没有复习记录；复习过的卡片会出现在这里。</p>
                 )}
+                {weeklyReport.stuck.length > 0 && (
+                  <div className="pdf-week-stuck-actions">
+                    <button type="button" data-testid="report-stuck-list" onClick={generateStuckList}>
+                      生成复习清单
+                    </button>
+                    {stuckList && stuckList.length > 0 && (
+                      <button type="button" data-testid="report-stuck-copy" onClick={copyStuckList}>
+                        {reportCopied ? '已复制' : '复制清单'}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {stuckList && (
+                  stuckList.length > 0 ? (
+                    <ul className="pdf-progress-list" data-testid="report-stuck-cards">
+                      {stuckList.map((item) => (
+                        <li key={item.id}>
+                          <button
+                            type="button"
+                            className="pdf-progress-row"
+                            data-testid="report-stuck-card"
+                            onClick={() => {
+                              if (item.page) goToPage(item.page)
+                              setProgressOpen(false)
+                            }}
+                          >
+                            <span className="pdf-progress-title">{item.title}</span>
+                            <span className="pdf-progress-page">{item.page ? `第 ${item.page} 页` : '无页码'}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="pdf-progress-empty" data-testid="report-stuck-empty">这些小节暂时没有到期卡片，明天再来看看。</p>
+                  )
+                )}
               </>
             )}
+            </div>
 
             <div className="pdf-modal-actions">
               <button type="button" onClick={() => setProgressOpen(false)}>关闭</button>

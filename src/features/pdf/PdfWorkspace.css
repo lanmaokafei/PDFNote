@@ -1994,3 +1994,169 @@
   color: #a2543f;
   font-weight: 600;
 }
+
+/* ---------- 本周复盘：趋势 / 排行 / 复习清单（0.49.0） ---------- */
+
+.pdf-week-subtitle-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 10px 0 4px;
+}
+
+.pdf-week-subtitle-row h3 {
+  margin: 0;
+}
+
+.pdf-week-subtitle-row > span {
+  color: #9aa496;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-week-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 56px;
+  padding: 6px 8px;
+  border: 1px solid #e6ece0;
+  border-radius: 9px;
+  background: #fbfdf8;
+}
+
+.pdf-week-bar {
+  display: flex;
+  flex: 1 1 0;
+  align-items: flex-end;
+  height: 100%;
+}
+
+.pdf-week-bar > span {
+  width: 100%;
+  min-height: 2px;
+  border-radius: 3px 3px 2px 2px;
+  background: #9dbfa2;
+}
+
+.pdf-week-bar > span[data-reviews="0"] {
+  background: #e7ede2;
+}
+
+.pdf-week-bar:hover > span {
+  background: #5f8f6a;
+}
+
+.pdf-week-bars-empty {
+  align-self: center;
+  margin: auto;
+  color: #a3ada0;
+  font-size: 11px;
+}
+
+.pdf-rank-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.pdf-rank-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px 10px;
+  border: 1px solid #e6ece0;
+  border-radius: 10px;
+  background: #f8fbf5;
+}
+
+.pdf-rank-slot strong {
+  color: #cfd8c9;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.pdf-rank-slot.is-empty {
+  opacity: .55;
+}
+
+.pdf-rank-title {
+  max-width: 100%;
+  overflow: hidden;
+  color: #3f5042;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-rank-minutes {
+  color: #96a194;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-rank-goal {
+  margin: 8px 0 2px;
+  color: #8b9689;
+  font-size: 11px;
+}
+
+.pdf-week-stuck-actions {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.pdf-week-stuck-actions button {
+  padding: 6px 12px;
+  border: 1px solid #d7e0d2;
+  border-radius: 7px;
+  color: #47604c;
+  background: #f3f7f1;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.pdf-week-stuck-actions button:hover {
+  background: #e9f2e4;
+}
+
+/* 周报内容变长：弹窗限高并整体滚动，关闭按钮固定在底部。 */
+.pdf-modal-backdrop:has(.pdf-progress-modal) {
+  overflow-y: auto;
+  padding: 20px 0;
+}
+
+.pdf-progress-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: min(64vh, 560px);
+  overflow: hidden;
+}
+
+/* 只有内容区滚动，标题、tab 与底部按钮固定。 */
+.pdf-report-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.pdf-progress-modal .pdf-modal-actions {
+  flex: 0 0 auto;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef1ec;
+  background: #fff;
+}
+
+/* 日均条数少时不要把两根柱子拉满整行。 */
+.pdf-week-bar {
+  max-width: 18px;
+}
+
+.pdf-week-bars {
+  gap: 4px;
+}

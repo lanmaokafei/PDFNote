@@ -394,6 +394,7 @@ fn import_overwrite(
         "page_inks",
         "cards",
         "document_readings",
+        "reading_daily",
         "documents",
     ] {
         transaction
@@ -423,8 +424,9 @@ fn import_overwrite(
         for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr", "book_analysis", "book_outline", "mindmap_canvases"] {
             copy_table_if_present(&transaction, table)?;
         }
-        // 0.41.0 两遍阅读：一本书一行，直接整表覆盖。
+        // 0.41.0 两遍阅读：一本书一行，直接整表覆盖；0.49 阅读计时按书 + 日期累计。
         copy_table_if_present(&transaction, "document_readings")?;
+        copy_table_if_present(&transaction, "reading_daily")?;
         // 0.36.0 图层与手写本：父表在前，避免外键失败。
         for table in ["notebooks", "layers", "notebook_inks", "canvas_inks", "mindmap_layer_members"] {
             copy_table_if_present(&transaction, table)?;
@@ -662,6 +664,34 @@ fn import_merge(
                      FROM import_src.page_notes s
                      WHERE NOT EXISTS (SELECT 1 FROM page_notes p WHERE p.id = s.id)
                        AND EXISTS (SELECT 1 FROM documents d WHERE d.id = s.document_id)",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+
+        if import_has_table(&transaction, "reading_daily")? {
+            // 阅读时长按「书 + 日期」重指向本地文档；同一天两边都有记录时取较大值，避免合并被重复累加。
+            transaction
+                .execute(
+                    "UPDATE import_src.reading_daily SET document_id = (
+                        SELECT d.id FROM documents d
+                        WHERE d.content_hash = (
+                            SELECT s2.content_hash FROM import_src.documents s2
+                            WHERE s2.id = import_src.reading_daily.document_id
+                        )
+                     ) WHERE document_id IS NOT NULL",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO reading_daily (document_id, day, seconds, updated_at)
+                     SELECT s.document_id, s.day, s.seconds, s.updated_at
+                     FROM import_src.reading_daily s
+                     WHERE EXISTS (SELECT 1 FROM documents d WHERE d.id = s.document_id)
+                     ON CONFLICT(document_id, day) DO UPDATE SET
+                        seconds = MAX(reading_daily.seconds, excluded.seconds),
+                        updated_at = excluded.updated_at",
                     [],
                 )
                 .map_err(|error| error.to_string())?;
@@ -1033,6 +1063,7 @@ mod tests {
         // 粗读精读的阶段与召回也属于用户内容，必须随备份往返。
         crate::reading::set_reading_pass(&source_state, &document.id, 2).unwrap();
         crate::reading::save_recall_note(&source_state, &document.id, "粗读召回").unwrap();
+        crate::reading::add_reading_time(&source_state, &document.id, "2026-11-16", 600).unwrap();
 
         let archive = source_dir.join("backup.zip");
         let exported = export_backup(&source_state, archive.to_string_lossy().to_string()).unwrap();
@@ -1081,6 +1112,10 @@ mod tests {
             })
             .unwrap();
         assert_eq!(reading, (2, "粗读召回".to_string()), "阶段与召回必须随备份恢复");
+        let minutes: i64 = database
+            .query_row("SELECT seconds FROM reading_daily", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(minutes, 600, "阅读时长必须随备份恢复");
         let with_image: i64 = database
             .query_row(
                 "SELECT COUNT(*) FROM cards WHERE excerpt_image IS NOT NULL",

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buildWeeklyReport, weekStartIso, type ReviewStatLike, type WeeklyCardLike } from './weeklyReport'
+import {
+  buildWeeklyReport,
+  collectStuckCards,
+  weekStartIso,
+  type ReviewStatLike,
+  type WeeklyCardLike,
+} from './weeklyReport'
 
 const entries = [
   { cardId: 'ch1', page: 1, title: '第一章', level: 0 },
@@ -111,5 +117,67 @@ describe('本周学习报告', () => {
     })
     expect(report.cardsWritten).toBe(1)
     expect(report.reviews).toBe(7)
+  })
+})
+
+describe('卡住小节的复习清单', () => {
+  const entries2 = [
+    { cardId: 'ch1', page: 1, title: '第一章', level: 0 },
+    { cardId: 's11', page: 3, title: '1.1', level: 1 },
+    { cardId: 'ch2', page: 20, title: '第二章', level: 0 },
+  ]
+  const makeCard = (id: string, parent: string | null, due: string, extra: Partial<{ surface_review: boolean; question: string; page: number }> = {}) => ({
+    id,
+    parent_id: parent,
+    created_at: '2026-11-01T00:00:00.000Z',
+    question: extra.question ?? `卡片 ${id}`,
+    excerpt: '',
+    due,
+    surface_review: extra.surface_review ?? true,
+    source_ref: extra.page ? { page: extra.page } : null,
+  })
+
+  it('只收卡住小节子树下已到期、参与复习的卡片', () => {
+    const cards = [
+      makeCard('ch1', null, '2026-01-01T00:00:00.000Z'),
+      makeCard('s11', 'ch1', '2026-01-01T00:00:00.000Z'),
+      makeCard('a', 's11', '2026-11-01T00:00:00.000Z', { page: 5 }),
+      makeCard('b', 's11', '2026-12-31T00:00:00.000Z', { page: 6 }),
+      makeCard('c', 's11', '2026-11-01T00:00:00.000Z', { surface_review: false }),
+      makeCard('d', 'ch2', '2026-11-01T00:00:00.000Z'),
+    ]
+    const list = collectStuckCards({ entries: entries2, cards, stuckCardIds: ['s11'], now: '2026-11-16T00:00:00.000Z' })
+    expect(list.map((item) => item.id)).toEqual(['a'])
+    expect(list[0]).toMatchObject({ title: '卡片 a', page: 5 })
+  })
+
+  it('父与子都被列为卡住时不重复收同一张卡', () => {
+    const cards = [makeCard('a', 's11', '2026-11-01T00:00:00.000Z')]
+    const list = collectStuckCards({
+      entries: entries2, cards, stuckCardIds: ['ch1', 's11'], now: '2026-11-16T00:00:00.000Z',
+    })
+    expect(list).toHaveLength(1)
+  })
+
+  it('没有卡住小节或清单为空时返回空数组', () => {
+    expect(collectStuckCards({ entries: entries2, cards: [], stuckCardIds: [], now: '2026-11-16T00:00:00.000Z' })).toEqual([])
+    expect(collectStuckCards({
+      entries: entries2,
+      cards: [makeCard('a', 's11', '2027-01-01T00:00:00.000Z')],
+      stuckCardIds: ['s11'],
+      now: '2026-11-16T00:00:00.000Z',
+    })).toEqual([])
+  })
+
+  it('按到期时间排序并受条数上限约束', () => {
+    const cards = [
+      makeCard('late', 's11', '2026-11-10T00:00:00.000Z'),
+      makeCard('early', 's11', '2026-11-01T00:00:00.000Z'),
+      makeCard('mid', 's11', '2026-11-05T00:00:00.000Z'),
+    ]
+    const list = collectStuckCards({
+      entries: entries2, cards, stuckCardIds: ['s11'], now: '2026-11-16T00:00:00.000Z', limit: 2,
+    })
+    expect(list.map((item) => item.id)).toEqual(['early', 'mid'])
   })
 })

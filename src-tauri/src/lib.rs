@@ -119,6 +119,8 @@ pub fn run() {
             commands::set_reading_pass,
             commands::save_recall_note,
             commands::save_toc_json,
+            commands::add_reading_time,
+            commands::get_reading_stats,
             commands::export_opml,
         ])
         .setup(|app| {

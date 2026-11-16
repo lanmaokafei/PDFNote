@@ -179,3 +179,73 @@ export function buildWeeklyReport(input: {
     stuck,
   }
 }
+
+export interface StuckCardSource extends WeeklyCardLike {
+  question: string
+  excerpt: string
+  due: string
+  surface_review: boolean
+  source_ref: { page: number } | null
+}
+
+export interface StuckCard {
+  id: string
+  title: string
+  page: number | null
+  due: string
+}
+
+/**
+ * 把「卡住的小节」变成一份复习清单：这些小节子树下、已经到期、且参与复习的卡片。
+ * 只读，不改任何卡片；标题取问题 → 摘录。
+ */
+export function collectStuckCards(input: {
+  entries: readonly SkeletonEntryLike[]
+  cards: readonly StuckCardSource[]
+  stuckCardIds: readonly string[]
+  now: string
+  limit?: number
+}): StuckCard[] {
+  const { entries, cards, stuckCardIds, now } = input
+  const limit = Math.max(1, Math.min(100, input.limit ?? 20))
+  if (stuckCardIds.length === 0) return []
+  const skeletonIds = new Set(entries.map((entry) => entry.cardId))
+  const cardById = new Map(cards.map((card) => [card.id, card]))
+  const childrenOf = new Map<string, string[]>()
+  for (const card of cards) {
+    if (!card.parent_id) continue
+    const list = childrenOf.get(card.parent_id) ?? []
+    list.push(card.id)
+    childrenOf.set(card.parent_id, list)
+  }
+
+  const nowTime = Date.parse(now)
+  const seen = new Set<string>()
+  const result: StuckCard[] = []
+  for (const rootId of stuckCardIds) {
+    const visited = new Set<string>([rootId])
+    const stack = [...(childrenOf.get(rootId) ?? [])]
+    while (stack.length > 0) {
+      const id = stack.pop() as string
+      if (visited.has(id)) continue
+      visited.add(id)
+      stack.push(...(childrenOf.get(id) ?? []))
+      if (skeletonIds.has(id) || seen.has(id)) continue
+      const card = cardById.get(id)
+      if (!card || !card.surface_review) continue
+      const due = Date.parse(card.due)
+      if (!Number.isFinite(due) || !Number.isFinite(nowTime) || due > nowTime) continue
+      seen.add(id)
+      const rawTitle = (card.question || card.excerpt || '未命名卡片').replace(/\s+/gu, ' ').trim()
+      result.push({
+        id,
+        title: Array.from(rawTitle).slice(0, 80).join(''),
+        page: card.source_ref?.page ?? null,
+        due: card.due,
+      })
+    }
+  }
+  return result
+    .sort((a, b) => Date.parse(a.due) - Date.parse(b.due))
+    .slice(0, limit)
+}

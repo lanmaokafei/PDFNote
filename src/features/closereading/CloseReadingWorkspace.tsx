@@ -3,11 +3,15 @@ import { BookOpenCheck, ChevronRight, Repeat } from 'lucide-react'
 import type { Document } from '../../domain/card'
 import {
   createMindmapCanvas,
+  getReadingDays,
   getReadingStats,
+  getStudyOverview,
   listDocuments,
   listMindmapCanvases,
   updateDocumentMetadata,
   type ReadingStats,
+  type ReadingDay,
+  type StudyOverview,
 } from '../../services/pdfnote'
 import {
   formatReadingClock,
@@ -18,6 +22,13 @@ import {
   yearStartKey,
   GOAL_CHOICES,
 } from '../reading/readingStats'
+import {
+  activeDayCount,
+  averagePerDay,
+  currentStreak,
+  longestStreak,
+  monthTotals,
+} from '../reading/yearReview'
 import { closeReadingCanvasName } from '../mindmap/canvas'
 import { StudyWorkspace } from '../study/StudyWorkspace'
 import './CloseReadingWorkspace.css'
@@ -69,6 +80,11 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
   // 阅读目标：今日累计时长来自 reading_daily，目标分钟数存 localStorage。
   const [readingStats, setReadingStats] = useState<ReadingStats | null>(null)
   const [goalMinutes, setGoalMinutes] = useState(readGoalMinutes)
+  // 年度回顾：跨书阅读日历 + 今年的写卡/复习。
+  const [yearOpen, setYearOpen] = useState(false)
+  const [yearDays, setYearDays] = useState<ReadingDay[]>([])
+  const [yearStudy, setYearStudy] = useState<StudyOverview | null>(null)
+  const [yearBusy, setYearBusy] = useState(false)
   const [lastDocId, setLastDocId] = useState<string | null>(() => {
     try {
       return globalThis.localStorage?.getItem('pdfnote.reading.lastDocument') ?? null
@@ -109,6 +125,25 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
       active = false
     }
   }, [selected, documents.length])
+
+  /** 年度回顾：一次拉齐阅读日历与学习汇总，弹窗里再算月度与连续天数。 */
+  const openYearReview = () => {
+    setYearOpen(true)
+    setYearBusy(true)
+    const now = new Date()
+    const year = now.getFullYear()
+    Promise.all([
+      getReadingDays(`${year}-01-01`, `${year}-12-31`).catch(() => [] as ReadingDay[]),
+      getReadingStats(localDayKey(now), `${year}-01-01`).catch(() => null),
+      getStudyOverview(new Date(year, 0, 1).toISOString()).catch(() => null),
+    ])
+      .then(([days, stats, study]) => {
+        setYearDays(days)
+        if (stats) setReadingStats(stats)
+        setYearStudy(study)
+      })
+      .finally(() => setYearBusy(false))
+  }
 
   /** 进入一本书：确保「精读 · 书名」画布存在，把它钉给 PDF 与脑图。 */
   const openDocument = async (document: Document) => {
@@ -184,6 +219,14 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
   const todaySeconds = readingStats?.todaySeconds ?? 0
   const goalPercent = readingGoalPercent(todaySeconds, goalMinutes)
 
+  const year = new Date().getFullYear()
+  const yearTotals = monthTotals(yearDays, year)
+  const yearSeconds = yearTotals.reduce((sum, value) => sum + value, 0)
+  const yearPeak = Math.max(1, ...yearTotals)
+  const yearActiveDays = activeDayCount(yearDays)
+  const yearLongest = longestStreak(yearDays)
+  const yearStreak = currentStreak(yearDays, localDayKey(new Date()))
+
   return (
     <div className="close-reading">
       <header className="close-reading-head">
@@ -239,6 +282,7 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
           <StudyWorkspace
             document={selected}
             showMindmap
+            closeReading
             canvasId={canvasId}
             jumpTarget={jump}
             onJumpHandled={() => setJump(null)}
@@ -264,6 +308,14 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
               <strong>今日阅读</strong>
               <span>{goalPercent >= 100 ? '目标已完成，继续保持' : `目标 ${goalMinutes} 分钟`}</span>
             </div>
+            <button
+              type="button"
+              className="close-reading-year-open"
+              data-testid="year-review-open"
+              onClick={openYearReview}
+            >
+              年度回顾
+            </button>
             <select
               aria-label="每日阅读目标"
               data-testid="reading-goal-select"
@@ -319,6 +371,68 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
           ))}
         </ul>
         </>
+      )}
+      {yearOpen && (
+        <div className="close-reading-year-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setYearOpen(false)
+        }}>
+          <section className="close-reading-year" role="dialog" aria-modal="true" aria-labelledby="year-review-title" data-testid="year-review">
+            <header>
+              <div>
+                <small>YEAR IN REVIEW</small>
+                <h2 id="year-review-title">{year} 年度回顾</h2>
+              </div>
+              <button type="button" onClick={() => setYearOpen(false)} aria-label="关闭年度回顾">×</button>
+            </header>
+            {yearBusy ? (
+              <p className="close-reading-year-loading">正在汇总这一年的阅读…</p>
+            ) : (
+              <>
+                <div className="close-reading-year-metrics" data-testid="year-metrics">
+                  <div><strong>{formatReadingClock(yearSeconds)}</strong><span>阅读时长</span></div>
+                  <div><strong>{yearActiveDays}</strong><span>阅读天数</span></div>
+                  <div><strong>{yearLongest}</strong><span>最长连续</span></div>
+                  <div><strong>{yearStudy?.cardsWritten ?? 0}</strong><span>写卡</span></div>
+                </div>
+                <div className="close-reading-year-chart" data-testid="year-chart">
+                  {yearTotals.map((seconds, index) => (
+                    <div
+                      key={index}
+                      className="close-reading-year-bar"
+                      title={`${index + 1} 月：${formatReadingClock(seconds)}`}
+                      data-month={index + 1}
+                      data-seconds={seconds}
+                    >
+                      <span style={{ height: `${Math.max(seconds > 0 ? 6 : 0, Math.round((seconds / yearPeak) * 100))}%` }} />
+                      <em>{index + 1}</em>
+                    </div>
+                  ))}
+                </div>
+                <p className="close-reading-year-line">
+                  今年复习 {yearStudy?.reviews ?? 0} 次 · 复习过 {yearStudy?.reviewedCards ?? 0} 张卡
+                  · 平均每个阅读日 {formatReadingClock(averagePerDay(yearSeconds, yearActiveDays))}
+                  {yearStreak > 0 ? ` · 当前连续 ${yearStreak} 天` : ''}
+                </p>
+                <h3 className="close-reading-year-subtitle">读过的书（按阅读时长）</h3>
+                {(readingStats?.books.length ?? 0) === 0 ? (
+                  <p className="close-reading-year-empty">今年还没有阅读记录，打开一本书就会开始计时。</p>
+                ) : (
+                  <ul className="close-reading-year-books" data-testid="year-books">
+                    {readingStats?.books.slice(0, 6).map((book) => (
+                      <li key={book.documentId}>
+                        <span>{book.title}</span>
+                        <strong>{formatReadingClock(book.yearSeconds)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <footer>
+                  <button type="button" onClick={() => setYearOpen(false)}>关闭</button>
+                </footer>
+              </>
+            )}
+          </section>
+        </div>
       )}
     </div>
   )

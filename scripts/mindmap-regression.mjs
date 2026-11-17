@@ -564,6 +564,10 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       return null
     },
     purge_expired_trash: () => 0,
+    get_reading_days: () => [
+      { day: '2026-03-01', seconds: 3600 },
+      { day: '2026-03-02', seconds: 1800 },
+    ],
     get_study_overview: () => ({
       cardsWritten: 3,
       reviews: 9,
@@ -1795,6 +1799,19 @@ if (process.env.STEP === 'board') {
   if (JSON.stringify(draggedTags) !== JSON.stringify(['空标签'])) {
     problems.push(`拖拽后标签应为 [空标签]：${JSON.stringify(draggedTags)}`)
   }
+  await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur() })
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(800)
+  const undoneTags = await page.evaluate(() => window.__cardState.find((item) => item.id === 'c1')?.tags ?? [])
+  if (JSON.stringify(undoneTags) !== JSON.stringify(['心内'])) {
+    problems.push(`⌘Z 没有恢复标签：[${undoneTags}]`)
+  }
+  await page.keyboard.press('Meta+Shift+z')
+  await page.waitForTimeout(800)
+  const redoneTags = await page.evaluate(() => window.__cardState.find((item) => item.id === 'c1')?.tags ?? [])
+  if (JSON.stringify(redoneTags) !== JSON.stringify(['空标签'])) {
+    problems.push(`⇧⌘Z 没有重做标签：[${redoneTags}]`)
+  }
   const afterDrag = await readBoard()
   if (afterDrag.counts['空标签'] !== 1) problems.push(`空标签列应有 1 张：${afterDrag.counts['空标签']}`)
   if (afterDrag.counts['心内'] !== 3) problems.push(`心内列应剩 3 张：${afterDrag.counts['心内']}`)
@@ -1964,8 +1981,11 @@ if (process.env.STEP === 'cloze') {
 
 // STEP=two-pass：粗读精读的阶段切换、粗读的工具门禁、自由召回与持久化。
 if (process.env.STEP === 'two-pass') {
+  // 资料库打开 PDF 不再有阶段条：两遍阅读的流程走「粗读精读」模块。
   const openDoc = async () => {
-    await page.locator('.document-card').first().click()
+    await page.locator('.app-segment').filter({ hasText: '粗读精读' }).first().click()
+    await page.waitForSelector('.close-reading-list', { timeout: 15000 })
+    await page.locator('.close-reading-list button').first().click()
     await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
     await page.waitForTimeout(1200)
   }
@@ -2067,6 +2087,30 @@ if (process.env.STEP === 'closereading') {
   const books = await page.locator('.close-reading-list button').count()
   if (books < 1) problems.push(`粗读精读书单为空：${books}`)
 
+  // 年度回顾：两个阅读日 3600 + 1800 秒，跨书汇总的写卡 3 / 复习 9。
+  await page.locator('[data-testid="year-review-open"]').click()
+  await page.waitForSelector('[data-testid="year-review"]', { timeout: 5000 })
+  await page.waitForTimeout(700)
+  const year = await page.evaluate(() => ({
+    metrics: [...document.querySelectorAll('[data-testid="year-metrics"] > div')].map((item) => item.textContent ?? ''),
+    bars: [...document.querySelectorAll('[data-testid="year-chart"] [data-month]')].map((bar) => Number(bar.getAttribute('data-seconds') ?? 0)),
+    books: [...document.querySelectorAll('[data-testid="year-books"] li')].map((item) => item.textContent ?? ''),
+    line: document.querySelector('.close-reading-year-line')?.textContent ?? '',
+  }))
+  const yearText = year.metrics.join('|')
+  if (!yearText.includes('1:30:00')) problems.push(`年度总时长不对：${yearText}`)
+  if (!yearText.includes('2阅读天数')) problems.push(`年度阅读天数不对：${yearText}`)
+  if (!yearText.includes('2最长连续')) problems.push(`年度最长连续不对：${yearText}`)
+  if (!yearText.includes('3写卡')) problems.push(`年度写卡数不对：${yearText}`)
+  if (year.bars.length !== 12) problems.push(`年度柱状图应有 12 根：${year.bars.length}`)
+  if (year.bars[2] !== 5400) problems.push(`三月时长不对：${year.bars[2]}`)
+  if (year.books.length !== 1) problems.push(`年度书单条数不对：${year.books.length}`)
+  if (!year.line.includes('复习 9 次')) problems.push(`年度复习次数不对：${year.line}`)
+  await page.locator('[data-testid="year-review"] footer button').click()
+  await page.waitForTimeout(300)
+  if (await page.locator('[data-testid="year-review"]').count() !== 0) problems.push('年度回顾没有关闭')
+
+
   await page.locator('.close-reading-list button').first().click()
   await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
   await page.waitForTimeout(1800)
@@ -2129,7 +2173,7 @@ if (process.env.STEP === 'closereading') {
   if (normal < 1) problems.push(`回到资料库后原有标注丢了：${normal}`)
 
   await browser.close()
-  console.log(JSON.stringify({ problems, step: 'closereading', books, entered, toc, afterJump, normal }, null, 2))
+  console.log(JSON.stringify({ problems, step: 'closereading', goal, year, books, entered, toc, afterJump, normal }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 
@@ -2498,6 +2542,50 @@ if (process.env.STEP === 'toc-ocr') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'toc-ocr', defaultPage, ocrText, ocrPreview, skeleton }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=undo-create：新建卡片进撤销栈（撤销 = 进回收站，重做 = 取回）。
+if (process.env.STEP === 'undo-create') {
+  await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(600)
+  const before = await page.evaluate(() => window.__cardState.length)
+
+  await page.getByRole('button', { name: '＋ 新建卡片' }).first().click()
+  await page.waitForSelector('.mindmap-editor', { timeout: 5000 })
+  await page.locator('.mindmap-editor textarea').first().fill('撤销测试卡片')
+  await page.getByRole('button', { name: '创建卡片' }).click()
+  await page.waitForTimeout(900)
+  const created = await page.evaluate(() => ({
+    cards: window.__cardState.length,
+    has: window.__cardState.some((card) => card.question === '撤销测试卡片'),
+  }))
+  if (created.cards !== before + 1 || !created.has) problems.push(`新建卡片没有落库：${JSON.stringify(created)}`)
+
+  await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur() })
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(900)
+  const undone = await page.evaluate(() => ({
+    cards: window.__cardState.length,
+    trash: window.__trashState.length,
+    nodes: document.querySelectorAll('.mindmap-node').length,
+  }))
+  if (undone.cards !== before) problems.push(`⌘Z 没有撤销新建：${undone.cards}/${before}`)
+  if (undone.trash !== 1) problems.push(`撤销新建应放进回收站：${undone.trash}`)
+
+  await page.keyboard.press('Meta+Shift+z')
+  await page.waitForTimeout(900)
+  const redone = await page.evaluate(() => ({
+    cards: window.__cardState.length,
+    has: window.__cardState.some((card) => card.question === '撤销测试卡片'),
+    trash: window.__trashState.length,
+  }))
+  if (redone.cards !== before + 1 || !redone.has) problems.push(`⇧⌘Z 没有重做新建：${JSON.stringify(redone)}`)
+  if (redone.trash !== 0) problems.push(`重做后回收站应清空：${redone.trash}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'undo-create', before, created, undone, redone }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 
@@ -3691,6 +3779,9 @@ if (STEP === 'digest') {
 
 if (STEP === 'notes') {
   await page.waitForTimeout(1200)
+  // 资料库直接打开 PDF 不走粗读精读流程：阶段条不该出现。
+  const passBars = await page.locator('[data-pass-bar]').count()
+  if (passBars !== 0) problems.push(`资料库视图不该显示粗读阶段条：${passBars}`)
   const pageBox = await page.locator('.pdf-page').first().boundingBox()
   if (!pageBox) {
     problems.push('PDF 页面不可见')
@@ -3790,7 +3881,7 @@ if (STEP === 'notes') {
   if (remaining !== 0) problems.push(`删除留白后仍显示：${remaining}`)
 
   await browser.close()
-  console.log(JSON.stringify({ problems, step: STEP, noteCount, saved, gutter, backToOverlay, collapsed, remaining }, null, 2))
+  console.log(JSON.stringify({ problems, step: STEP, passBars, noteCount, saved, gutter, backToOverlay, collapsed, remaining }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

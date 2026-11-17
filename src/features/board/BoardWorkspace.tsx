@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Boxes, FileText, RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-react'
 import type { Card, Document } from '../../domain/card'
+import { pushUndo } from '../undo/undoStack'
 import {
   isTauriRuntime,
   listCards,
@@ -255,10 +256,25 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
 
   async function applyTags(card: Card, next: string[], targetLabel: string) {
     setBusyCardId(card.id)
+    const previous = [...card.tags]
     try {
       const updated = await setCardTags(card.id, next)
       setCards((current) => current.map((item) => (item.id === card.id ? updated : item)))
-      setNotice(`已归入 ${targetLabel}`)
+      // 标签是一次 set_card_tags 写库（原子替换），撤销就是把这组标签再写回去。
+      pushUndo({
+        label: '调整标签',
+        undo: async () => {
+          const back = await setCardTags(card.id, previous)
+          setCards((current) => current.map((item) => (item.id === card.id ? back : item)))
+          onCardsChanged()
+        },
+        redo: async () => {
+          const again = await setCardTags(card.id, next)
+          setCards((current) => current.map((item) => (item.id === card.id ? again : item)))
+          onCardsChanged()
+        },
+      })
+      setNotice(`已归入 ${targetLabel}（⌘Z 可撤销）`)
       onCardsChanged()
     } catch (reason) {
       setError(`标签保存失败：${errorMessage(reason)}`)

@@ -439,6 +439,17 @@ export async function addReadingTime(documentId: string, day: string, seconds: n
   return invoke('add_reading_time', { input: { documentId, day, seconds } })
 }
 
+/** 跨书阅读日历：区间内每天的合计秒数（年度回顾用）。 */
+export interface ReadingDay {
+  day: string
+  seconds: number
+}
+
+export async function getReadingDays(startDay: string, endDay: string): Promise<ReadingDay[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('get_reading_days', { startDay, endDay })
+}
+
 export async function getReadingStats(day: string, yearStart: string): Promise<ReadingStats> {
   if (!isTauriRuntime()) return { todaySeconds: 0, yearSeconds: 0, books: [] }
   return invoke('get_reading_stats', { input: { day, yearStart } })

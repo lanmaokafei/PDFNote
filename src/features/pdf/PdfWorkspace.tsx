@@ -156,6 +156,11 @@ export interface PdfWorkspaceProps {
    * 不传则跟随本书当前画布（并随画布切换事件更新）。
    */
   canvasId?: string
+  /**
+   * 粗读精读模式：显示粗读/精读阶段条与骨架入口。
+   * 资料库直接打开 PDF 时不开（那套流程在「粗读精读」模块里），工具按精读档全开。
+   */
+  closeReading?: boolean
 }
 
 interface TocSkeletonEntry {
@@ -193,6 +198,7 @@ export function PdfWorkspace({
   onJumpHandled,
   embedded = false,
   canvasId: canvasIdOverride,
+  closeReading = false,
 }: PdfWorkspaceProps) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [pageCount, setPageCount] = useState(document.page_count)
@@ -300,7 +306,9 @@ export function PdfWorkspace({
   const [tableBusy, setTableBusy] = useState(false)
   const [aiTimeoutSecs, setAiTimeoutSecs] = useState(120)
 
-  const firstPass = readingPass === 1
+  // 资料库打开 PDF 不走粗读流程：阶段条不渲染，工具按精读档解锁。
+  const effectivePass = closeReading ? readingPass : 2
+  const firstPass = effectivePass === 1
   const [noteLayout, setNoteLayout] = useNoteLayout()
 
   // 阅读计时：PDF 打开且不在回忆态时累计（回忆算复习，不算阅读）。
@@ -1635,7 +1643,7 @@ export function PdfWorkspace({
             page: item.page,
             bbox: { x: 0.08, y: 0.08, width: 0.04, height: 0.02 },
           },
-        })
+        }, { undoable: false })
         cardId = card.id
         if (point) {
           positions.set(card.id, point)
@@ -1978,7 +1986,7 @@ export function PdfWorkspace({
       </header>
       )}
 
-      {!embedded && passBar}
+      {!embedded && closeReading && passBar}
 
       {(operationError || notice || creating || ocrMessage) && (
         <div className={`pdf-operation-bar${embedded ? ' is-floating' : ''} ${operationError ? 'is-error' : ''}`} role={operationError ? 'alert' : 'status'}>
@@ -2172,7 +2180,7 @@ export function PdfWorkspace({
 
       {embedded && (
         <>
-          {passBar}
+          {closeReading && passBar}
 
           {recallMode && clozeEnabled && selectedAnnotation && !revealedCardIds.has(selectedAnnotation.card_id) && clozeExercise && (
             <div className="pdf-cloze-float" data-cloze-float>

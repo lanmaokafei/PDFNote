@@ -127,6 +127,7 @@ pub fn run() {
             commands::save_toc_json,
             commands::add_reading_time,
             commands::get_reading_stats,
+            commands::get_reading_days,
             commands::export_opml,
         ])
         .setup(|app| {

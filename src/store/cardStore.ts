@@ -2,11 +2,12 @@ import { create } from 'zustand'
 import type { Card, CreateCardInput } from '../domain/card'
 import * as api from '../services/pdfnote'
 import { notifyCardTrashed } from '../features/card/trash'
+import { pushUndo } from '../features/undo/undoStack'
 
 interface CardState {
   cardsById: Record<string, Card>
   loadCards: () => Promise<void>
-  createCard: (input: CreateCardInput) => Promise<Card>
+  createCard: (input: CreateCardInput, options?: { undoable?: boolean }) => Promise<Card>
   removeFromMindmap: (id: string, canvasId?: string) => Promise<void>
   deleteCard: (id: string) => Promise<void>
 }
@@ -21,11 +22,30 @@ export const useCardStore = create<CardState>((set) => ({
     })
   },
 
-  createCard: async (input) => {
+  createCard: async (input, options) => {
     const card = await api.createCard(input)
     set((state) => ({
       cardsById: { ...state.cardsById, [card.id]: card },
     }))
+    // 批量建骨架时不该给每张卡都塞一条撤销记录。
+    if (options?.undoable !== false) {
+      pushUndo({
+        label: '新建卡片',
+        undo: async () => {
+          await api.deleteCard(card.id)
+          set((state) => {
+            const next = { ...state.cardsById }
+            delete next[card.id]
+            return { cardsById: next }
+          })
+          window.dispatchEvent(new CustomEvent('pdfnote:card-deleted', { detail: { cardId: card.id } }))
+        },
+        redo: async () => {
+          const restored = await api.restoreCard(card.id)
+          set((state) => ({ cardsById: { ...state.cardsById, [restored.id]: restored } }))
+        },
+      })
+    }
     return card
   },
 

@@ -319,3 +319,221 @@
   opacity: .6;
   cursor: default;
 }
+
+/* ---------- 年度回顾（0.55.0） ---------- */
+
+.close-reading-year-open {
+  padding: 5px 10px;
+  border: 1px solid #dbe4d6;
+  border-radius: 7px;
+  color: #4f6353;
+  background: #fff;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.close-reading-year-open:hover {
+  background: #eef6ea;
+}
+
+.close-reading-year-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 190;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(24, 32, 26, .34);
+}
+
+.close-reading-year {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(84vh, 700px);
+  overflow-y: auto;
+  padding: 22px 24px 18px;
+  border: 1px solid #e2e6e0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(24, 32, 26, .22);
+}
+
+.close-reading-year header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.close-reading-year header small {
+  color: #a3ada0;
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+
+.close-reading-year h2 {
+  margin: 2px 0 0;
+  color: #2f3e33;
+  font-size: 17px;
+}
+
+.close-reading-year header > button {
+  border: 0;
+  color: #8b9689;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.close-reading-year-loading {
+  margin: 20px 0;
+  padding: 26px;
+  border: 1px dashed #e0e7da;
+  border-radius: 10px;
+  color: #9aa496;
+  font-size: 12px;
+  text-align: center;
+}
+
+.close-reading-year-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 14px 0 12px;
+}
+
+.close-reading-year-metrics > div {
+  padding: 10px 8px;
+  border: 1px solid #e6ece0;
+  border-radius: 10px;
+  background: #f8fbf5;
+  text-align: center;
+}
+
+.close-reading-year-metrics strong {
+  display: block;
+  color: #33503c;
+  font-size: 18px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.close-reading-year-metrics span {
+  color: #8b9689;
+  font-size: 10.5px;
+}
+
+.close-reading-year-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 110px;
+  padding: 10px 10px 0;
+  border: 1px solid #e6ece0;
+  border-radius: 10px;
+  background: #fbfdf8;
+}
+
+.close-reading-year-bar {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  gap: 4px;
+}
+
+.close-reading-year-bar > span {
+  width: 100%;
+  max-width: 22px;
+  border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(180deg, #a6c8ab, #7aa683);
+}
+
+.close-reading-year-bar[data-seconds="0"] > span {
+  background: #e7ede2;
+}
+
+.close-reading-year-bar em {
+  color: #a3ada0;
+  font-size: 9.5px;
+  font-style: normal;
+}
+
+.close-reading-year-line {
+  margin: 10px 0 14px;
+  color: #8b9689;
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.close-reading-year-subtitle {
+  margin: 0 0 6px;
+  color: #556253;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.close-reading-year-books {
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.close-reading-year-books li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 2px;
+  border-bottom: 1px solid #f1f4ee;
+}
+
+.close-reading-year-books span {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: #3f4f42;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.close-reading-year-books strong {
+  flex: 0 0 auto;
+  color: #7b877a;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.close-reading-year-empty {
+  margin: 0 0 14px;
+  padding: 18px;
+  border: 1px dashed #e0e7da;
+  border-radius: 9px;
+  color: #9aa496;
+  font-size: 12px;
+  text-align: center;
+}
+
+.close-reading-year footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.close-reading-year footer button {
+  padding: 7px 16px;
+  border: 1px solid #d7e0d2;
+  border-radius: 8px;
+  color: #3f5a44;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.close-reading-year footer button:hover {
+  background: #f3f7f1;
+}

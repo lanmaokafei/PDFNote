@@ -44,6 +44,8 @@ import { useContextMenu, type ContextMenuSection } from '../../ui/contextMenuCor
 import {
   applyCardOrder,
   clearMindmapCards,
+  deleteCard as deleteCardApi,
+  restoreCard as restoreTrashedCard,
   createMindmapCanvas,
   exportAnkiTxt,
   exportMarkdownFile,
@@ -1747,6 +1749,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   /** 批量清空：后端单事务完成后，本地把当前画布的投影、坐标、选中与弹窗一次性复位。 */
   const clearAllCards = useCallback((mode: ClearCardsMode) => {
     void runTask(async () => {
+      // 删卡前先记住这一批 id：撤销就是把它们从回收站取回并重排布局。
+      const clearedIds = mode === 'delete' ? cards.map((card) => card.id) : []
       const count = await clearMindmapCards(mode, canvasId)
       setPositions({})
       setMeasuredSizes({})
@@ -1759,11 +1763,24 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       setViewMode('canvas')
       await syncCards()
       void listMindmapCanvases(documentId ?? null).then(setCanvases).catch(() => undefined)
+      if (clearedIds.length > 0) {
+        pushUndo({
+          label: `清空画布（${count} 张）`,
+          undo: async () => {
+            for (const id of clearedIds) await restoreTrashedCard(id)
+            await refresh()
+          },
+          redo: async () => {
+            for (const id of clearedIds) await deleteCardApi(id)
+            await refresh()
+          },
+        })
+      }
       setNotice(mode === 'remove'
         ? `已清空当前画布的 ${count} 张卡片，其他画布与 PDF / 复习投影仍保留。`
-        : `已把当前画布的 ${count} 张卡片移入回收站（保留 30 天，可恢复）。`)
+        : `已把当前画布的 ${count} 张卡片移入回收站（保留 30 天，⌘Z 可撤销）。`)
     })
-  }, [canvasId, documentId, runTask, syncCards])
+  }, [canvasId, cards, documentId, refresh, runTask, syncCards])
 
   const copyToClipboard = (text: string) => {
     if (navigator.clipboard) void navigator.clipboard.writeText(text).catch(() => undefined)

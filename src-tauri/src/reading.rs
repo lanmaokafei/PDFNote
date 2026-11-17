@@ -194,6 +194,48 @@ pub fn add_reading_time(
     Ok(())
 }
 
+/// 某一天的阅读时长（跨书合计）。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingDay {
+    pub day: String,
+    pub seconds: i64,
+}
+
+/// 跨书阅读日历：区间内每天的合计秒数，供年度回顾画柱状图与算连续天数。
+pub fn get_reading_days(
+    state: &AppState,
+    start_day: &str,
+    end_day: &str,
+) -> Result<Vec<ReadingDay>, String> {
+    validate_day(start_day)?;
+    validate_day(end_day)?;
+    if start_day > end_day {
+        return Err("start_day must not be after end_day".into());
+    }
+    let database = state.db()?;
+    let mut statement = database
+        .prepare(
+            "SELECT day, SUM(seconds) FROM reading_daily
+             WHERE day >= ?1 AND day <= ?2
+             GROUP BY day
+             HAVING SUM(seconds) > 0
+             ORDER BY day",
+        )
+        .map_err(|error| error.to_string())?;
+    let days = statement
+        .query_map(params![start_day, end_day], |row| {
+            Ok(ReadingDay {
+                day: row.get(0)?,
+                seconds: row.get(1)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(days)
+}
+
 /// 阅读目标与年度排行：今日总时长、今年总时长、今年每本书的时长。
 pub fn get_reading_stats(state: &AppState, day: &str, year_start: &str) -> Result<ReadingStats, String> {
     validate_day(day)?;
@@ -393,6 +435,34 @@ mod tests {
         assert!(add_reading_time(&state, "doc1", "2026-11-16", 3601).is_err());
         assert!(get_reading_stats(&state, "bad", "2026-01-01").is_err());
         assert!(add_reading_time(&state, "missing", "2026-11-16", 60).is_err());
+    }
+
+    #[test]
+    fn reading_days_aggregates_per_day_and_validates_range() {
+        let state = state();
+        seed_document(&state, "doc1");
+        {
+            let database = state.db().unwrap();
+            database
+                .execute(
+                    "INSERT INTO documents (id, title, stored_path, content_hash, created_at, updated_at)
+                     VALUES ('doc2', '第二本', 'pdfs/b.pdf', 'hash-2', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                    [],
+                )
+                .unwrap();
+        }
+        add_reading_time(&state, "doc1", "2026-03-01", 600).unwrap();
+        add_reading_time(&state, "doc2", "2026-03-01", 300).unwrap();
+        add_reading_time(&state, "doc1", "2026-03-03", 120).unwrap();
+
+        let days = get_reading_days(&state, "2026-01-01", "2026-12-31").unwrap();
+        assert_eq!(days.len(), 2, "同一天跨书要合并成一行");
+        assert_eq!(days[0], ReadingDay { day: "2026-03-01".into(), seconds: 900 });
+        assert_eq!(days[1].seconds, 120);
+
+        assert!(get_reading_days(&state, "2026-12-31", "2026-01-01").is_err());
+        assert!(get_reading_days(&state, "2026/01/01", "2026-12-31").is_err());
+        assert!(get_reading_days(&state, "2020-01-01", "2020-12-31").unwrap().is_empty());
     }
 
     #[test]

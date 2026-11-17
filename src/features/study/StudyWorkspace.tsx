@@ -13,6 +13,8 @@ interface StudyWorkspaceProps {
   onCardsChanged: () => void
   /** 固定画布：粗读精读工作区把 PDF 标注与脑图都钉在专属画布上。 */
   canvasId?: string
+  /** 粗读精读模式：只有这个模块显示阶段条与骨架入口。 */
+  closeReading?: boolean
 }
 
 const MIN_RATIO = 32
@@ -27,6 +29,7 @@ export function StudyWorkspace({
   onPageCount,
   onCardsChanged,
   canvasId,
+  closeReading = false,
 }: StudyWorkspaceProps) {
   const [ratio, setRatio] = useState(54)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -61,6 +64,7 @@ export function StudyWorkspace({
         <PdfWorkspace
           document={document}
           embedded
+          closeReading={closeReading}
           canvasId={canvasId}
           jumpTarget={jumpTarget}
           onJumpHandled={onJumpHandled}

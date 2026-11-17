@@ -890,6 +890,15 @@ pub fn get_reading_stats(
 }
 
 #[tauri::command]
+pub fn get_reading_days(
+    state: State<'_, AppState>,
+    start_day: String,
+    end_day: String,
+) -> Result<Vec<reading::ReadingDay>, String> {
+    reading::get_reading_days(&state, &start_day, &end_day)
+}
+
+#[tauri::command]
 pub fn save_recall_note(
     state: State<'_, AppState>,
     input: reading::SaveRecallNoteInput,

@@ -16,6 +16,7 @@ import {
 import { SizeControl } from '../ink/SizeControl'
 import { readSizePreference, saveSizePreference } from '../ink/size'
 import { findInkHits, type InkHitCandidate } from '../pdf/inkErase'
+import { pushUndo } from '../undo/undoStack'
 import './CanvasInkLayer.css'
 
 export type InkMode = 'off' | 'pen' | 'eraser'
@@ -229,10 +230,33 @@ export function useCanvasInk(canvasId: string, selectedCardIds: ReadonlySet<stri
       const ids = [...erasedRef.current]
       erasedRef.current = new Set()
       if (ids.length) {
+        const targets = inks.filter((ink) => ids.includes(ink.id))
         try {
           for (const id of ids) await deleteCanvasInk(id)
           const removed = new Set(ids)
           setInks((current) => current.filter((ink) => !removed.has(ink.id)))
+          if (targets.length > 0) {
+            // 撤销 = 按原点位重建；重做 = 删掉重建得到的新 id。
+            let recreated: CanvasInk[] = []
+            pushUndo({
+              label: '擦除画布笔迹',
+              undo: async () => {
+                recreated = await Promise.all(targets.map((ink) => createCanvasInk({
+                  canvas_id: ink.canvas_id,
+                  layer_id: ink.layer_id,
+                  points: ink.points,
+                  style: ink.style,
+                })))
+                setInks((current) => [...current, ...recreated])
+              },
+              redo: async () => {
+                for (const ink of recreated) await deleteCanvasInk(ink.id)
+                const drop = new Set(recreated.map((ink) => ink.id))
+                setInks((current) => current.filter((ink) => !drop.has(ink.id)))
+                recreated = []
+              },
+            })
+          }
         } catch (reason) { setError(errorMessage(reason)) }
       }
       setErased(new Set())
@@ -250,6 +274,24 @@ export function useCanvasInk(canvasId: string, selectedCardIds: ReadonlySet<stri
         style: { color, width },
       })
       setInks((current) => [...current, created])
+      let createdId = created.id
+      pushUndo({
+        label: '画布笔迹',
+        undo: async () => {
+          await deleteCanvasInk(createdId)
+          setInks((current) => current.filter((ink) => ink.id !== createdId))
+        },
+        redo: async () => {
+          const again = await createCanvasInk({
+            canvas_id: canvasId,
+            layer_id: activeLayerId,
+            points,
+            style: { color, width },
+          })
+          createdId = again.id
+          setInks((current) => [...current, again])
+        },
+      })
     } catch (reason) { setError(`笔迹保存失败：${errorMessage(reason)}`) }
   }
 

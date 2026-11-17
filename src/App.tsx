@@ -18,6 +18,7 @@ import { useContextMenu } from './ui/contextMenuCore'
 import type { BootstrapStatus, Document } from './domain/card'
 import { listDocuments, restoreCard } from './services/pdfnote'
 import { CARD_TRASHED_EVENT } from './features/card/trash'
+import { redoLast, undoLast } from './features/undo/undoStack'
 import { LibraryWorkspace } from './features/library/LibraryWorkspace'
 import { StudyWorkspace } from './features/study/StudyWorkspace'
 import { SettingsDialog } from './features/settings/SettingsDialog'
@@ -78,6 +79,8 @@ function App() {
   // 刚被移入回收站的卡片：用于底部「撤销」条与 ⌘Z。
   const [trashed, setTrashed] = useState<string[]>([])
   const [undoBusy, setUndoBusy] = useState(false)
+  // 撤销/重做后的轻提示（「已撤销：大纲缩进」）。
+  const [actionNotice, setActionNotice] = useState('')
   const { menu, show, close } = useContextMenu()
   const loadCards = useCardStore((state) => state.loadCards)
   const cardsById = useCardStore((state) => state.cardsById)
@@ -141,6 +144,51 @@ function App() {
     return () => window.removeEventListener(CARD_TRASHED_EVENT, handler)
   }, [])
 
+  const showActionNotice = useCallback((text: string) => {
+    setActionNotice(text)
+    window.setTimeout(() => setActionNotice((current) => (current === text ? '' : current)), 2400)
+  }, [])
+
+  /** ⌘Z：优先撤销栈（大纲 / 笔迹），没有可撤销的就回退到「恢复刚删的卡片」。 */
+  const runUndo = useCallback(async () => {
+    if (undoBusy) return
+    setUndoBusy(true)
+    try {
+      const label = await undoLast()
+      if (label) {
+        showActionNotice(`已撤销：${label}`)
+        return
+      }
+      if (trashed.length > 0) {
+        const ids = trashed
+        setTrashed([])
+        for (const id of ids) await restoreCard(id)
+        await useCardStore.getState().loadCards()
+        await refreshStatus()
+        showActionNotice('已从回收站恢复')
+        return
+      }
+      showActionNotice('没有可撤销的操作')
+    } catch (reason) {
+      showActionNotice(`撤销失败：${reason instanceof Error ? reason.message : String(reason)}`)
+    } finally {
+      setUndoBusy(false)
+    }
+  }, [refreshStatus, showActionNotice, trashed, undoBusy])
+
+  const runRedo = useCallback(async () => {
+    if (undoBusy) return
+    setUndoBusy(true)
+    try {
+      const label = await redoLast()
+      showActionNotice(label ? `已重做：${label}` : '没有可重做的操作')
+    } catch (reason) {
+      showActionNotice(`重做失败：${reason instanceof Error ? reason.message : String(reason)}`)
+    } finally {
+      setUndoBusy(false)
+    }
+  }, [showActionNotice, undoBusy])
+
   const undoTrash = useCallback(async () => {
     if (trashed.length === 0 || undoBusy) return
     setUndoBusy(true)
@@ -164,7 +212,14 @@ function App() {
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
       if (event.metaKey || event.ctrlKey) {
-        if (event.altKey || event.shiftKey) return
+        if (event.altKey) return
+        if (event.key.toLowerCase() === 'z') {
+          event.preventDefault()
+          if (event.shiftKey) void runRedo()
+          else void runUndo()
+          return
+        }
+        if (event.shiftKey) return
         const views: View[] = ['library', 'mindmap', 'board', 'notebook', 'review', 'closereading']
         const index = Number(event.key)
         if (Number.isInteger(index) && index >= 1 && index <= views.length) {
@@ -177,11 +232,6 @@ function App() {
           window.dispatchEvent(new Event('pdfnote:focus-search'))
           return
         }
-        if (event.key.toLowerCase() === 'z' && trashed.length > 0) {
-          event.preventDefault()
-          void undoTrash()
-          return
-        }
       }
       if (event.key === '?' || (event.key === '/' && event.shiftKey)) {
         event.preventDefault()
@@ -192,7 +242,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [trashed, undoTrash])
+  }, [runRedo, runUndo])
 
   // 学习报告里点「开始复习这些卡」：切到复习视图并只看这一组到期卡片。
   useEffect(() => {
@@ -487,6 +537,11 @@ function App() {
           />
         </Suspense>
       )}
+      {actionNotice && (
+        <div className="app-undo-toast is-action" role="status" data-testid="action-toast">
+          <span>{actionNotice}</span>
+        </div>
+      )}
       {trashed.length > 0 && (
         <div className="app-undo-toast" role="status" data-testid="undo-toast">
           <span>已移入回收站{trashed.length > 1 ? `（${trashed.length} 张）` : ''}</span>
@@ -508,7 +563,8 @@ function App() {
               <dt>⌘4 / ⌘5 / ⌘6</dt><dd>笔记本 / 复习 / 粗读精读</dd>
               <dt>⌘K</dt><dd>聚焦当前视图的搜索框</dd>
               <dt>? </dt><dd>显示或关闭这张键位表</dd>
-              <dt>⌘Z</dt><dd>撤销刚才的删除（从回收站取回）</dd>
+              <dt>⌘Z</dt><dd>撤销：大纲改动 / 笔迹 / 删除卡片（删除会从回收站取回）</dd>
+              <dt>⇧⌘Z</dt><dd>重做</dd>
               <dt>← / →</dt><dd>PDF 上一页 / 下一页</dd>
               <dt>空格</dt><dd>复习页揭示答案</dd>
               <dt>1 – 4</dt><dd>复习页评分：重来 / 困难 / 良好 / 简单</dd>

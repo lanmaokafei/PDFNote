@@ -35,6 +35,7 @@ import {
   updateNotebook,
 } from '../../services/pdfnote'
 import { findInkHits, type InkHitCandidate } from '../pdf/inkErase'
+import { pushUndo } from '../undo/undoStack'
 import { SizeControl } from '../ink/SizeControl'
 import { readSizePreference, saveSizePreference } from '../ink/size'
 import './NotebookWorkspace.css'
@@ -410,6 +411,19 @@ function NotebookEditor({ notebook, onBack, onNotebookUpdated }: NotebookEditorP
     try {
       const created = await createNotebookInk(input)
       setInks((current) => [...current, created])
+      let createdId = created.id
+      pushUndo({
+        label: '手写本笔迹',
+        undo: async () => {
+          await deleteNotebookInk(createdId)
+          setInks((current) => current.filter((ink) => ink.id !== createdId))
+        },
+        redo: async () => {
+          const again = await createNotebookInk(input)
+          createdId = again.id
+          setInks((current) => [...current, again])
+        },
+      })
     } catch (reason) {
       setError(`墨迹保存失败：${errorMessage(reason)}`)
     }
@@ -418,15 +432,42 @@ function NotebookEditor({ notebook, onBack, onNotebookUpdated }: NotebookEditorP
   const eraseStrokes = useCallback(async (ids: string[]) => {
     if (!ids.length) return
     const unique = [...new Set(ids)]
+    const targets = inks.filter((ink) => unique.includes(ink.id))
     try {
       // 串行删除：一次擦掉几十笔时，并发 invoke 只会互相等 SQLite 锁。
       for (const id of unique) await deleteNotebookInk(id)
       const removed = new Set(unique)
       setInks((current) => current.filter((ink) => !removed.has(ink.id)))
+      if (targets.length > 0) {
+        let recreated: typeof targets = []
+        pushUndo({
+          label: '擦除手写本笔迹',
+          undo: async () => {
+            recreated = []
+            for (const ink of targets) {
+              const again = await createNotebookInk({
+                notebook_id: ink.notebook_id,
+                page: ink.page,
+                layer_id: ink.layer_id,
+                bbox: ink.bbox,
+                style: ink.style,
+              })
+              recreated.push(again)
+            }
+            setInks((current) => [...current, ...recreated])
+          },
+          redo: async () => {
+            for (const ink of recreated) await deleteNotebookInk(ink.id)
+            const drop = new Set(recreated.map((ink) => ink.id))
+            setInks((current) => current.filter((ink) => !drop.has(ink.id)))
+            recreated = []
+          },
+        })
+      }
     } catch (reason) {
       setError(`擦除失败：${errorMessage(reason)}`)
     }
-  }, [])
+  }, [inks])
 
   const canDraw = Boolean(activeLayer && activeLayer.visible && !activeLayer.locked)
 

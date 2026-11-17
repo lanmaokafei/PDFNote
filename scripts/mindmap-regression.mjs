@@ -2806,6 +2806,30 @@ if (process.env.STEP === 'outline-edit') {
     .locator(`.mindmap-outline-row[data-card-id="${created?.id}"]`)
     .getAttribute('data-depth')
   if (depthOfCreated !== '1') problems.push(`Tab 后大纲深度应为 1：${depthOfCreated}`)
+
+  // 3) ⌘Z 撤销缩进 → 回到顶层；⇧⌘Z 重做 → 又回到 c1 下。
+  await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur() })
+  await page.waitForTimeout(300)
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(1000)
+  const afterUndo = await readCards()
+  const undone = afterUndo.find((card) => card.id === created?.id)
+  if (undone?.parent_id !== null) problems.push(`⌘Z 没有撤销缩进：${undone?.parent_id}`)
+  const depthAfterUndo = await page
+    .locator(`.mindmap-outline-row[data-card-id="${created?.id}"]`)
+    .getAttribute('data-depth')
+  if (depthAfterUndo !== '0') problems.push(`撤销后深度应回到 0：${depthAfterUndo}`)
+
+  await page.keyboard.press('Meta+Shift+z')
+  await page.waitForTimeout(1000)
+  const afterRedo = await readCards()
+  const redone = afterRedo.find((card) => card.id === created?.id)
+  if (redone?.parent_id !== 'c1') problems.push(`⇧⌘Z 没有重做缩进：${redone?.parent_id}`)
+
+  // 撤销/重做后输入框已经失焦：重新进入编辑态，后面的 Shift+Tab 才有落点。
+  await page.locator(`.mindmap-outline-row[data-card-id="${created?.id}"] .mindmap-outline-title`).click()
+  await page.locator('[data-testid="outline-input"]').waitFor()
+  await page.waitForTimeout(200)
   if (process.env.SHOT) {
     await page.locator('.mindmap-outline').screenshot({ path: '/tmp/pdfnote-outline-edit.png' })
   }
@@ -2879,6 +2903,15 @@ if (process.env.STEP === 'canvas-ink') {
   await drawStroke(0.25)
   if ((await inkCount()) !== 1) problems.push(`第一笔没有落库：${await inkCount()}`)
   if ((await pathCount()) !== 1) problems.push(`第一笔没有渲染：${await pathCount()}`)
+  await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur() })
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(800)
+  if ((await inkCount()) !== 0) problems.push(`⌘Z 没有撤销笔迹：${await inkCount()}`)
+  if ((await pathCount()) !== 0) problems.push(`⌘Z 后画布仍有笔迹：${await pathCount()}`)
+  await page.keyboard.press('Meta+Shift+z')
+  await page.waitForTimeout(900)
+  if ((await inkCount()) !== 1) problems.push(`⇧⌘Z 没有重做笔迹：${await inkCount()}`)
+  if ((await pathCount()) !== 1) problems.push(`重做后画布没有恢笔迹：${await pathCount()}`)
 
   // 2) 退出涂鸦后平移：世界坐标笔迹必须跟着视口一起移动
   await page.locator('[data-testid="mindmap-ink-toggle"]').click()

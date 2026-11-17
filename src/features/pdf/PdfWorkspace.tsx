@@ -104,6 +104,7 @@ import {
 import { parseTocText } from './tocText'
 import { ocrLinesToText, renderPageImage } from './tocOcr'
 import { useNoteLayout } from './noteLayout'
+import { pushUndo } from '../undo/undoStack'
 import {
   bumpClozeTurn,
   buildCloze,
@@ -977,18 +978,45 @@ export function PdfWorkspace({
     goToPage(page)
   }
 
+  const addInkToState = useCallback((page: number, ink: PageInk) => {
+    setInksByPage((previous) => ({ ...previous, [page]: [...(previous[page] ?? []), ink] }))
+  }, [])
+
+  const dropInksFromState = useCallback((ids: string[]) => {
+    const drop = new Set(ids)
+    setInksByPage((previous) => {
+      const next: Record<number, PageInk[]> = {}
+      Object.entries(previous).forEach(([page, items]) => {
+        next[Number(page)] = items.filter((ink) => !drop.has(ink.id))
+      })
+      return next
+    })
+  }, [])
+
   const handleInk = useCallback(async (page: number, bbox: NormalizedBBox, points: Array<[number, number]>) => {
+    const style = { color: inkColor, width: inkWidth, points }
     try {
-      const ink = await createPageInk(document.id, page, bbox, { color: inkColor, width: inkWidth, points })
-      setInksByPage((previous) => ({
-        ...previous,
-        [page]: [...(previous[page] ?? []), ink],
-      }))
-      setNotice('墨迹已保存到本页。')
+      const ink = await createPageInk(document.id, page, bbox, style)
+      addInkToState(page, ink)
+      // 撤销 = 删掉这一笔；重做 = 用同样的点再画一次（新 id 回填给下一次撤销）。
+      let inkId = ink.id
+      pushUndo({
+        label: '手写笔迹',
+        undo: async () => {
+          await deletePageInk(inkId)
+          dropInksFromState([inkId])
+        },
+        redo: async () => {
+          const again = await createPageInk(document.id, page, bbox, style)
+          inkId = again.id
+          addInkToState(page, again)
+        },
+      })
+      setNotice('墨迹已保存到本页（⌘Z 可撤销）。')
     } catch (reason) {
       setOperationError(`墨迹保存失败：${errorMessage(reason)}`)
     }
-  }, [document.id, inkColor, inkWidth])
+  }, [addInkToState, document.id, dropInksFromState, inkColor, inkWidth])
 
   /**
    * 批量擦除：橡皮拖动时可能一次命中多条，松手才统一删，
@@ -997,21 +1025,39 @@ export function PdfWorkspace({
   const handleEraseInks = useCallback(async (ids: string[]) => {
     const unique = [...new Set(ids)]
     if (!unique.length) return
+    const removed = unique
+      .map((id) => Object.values(inksByPage).flat().find((ink) => ink.id === id))
+      .filter((ink): ink is PageInk => Boolean(ink))
     try {
       await Promise.all(unique.map((id) => deletePageInk(id)))
-      setInksByPage((previous) => {
-        const drop = new Set(unique)
-        const next: Record<number, PageInk[]> = {}
-        Object.entries(previous).forEach(([page, items]) => {
-          next[Number(page)] = items.filter((ink) => !drop.has(ink.id))
+      dropInksFromState(unique)
+      if (removed.length > 0) {
+        // 撤销 = 按原来的点重建；重做 = 删掉重建出来的新 id。
+        let recreatedIds: string[] = []
+        pushUndo({
+          label: '擦除笔迹',
+          undo: async () => {
+            const again = await Promise.all(removed.map((ink) => createPageInk(
+              document.id,
+              ink.page,
+              { x: ink.bbox.x, y: ink.bbox.y, width: ink.bbox.width, height: ink.bbox.height },
+              ink.style,
+            )))
+            recreatedIds = again.map((ink) => ink.id)
+            again.forEach((ink) => addInkToState(ink.page, ink))
+          },
+          redo: async () => {
+            await Promise.all(recreatedIds.map((id) => deletePageInk(id)))
+            dropInksFromState(recreatedIds)
+            recreatedIds = []
+          },
         })
-        return next
-      })
-      setNotice(unique.length > 1 ? `已擦除 ${unique.length} 条墨迹。` : '墨迹已删除。')
+      }
+      setNotice(unique.length > 1 ? `已擦除 ${unique.length} 条墨迹（⌘Z 可撤销）。` : '墨迹已删除（⌘Z 可撤销）。')
     } catch (reason) {
       setOperationError(`删除墨迹失败：${errorMessage(reason)}`)
     }
-  }, [])
+  }, [addInkToState, document.id, dropInksFromState, inksByPage])
 
   const handleEraseInk = useCallback((id: string) => {
     void handleEraseInks([id])

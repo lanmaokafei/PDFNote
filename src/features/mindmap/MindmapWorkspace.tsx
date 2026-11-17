@@ -38,7 +38,7 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react'
-import type { Card, CardLink, MindmapCanvas, MindmapLayoutInput, Rating } from '../../domain/card'
+import type { Card, CardLink, CardOrderUpdate, MindmapCanvas, MindmapLayoutInput, Rating } from '../../domain/card'
 import { ContextMenu } from '../../ui/ContextMenu'
 import { useContextMenu, type ContextMenuSection } from '../../ui/contextMenuCore'
 import {
@@ -98,6 +98,8 @@ import {
   saveCanvasId,
 } from './canvas'
 import { searchCards } from './search'
+import { orderDiff, snapshotOrder } from './orderUndo'
+import { pushUndo } from '../undo/undoStack'
 import {
   nextMindmapInsertPoint,
   readMindmapViewportCenter,
@@ -1413,12 +1415,28 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
         excerpt: card.excerpt,
         user_note: card.user_note,
       }
+      const previous = {
+        question: card.question,
+        excerpt: card.excerpt,
+        user_note: card.user_note,
+      }
       content[field] = draft
       await updateCardContent({
         ...content,
         link_aliases: card.link_aliases,
       })
       await syncCards()
+      pushUndo({
+        label: '编辑大纲文字',
+        undo: async () => {
+          await updateCardContent({ ...previous, id })
+          await syncCards()
+        },
+        redo: async () => {
+          await updateCardContent({ ...content })
+          await syncCards()
+        },
+      })
     } catch (reason) {
       setError(`标题保存失败：${errorMessage(reason)}`)
     }
@@ -1460,6 +1478,32 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     }
   }, [busy, canvasId, cards, createCardInStore, positions, syncCards])
 
+  /**
+   * 结构变更 + 撤销记录：先把当前顺序拍个快照，改完再拍一次，
+   * 两次的差就是撤销/重做要写回的行；没有变化就不占撤销栈。
+   */
+  const applyOrderUndoable = useCallback(async (label: string, plan: CardOrderUpdate[]) => {
+    const before = snapshotOrder(cards)
+    await applyCardOrder(plan)
+    await syncCards()
+    const afterCards = Object.values(useCardStore.getState().cardsById)
+    const after = snapshotOrder(afterCards)
+    const undoPlan = orderDiff(before, after)
+    if (undoPlan.length === 0) return
+    const redoPlan = orderDiff(after, before)
+    pushUndo({
+      label,
+      undo: async () => {
+        await applyCardOrder(undoPlan)
+        await syncCards()
+      },
+      redo: async () => {
+        await applyCardOrder(redoPlan)
+        await syncCards()
+      },
+    })
+  }, [cards, syncCards])
+
   const moveOutlineCard = useCallback(async (id: string, kind: 'indent' | 'outdent') => {
     const plan = kind === 'indent' ? indentPlan(cards, id) : outdentPlan(cards, id)
     if (!plan) {
@@ -1467,11 +1511,10 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       return
     }
     await runTask(async () => {
-      await applyCardOrder(plan)
-      await syncCards()
-      setNotice(kind === 'indent' ? '已缩进为上一项的子级。' : '已提升一级。')
+      await applyOrderUndoable(kind === 'indent' ? '大纲缩进' : '大纲提升', plan)
+      setNotice(kind === 'indent' ? '已缩进为上一项的子级（⌘Z 可撤销）。' : '已提升一级（⌘Z 可撤销）。')
     })
-  }, [cards, runTask, syncCards])
+  }, [applyOrderUndoable, cards, runTask])
 
   const handleOutlineKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     // 中文输入法用回车确认候选词时不能建行。
@@ -1552,11 +1595,10 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       return
     }
     void runTask(async () => {
-      await applyCardOrder(plan)
-      await syncCards()
-      setNotice('已调整大纲结构。')
+      await applyOrderUndoable('调整大纲结构', plan)
+      setNotice('已调整大纲结构（⌘Z 可撤销）。')
     })
-  }, [cards, outlineDrop, runTask, syncCards])
+  }, [applyOrderUndoable, cards, outlineDrop, runTask])
 
   const endOutlineDrag = useCallback(() => {
     outlineDragRef.current = null

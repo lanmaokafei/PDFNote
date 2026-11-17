@@ -2182,3 +2182,35 @@
 .pdf-inspector-actions > button:not(.pdf-delete-button):hover:not(:disabled) {
   background: #e9f2e4;
 }
+
+/* ---------- 跨书汇总（0.52.0） ---------- */
+
+.pdf-overview-books {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pdf-overview-books li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 2px;
+  border-bottom: 1px solid #f1f4ee;
+}
+
+.pdf-overview-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: #3f4f42;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-overview-books .pdf-progress-stats {
+  flex: 0 0 auto;
+  color: #8b9689;
+  font-variant-numeric: tabular-nums;
+}

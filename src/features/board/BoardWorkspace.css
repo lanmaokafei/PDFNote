@@ -459,3 +459,171 @@
   .board-banner { margin-left: 20px; margin-right: 20px; }
   .board-column { flex-basis: 250px; }
 }
+
+/* ---------- 回收站（0.52.0） ---------- */
+
+.board-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(24, 32, 26, .32);
+}
+
+.board-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(78vh, 640px);
+  padding: 20px 22px 16px;
+  border: 1px solid #e2e6e0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(24, 32, 26, .2);
+}
+
+.board-modal header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.board-modal header small {
+  color: #a3ada0;
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+
+.board-modal header h2 {
+  margin: 2px 0 0;
+  color: #2f3e33;
+  font-size: 16px;
+}
+
+.board-modal header > button {
+  border: 0;
+  color: #8b9689;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.board-modal-intro {
+  margin: 8px 0 12px;
+  color: #8b9689;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.board-modal-empty {
+  margin: 12px 0;
+  padding: 22px;
+  border: 1px dashed #e0e7da;
+  border-radius: 10px;
+  color: #9aa496;
+  font-size: 12px;
+  text-align: center;
+}
+
+.board-trash-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 0 12px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.board-trash-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid #f0f3ed;
+}
+
+.board-trash-text {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.board-trash-text strong {
+  overflow: hidden;
+  color: #3f4f42;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-trash-text span {
+  color: #9aa496;
+  font-size: 11px;
+}
+
+.board-trash-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.board-trash-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid #d7e0d2;
+  border-radius: 7px;
+  color: #3f5a44;
+  background: #f4f8f1;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.board-trash-actions button:hover:not(:disabled) {
+  background: #e9f2e4;
+}
+
+.board-trash-actions button.is-danger {
+  border-color: #efd9d3;
+  color: #a2543f;
+  background: #fdf6f4;
+}
+
+.board-trash-actions button.is-danger:hover:not(:disabled) {
+  background: #fbeae5;
+}
+
+.board-modal footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f3ed;
+}
+
+.board-modal footer span {
+  flex: 1 1 auto;
+}
+
+.board-modal footer button {
+  padding: 7px 14px;
+  border: 1px solid #d7e0d2;
+  border-radius: 8px;
+  color: #3f5a44;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.board-modal footer button:hover:not(:disabled) {
+  background: #f3f7f1;
+}

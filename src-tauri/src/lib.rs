@@ -53,6 +53,10 @@ pub fn run() {
             commands::update_card_content,
             commands::remove_card_from_mindmap,
             commands::delete_card,
+            commands::list_trashed_cards,
+            commands::restore_card,
+            commands::purge_trashed_card,
+            commands::purge_expired_trash,
             commands::clear_mindmap_cards,
             commands::list_mindmap_canvases,
             commands::create_mindmap_canvas,
@@ -80,6 +84,7 @@ pub fn run() {
             commands::merge_cards,
             commands::record_review,
             commands::get_review_stats,
+            commands::get_study_overview,
             commands::get_card_review_stats,
             commands::import_document,
             commands::list_documents,
@@ -142,7 +147,10 @@ pub fn run() {
             let database_path = data_dir.join("pdfnote.db");
             let database = db::open(&database_path)
                 .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
-            app.manage(AppState::new(database, database_path, data_dir));
+            let state = AppState::new(database, database_path, data_dir);
+            // 回收站默认保留 30 天：启动时顺手清一次过期项，失败不阻塞启动。
+            let _ = cards::purge_expired_trash(&state, 30);
+            app.manage(state);
             Ok(())
         })
         .run(tauri::generate_context!())

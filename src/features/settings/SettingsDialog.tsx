@@ -13,6 +13,14 @@ import {
   type AiTestResult,
 } from '../../services/ai'
 import { getAppVersion } from '../../services/update'
+import {
+  INTERVAL_CHOICES,
+  LEARNING_STEP_CHOICES,
+  RETENTION_CHOICES,
+  readFsrsSettings,
+  saveFsrsSettings,
+  type FsrsSettings,
+} from '../review/fsrsSettings'
 import './SettingsDialog.css'
 
 interface SettingsDialogProps {
@@ -40,6 +48,8 @@ export function SettingsDialog({ onClose, onSaved, onCheckUpdate }: SettingsDial
   const [taskError, setTaskError] = useState('')
   const [taskCopied, setTaskCopied] = useState(false)
   const [appVersion, setAppVersion] = useState('')
+  // 复习计划参数：即改即存，不跟 AI 配置一起走「保存」按钮。
+  const [fsrs, setFsrs] = useState<FsrsSettings>(readFsrsSettings)
 
   useEffect(() => {
     let active = true
@@ -150,7 +160,7 @@ export function SettingsDialog({ onClose, onSaved, onCheckUpdate }: SettingsDial
         <header>
           <div>
             <small>SETTINGS</small>
-            <h2 id="settings-title">AI 识别选区（可选）</h2>
+            <h2 id="settings-title">设置</h2>
           </div>
           <button type="button" onClick={onClose} disabled={busy} aria-label="关闭设置">×</button>
         </header>
@@ -282,6 +292,68 @@ export function SettingsDialog({ onClose, onSaved, onCheckUpdate }: SettingsDial
         {testError && <p className="settings-error" role="alert">连接测试失败：{testError}</p>}
         {error && <p className="settings-error" role="alert">{error}</p>}
         {notice && <p className="settings-notice" role="status">{notice}</p>}
+
+        <section className="settings-fsrs" aria-label="复习计划" data-testid="settings-fsrs">
+          <h3>复习计划（FSRS）</h3>
+          <p className="settings-fsrs-intro">
+            期望保留率越高，复习次数越多；改完立即生效，只影响之后评分的卡片，已排好的到期时间不会回溯。
+          </p>
+          <div className="settings-fsrs-grid">
+            <label>
+              <span>期望保留率</span>
+              <select
+                data-testid="fsrs-retention"
+                value={fsrs.retention}
+                onChange={(event) => {
+                  const next = saveFsrsSettings({ ...fsrs, retention: Number(event.target.value) })
+                  setFsrs(next)
+                  window.dispatchEvent(new CustomEvent('pdfnote:fsrs-changed', { detail: next }))
+                }}
+              >
+                {RETENTION_CHOICES.map((value) => (
+                  <option key={value} value={value}>{Math.round(value * 100)}%</option>
+                ))}
+              </select>
+              <small>默认 90%。95% 更牢但复习量明显增加。</small>
+            </label>
+            <label>
+              <span>最长间隔</span>
+              <select
+                data-testid="fsrs-interval"
+                value={fsrs.maximumInterval}
+                onChange={(event) => {
+                  const next = saveFsrsSettings({ ...fsrs, maximumInterval: Number(event.target.value) })
+                  setFsrs(next)
+                  window.dispatchEvent(new CustomEvent('pdfnote:fsrs-changed', { detail: next }))
+                }}
+              >
+                {INTERVAL_CHOICES.map((value) => (
+                  <option key={value} value={value}>{value >= 3650 ? `${value / 365} 年` : `${value} 天`}</option>
+                ))}
+              </select>
+              <small>成熟卡最多排到多久之后；考试类资料可以设成 180 天。</small>
+            </label>
+            <label>
+              <span>学习步骤</span>
+              <select
+                data-testid="fsrs-steps"
+                value={fsrs.learningSteps.join(',')}
+                onChange={(event) => {
+                  const steps = LEARNING_STEP_CHOICES.find((choice) => choice.steps.join(',') === event.target.value)?.steps
+                  if (!steps) return
+                  const next = saveFsrsSettings({ ...fsrs, learningSteps: steps })
+                  setFsrs(next)
+                  window.dispatchEvent(new CustomEvent('pdfnote:fsrs-changed', { detail: next }))
+                }}
+              >
+                {LEARNING_STEP_CHOICES.map((choice) => (
+                  <option key={choice.label} value={choice.steps.join(',')}>{choice.label}</option>
+                ))}
+              </select>
+              <small>新卡当天的重学间隔；步骤越多，当天越容易记牢。</small>
+            </label>
+          </div>
+        </section>
 
         <section className="settings-update" aria-label="软件更新">
           <div className="settings-update-row">

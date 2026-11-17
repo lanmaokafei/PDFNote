@@ -225,6 +225,33 @@ export async function deleteCard(id: string): Promise<void> {
   return invoke('delete_card', { id })
 }
 
+/** 回收站里的一张卡：卡片本体 + 删除时间（删除只是登记，卡片行还在）。 */
+export interface TrashedCard {
+  card: Card
+  deletedAt: string
+}
+
+export async function listTrashedCards(limit = 200): Promise<TrashedCard[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_trashed_cards', { limit })
+}
+
+export async function restoreCard(id: string): Promise<Card> {
+  desktopOnly()
+  return invoke('restore_card', { id })
+}
+
+export async function purgeTrashedCard(id: string): Promise<void> {
+  desktopOnly()
+  return invoke('purge_trashed_card', { id })
+}
+
+/** 清理过期回收站（默认 30 天），返回删除数量。 */
+export async function purgeExpiredTrash(days = 30): Promise<number> {
+  if (!isTauriRuntime()) return 0
+  return invoke('purge_expired_trash', { days })
+}
+
 /** 批量清空指定画布；返回受影响数量。remove 只移除该画布布局，delete 级联删除卡片。 */
 export async function clearMindmapCards(mode: 'remove' | 'delete', canvasId?: string): Promise<number> {
   desktopOnly()
@@ -307,6 +334,30 @@ export interface CardReviewStat {
 export async function getCardReviewStats(since: string): Promise<CardReviewStat[]> {
   if (!isTauriRuntime()) return []
   return invoke('get_card_review_stats', { since })
+}
+
+/** 跨书学习汇总：一段时间内写卡、复习，以及按书拆开的明细。 */
+export interface StudyBookStat {
+  documentId: string | null
+  title: string
+  cardsWritten: number
+  reviews: number
+  reviewedCards: number
+}
+
+export interface StudyOverview {
+  cardsWritten: number
+  reviews: number
+  reviewedCards: number
+  correct: number
+  books: StudyBookStat[]
+}
+
+export async function getStudyOverview(since: string): Promise<StudyOverview> {
+  if (!isTauriRuntime()) {
+    return { cardsWritten: 0, reviews: 0, reviewedCards: 0, correct: 0, books: [] }
+  }
+  return invoke('get_study_overview', { since })
 }
 
 export async function getReviewStats(dayStart: string): Promise<ReviewStats> {

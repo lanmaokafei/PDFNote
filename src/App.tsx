@@ -16,7 +16,8 @@ import './App.css'
 import { ContextMenu } from './ui/ContextMenu'
 import { useContextMenu } from './ui/contextMenuCore'
 import type { BootstrapStatus, Document } from './domain/card'
-import { listDocuments } from './services/pdfnote'
+import { listDocuments, restoreCard } from './services/pdfnote'
+import { CARD_TRASHED_EVENT } from './features/card/trash'
 import { LibraryWorkspace } from './features/library/LibraryWorkspace'
 import { StudyWorkspace } from './features/study/StudyWorkspace'
 import { SettingsDialog } from './features/settings/SettingsDialog'
@@ -74,6 +75,9 @@ function App() {
   // 学习报告「开始复习这些卡」：把卡片集合交给复习工作区，进入时只看这一组。
   const [reviewCardIds, setReviewCardIds] = useState<string[] | null>(null)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  // 刚被移入回收站的卡片：用于底部「撤销」条与 ⌘Z。
+  const [trashed, setTrashed] = useState<string[]>([])
+  const [undoBusy, setUndoBusy] = useState(false)
   const { menu, show, close } = useContextMenu()
   const loadCards = useCardStore((state) => state.loadCards)
   const cardsById = useCardStore((state) => state.cardsById)
@@ -125,6 +129,35 @@ function App() {
   useEffect(() => {
     goToRef.current = goTo
   })
+  // 删除卡片后弹「撤销」：删除是软删除，恢复即从回收站取回。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const ids = (event as CustomEvent<{ ids?: string[] }>).detail?.ids ?? []
+      if (ids.length === 0) return
+      setTrashed(ids)
+      window.setTimeout(() => setTrashed((current) => (current === ids ? [] : current)), 10000)
+    }
+    window.addEventListener(CARD_TRASHED_EVENT, handler)
+    return () => window.removeEventListener(CARD_TRASHED_EVENT, handler)
+  }, [])
+
+  const undoTrash = useCallback(async () => {
+    if (trashed.length === 0 || undoBusy) return
+    setUndoBusy(true)
+    const ids = trashed
+    setTrashed([])
+    try {
+      for (const id of ids) await restoreCard(id)
+      await useCardStore.getState().loadCards()
+      await refreshStatus()
+      window.dispatchEvent(new CustomEvent('pdfnote:cards-restored', { detail: { ids } }))
+    } catch {
+      // 卡片可能已被彻底删除或已恢复：静默失败，列表刷新会给出真实状态。
+    } finally {
+      setUndoBusy(false)
+    }
+  }, [trashed, undoBusy, refreshStatus])
+
   // 全局快捷键：⌘1–6 切视图、⌘K 聚焦搜索、? 看键位表。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -144,6 +177,11 @@ function App() {
           window.dispatchEvent(new Event('pdfnote:focus-search'))
           return
         }
+        if (event.key.toLowerCase() === 'z' && trashed.length > 0) {
+          event.preventDefault()
+          void undoTrash()
+          return
+        }
       }
       if (event.key === '?' || (event.key === '/' && event.shiftKey)) {
         event.preventDefault()
@@ -154,7 +192,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [trashed, undoTrash])
 
   // 学习报告里点「开始复习这些卡」：切到复习视图并只看这一组到期卡片。
   useEffect(() => {
@@ -449,6 +487,15 @@ function App() {
           />
         </Suspense>
       )}
+      {trashed.length > 0 && (
+        <div className="app-undo-toast" role="status" data-testid="undo-toast">
+          <span>已移入回收站{trashed.length > 1 ? `（${trashed.length} 张）` : ''}</span>
+          <button type="button" onClick={() => void undoTrash()} disabled={undoBusy}>
+            {undoBusy ? '恢复中…' : '撤销'}
+          </button>
+          <button type="button" className="app-undo-close" aria-label="关闭提示" onClick={() => setTrashed([])}>×</button>
+        </div>
+      )}
       <ContextMenu state={menu} onClose={close} />
       {shortcutsOpen && (
         <div className="app-shortcuts-backdrop" role="presentation" onMouseDown={(event) => {
@@ -461,6 +508,7 @@ function App() {
               <dt>⌘4 / ⌘5 / ⌘6</dt><dd>笔记本 / 复习 / 粗读精读</dd>
               <dt>⌘K</dt><dd>聚焦当前视图的搜索框</dd>
               <dt>? </dt><dd>显示或关闭这张键位表</dd>
+              <dt>⌘Z</dt><dd>撤销刚才的删除（从回收站取回）</dd>
               <dt>← / →</dt><dd>PDF 上一页 / 下一页</dd>
               <dt>空格</dt><dd>复习页揭示答案</dd>
               <dt>1 – 4</dt><dd>复习页评分：重来 / 困难 / 良好 / 简单</dd>

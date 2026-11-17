@@ -325,3 +325,58 @@
   font-size: 10px;
   font-weight: 400;
 }
+
+/* ---------- 复习计划（FSRS，0.52.0） ---------- */
+
+.settings-fsrs {
+  margin: 4px 0 14px;
+  padding: 14px 16px;
+  border: 1px solid #e4eadf;
+  border-radius: 11px;
+  background: #f9fcf6;
+}
+
+.settings-fsrs h3 {
+  margin: 0 0 4px;
+  color: #33463a;
+  font-size: 13px;
+}
+
+.settings-fsrs-intro {
+  margin: 0 0 10px;
+  color: #8b9689;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.settings-fsrs-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-fsrs-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-fsrs-grid span {
+  color: #55635a;
+  font-size: 11.5px;
+}
+
+.settings-fsrs-grid select {
+  padding: 6px 8px;
+  border: 1px solid #dbe4d6;
+  border-radius: 7px;
+  color: #3f4f42;
+  background: #fff;
+  font-size: 12px;
+}
+
+.settings-fsrs-grid small {
+  color: #97a295;
+  font-size: 10.5px;
+  line-height: 1.5;
+}

@@ -318,3 +318,45 @@
 .app-shortcuts button:hover {
   background: #e9f2e4;
 }
+
+/* 删除后的撤销条（软删除 → 回收站，0.52.0）。 */
+.app-undo-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid #d9e3d3;
+  border-radius: 10px;
+  color: #3d5042;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(24, 32, 26, .16);
+  font-size: 12.5px;
+  transform: translateX(-50%);
+}
+
+.app-undo-toast button {
+  padding: 5px 12px;
+  border: 1px solid #cddcc7;
+  border-radius: 7px;
+  color: #33503c;
+  background: #f2f7ef;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.app-undo-toast button:hover:not(:disabled) {
+  background: #e7f1e2;
+}
+
+.app-undo-toast .app-undo-close {
+  border: 0;
+  background: transparent;
+  color: #9aa496;
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 4px;
+}

@@ -29,7 +29,8 @@ pub fn list_due_cards(
     let database = state.db()?;
     let mut query = format!(
         "SELECT {CARD_COLUMNS} FROM cards
-         WHERE surface_review = 1 AND due <= ?1"
+         WHERE surface_review = 1 AND due <= ?1
+           AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = cards.id)"
     );
     if let Some(ids) = &filtered {
         let placeholders = vec!["?"; ids.len()].join(", ");
@@ -197,9 +198,53 @@ pub fn record_review(state: &AppState, input: ReviewInput) -> Result<Card, Strin
             ],
         )
         .map_err(|error| error.to_string())?;
+    // 物化统计：按本地日期累加，读统计时只查这张小表（见 get_review_stats）。
+    transaction
+        .execute(
+            "INSERT INTO review_daily (day, reviews, correct, updated_at)
+             VALUES (?1, 1, CASE WHEN ?2 >= 3 THEN 1 ELSE 0 END, ?3)
+             ON CONFLICT(day) DO UPDATE SET
+                reviews = reviews + 1,
+                correct = correct + excluded.correct,
+                updated_at = excluded.updated_at",
+            params![local_day(&input.reviewed_at)?, input.rating, input.reviewed_at],
+        )
+        .map_err(|error| error.to_string())?;
     let card = get_card(&transaction, &input.card_id)?;
     transaction.commit().map_err(|error| error.to_string())?;
     Ok(card)
+}
+
+/// 时间戳 → 本机时区的日期键（`YYYY-MM-DD`）。统计一律按本地日期分桶，
+/// 否则 UTC+8 的凌晨复习会被算到前一天。
+fn local_day(iso: &str) -> Result<String, String> {
+    let parsed =
+        DateTime::parse_from_rfc3339(iso).map_err(|_| "timestamp must be RFC 3339")?;
+    Ok(parsed
+        .with_timezone(&chrono::Local)
+        .format("%Y-%m-%d")
+        .to_string())
+}
+
+/// 由 review_logs 重建物化统计表：导入备份、清空数据后调用。
+pub fn rebuild_review_daily(connection: &rusqlite::Connection) -> Result<(), String> {
+    connection
+        .execute("DELETE FROM review_daily", [])
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "INSERT INTO review_daily (day, reviews, correct, updated_at)
+             SELECT date(reviewed_at, 'localtime'), COUNT(*),
+                    COALESCE(SUM(CASE WHEN rating >= 3 THEN 1 ELSE 0 END), 0),
+                    MAX(reviewed_at)
+             FROM review_logs
+             WHERE reviewed_at IS NOT NULL AND reviewed_at <> ''
+               AND date(reviewed_at, 'localtime') IS NOT NULL
+             GROUP BY date(reviewed_at, 'localtime')",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 pub fn get_review_stats(state: &AppState, day_start: String) -> Result<ReviewStats, String> {
@@ -207,40 +252,46 @@ pub fn get_review_stats(state: &AppState, day_start: String) -> Result<ReviewSta
         .map_err(|_| "dayStart must be an RFC 3339 timestamp")?;
     let database = state.db()?;
     let current_time = now();
+    let day = local_day(&day_start)?;
+    let trend_start = (chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d")
+        .map_err(|_| "dayStart must be an RFC 3339 timestamp")?
+        - Duration::days(13))
+    .format("%Y-%m-%d")
+    .to_string();
     let due_now = database
         .query_row(
-            "SELECT COUNT(*) FROM cards WHERE surface_review = 1 AND due <= ?1",
+            "SELECT COUNT(*) FROM cards WHERE surface_review = 1 AND due <= ?1
+               AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = cards.id)",
             params![current_time],
             |row| row.get(0),
         )
         .map_err(|error| error.to_string())?;
     let backlog = database
         .query_row(
-            "SELECT COUNT(*) FROM cards WHERE surface_review = 1 AND due < ?1",
+            "SELECT COUNT(*) FROM cards WHERE surface_review = 1 AND due < ?1
+               AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = cards.id)",
             params![day_start],
             |row| row.get(0),
         )
         .map_err(|error| error.to_string())?;
+    // 今日与趋势都读物化表；review_logs 只在导入备份后用来重建它。
     let (completed_today, correct_today): (i64, i64) = database
         .query_row(
-            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN rating >= 3 THEN 1 ELSE 0 END), 0)
-             FROM review_logs WHERE reviewed_at >= ?1 AND reviewed_at < strftime('%Y-%m-%dT%H:%M:%S', ?1, '+1 day')",
-            params![day_start],
+            "SELECT COALESCE(reviews, 0), COALESCE(correct, 0) FROM review_daily WHERE day = ?1",
+            params![day],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .map_err(|error| error.to_string())?;
+        .optional()
+        .map_err(|error| error.to_string())?
+        .unwrap_or((0, 0));
     let mut statement = database
         .prepare(
-            "SELECT date(reviewed_at), COUNT(*),
-             COALESCE(SUM(CASE WHEN rating >= 3 THEN 1 ELSE 0 END), 0)
-             FROM review_logs
-             WHERE reviewed_at >= strftime('%Y-%m-%dT%H:%M:%S', ?1, '-13 days')
-               AND reviewed_at < strftime('%Y-%m-%dT%H:%M:%S', ?1, '+1 day')
-             GROUP BY date(reviewed_at) ORDER BY date(reviewed_at)",
+            "SELECT day, reviews, correct FROM review_daily
+             WHERE day >= ?1 AND day <= ?2 ORDER BY day",
         )
         .map_err(|error| error.to_string())?;
     let daily = statement
-        .query_map(params![day_start], |row| {
+        .query_map(params![trend_start, day], |row| {
             Ok(DailyReviewStats {
                 day: row.get(0)?,
                 reviews: row.get(1)?,
@@ -256,6 +307,125 @@ pub fn get_review_stats(state: &AppState, day_start: String) -> Result<ReviewSta
         correct_today,
         backlog,
         daily,
+    })
+}
+
+/// 跨书学习汇总：一段时间内写了多少卡、复习了多少次，并按书拆开。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudyBookStat {
+    pub document_id: Option<String>,
+    pub title: String,
+    pub cards_written: i64,
+    pub reviews: i64,
+    pub reviewed_cards: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudyOverview {
+    pub cards_written: i64,
+    pub reviews: i64,
+    pub reviewed_cards: i64,
+    pub correct: i64,
+    pub books: Vec<StudyBookStat>,
+}
+
+/// 跨书汇总：只统计「有正文内容」的卡片（排除目录骨架这类只有标题的节点），
+/// 回收站里的卡片不计入；按复习次数从多到少排序。
+pub fn get_study_overview(state: &AppState, since: &str) -> Result<StudyOverview, String> {
+    DateTime::parse_from_rfc3339(since).map_err(|_| "since must be an RFC 3339 timestamp")?;
+    let database = state.db()?;
+    let mut written_statement = database
+        .prepare(
+            "SELECT c.document_id, COALESCE(d.title, '未关联文档') AS title,
+                    SUM(CASE WHEN c.created_at >= ?1
+                              AND (TRIM(c.excerpt) <> '' OR TRIM(c.user_note) <> '')
+                             THEN 1 ELSE 0 END) AS written
+             FROM cards c LEFT JOIN documents d ON d.id = c.document_id
+             WHERE NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = c.id)
+             GROUP BY c.document_id, d.title",
+        )
+        .map_err(|error| error.to_string())?;
+    let written = written_statement
+        .query_map(params![since], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    let mut review_statement = database
+        .prepare(
+            "SELECT c.document_id, COUNT(*), COUNT(DISTINCT r.card_id),
+                    COALESCE(SUM(CASE WHEN r.rating >= 3 THEN 1 ELSE 0 END), 0)
+             FROM review_logs r JOIN cards c ON c.id = r.card_id
+             WHERE r.reviewed_at >= ?1
+               AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = c.id)
+             GROUP BY c.document_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let reviews = review_statement
+        .query_map(params![since], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    let mut books: Vec<StudyBookStat> = Vec::new();
+    for (document_id, title, cards_written) in written {
+        books.push(StudyBookStat {
+            document_id,
+            title,
+            cards_written,
+            reviews: 0,
+            reviewed_cards: 0,
+        });
+    }
+    let mut total_reviews = 0;
+    let mut total_reviewed = 0;
+    let mut total_correct = 0;
+    for (document_id, review_count, reviewed_cards, correct) in reviews {
+        total_reviews += review_count;
+        total_reviewed += reviewed_cards;
+        total_correct += correct;
+        match books.iter_mut().find(|book| book.document_id == document_id) {
+            Some(book) => {
+                book.reviews = review_count;
+                book.reviewed_cards = reviewed_cards;
+            }
+            None => books.push(StudyBookStat {
+                document_id,
+                title: "未关联文档".into(),
+                cards_written: 0,
+                reviews: review_count,
+                reviewed_cards,
+            }),
+        }
+    }
+    books.retain(|book| book.cards_written > 0 || book.reviews > 0);
+    books.sort_by(|a, b| {
+        b.reviews
+            .cmp(&a.reviews)
+            .then(b.cards_written.cmp(&a.cards_written))
+            .then(a.title.cmp(&b.title))
+    });
+    Ok(StudyOverview {
+        cards_written: books.iter().map(|book| book.cards_written).sum(),
+        reviews: total_reviews,
+        reviewed_cards: total_reviewed,
+        correct: total_correct,
+        books,
     })
 }
 
@@ -412,6 +582,121 @@ mod tests {
         assert_eq!(only[0].id, first.id);
 
         assert!(list_due_cards(&state, now, None, Some(Vec::new())).unwrap().is_empty(), "空集合表示没有卡可复习");
+    }
+
+    fn make_card(state: &AppState, excerpt: &str) -> Card {
+        create_card(
+            state,
+            CreateCardInput {
+                source_ref: None,
+                excerpt: excerpt.into(),
+                user_note: String::new(),
+                question: String::new(),
+                parent_id: None,
+                sort_order: 0,
+                annotation: None,
+                excerpt_image: None,
+                link_aliases: None,
+                canvas_id: None,
+                x: None,
+                y: None,
+            },
+        )
+        .unwrap()
+    }
+
+    fn local_midnight_iso() -> String {
+        let today = chrono::Local::now().date_naive();
+        today
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_local_timezone(chrono::Local)
+            .single()
+            .unwrap()
+            .to_rfc3339()
+    }
+
+    #[test]
+    fn review_stats_read_materialized_days() {
+        let (_directory, state) = test_state();
+        let card = make_card(&state, "物化统计");
+        let day_start = local_midnight_iso();
+        let stats = get_review_stats(&state, day_start.clone()).unwrap();
+        assert_eq!((stats.completed_today, stats.correct_today), (0, 0));
+
+        let current = {
+            let database = state.db().unwrap();
+            get_card(&database, &card.id).unwrap()
+        };
+        let mut input = review(&current, "materialized-1");
+        input.rating = 4;
+        input.reviewed_at = chrono::Local::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        record_review(&state, input).unwrap();
+
+        let stats = get_review_stats(&state, day_start).unwrap();
+        assert_eq!((stats.completed_today, stats.correct_today), (1, 1));
+        assert_eq!(stats.daily.len(), 1);
+        assert_eq!(stats.daily[0].reviews, 1);
+        assert_eq!(stats.daily[0].correct, 1);
+    }
+
+    #[test]
+    fn trashed_cards_leave_queue_and_stats() {
+        let (_directory, state) = test_state();
+        let card = make_card(&state, "回收站卡片");
+        let now = "2030-01-01T00:00:00.000Z".to_string();
+        assert_eq!(list_due_cards(&state, now.clone(), None, None).unwrap().len(), 1);
+
+        crate::cards::delete_card(&state, card.id.clone()).unwrap();
+        assert!(list_due_cards(&state, now.clone(), None, None).unwrap().is_empty(), "回收站里的卡片不该出现在复习队列");
+        let stats = get_review_stats(&state, now).unwrap();
+        assert_eq!(stats.due_now, 0);
+        assert_eq!(stats.backlog, 0, "回收站里的卡片不算积压");
+    }
+
+    #[test]
+    fn study_overview_aggregates_across_books() {
+        let (_directory, state) = test_state();
+        let first = make_card(&state, "第一本书的卡");
+        let second = make_card(&state, "第二本书的卡");
+        // 只有标题的骨架节点不算「写卡」。
+        create_card(
+            &state,
+            CreateCardInput {
+                source_ref: None,
+                excerpt: String::new(),
+                user_note: String::new(),
+                question: "第一章 绪论".into(),
+                parent_id: None,
+                sort_order: 0,
+                annotation: None,
+                excerpt_image: None,
+                link_aliases: None,
+                canvas_id: None,
+                x: None,
+                y: None,
+            },
+        )
+        .unwrap();
+
+        let current = {
+            let database = state.db().unwrap();
+            get_card(&database, &first.id).unwrap()
+        };
+        let mut input = review(&current, "overview-1");
+        input.reviewed_at = "2030-01-01T00:00:00.000Z".into();
+        record_review(&state, input).unwrap();
+
+        let overview = get_study_overview(&state, "2020-01-01T00:00:00.000Z").unwrap();
+        assert_eq!(overview.cards_written, 2, "骨架节点不算写卡");
+        assert_eq!((overview.reviews, overview.reviewed_cards, overview.correct), (1, 1, 1));
+        assert_eq!(overview.books.len(), 1, "没有关联文档的卡片归到同一组");
+        assert_eq!(overview.books[0].title, "未关联文档");
+
+        // 回收站里的卡片不参与汇总。
+        crate::cards::delete_card(&state, second.id).unwrap();
+        let overview = get_study_overview(&state, "2020-01-01T00:00:00.000Z").unwrap();
+        assert_eq!(overview.cards_written, 1);
     }
 
     #[test]

@@ -1698,7 +1698,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       void listMindmapCanvases(documentId ?? null).then(setCanvases).catch(() => undefined)
       setNotice(kind === 'remove'
         ? `已从「${canvasName}」移除，其他画布与 PDF / 复习投影保持不变。`
-        : '卡片已彻底删除（所有画布上的布局一并移除）。')
+        : '卡片已移入回收站，可在卡片盒里恢复（⌘Z 也可撤销）。')
     })
   }, [canvasId, canvasName, confirmation, deleteCard, documentId, editor, removeFromMindmap, runTask, syncCards])
 
@@ -1719,7 +1719,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       void listMindmapCanvases(documentId ?? null).then(setCanvases).catch(() => undefined)
       setNotice(mode === 'remove'
         ? `已清空当前画布的 ${count} 张卡片，其他画布与 PDF / 复习投影仍保留。`
-        : `已彻底删除当前画布的 ${count} 张卡片及其标注、复习记录。`)
+        : `已把当前画布的 ${count} 张卡片移入回收站（保留 30 天，可恢复）。`)
     })
   }, [canvasId, documentId, runTask, syncCards])
 
@@ -1751,7 +1751,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       ] },
       { id: 'danger', items: [
         { id: 'remove', label: '从脑图移除', icon: LayoutGrid, disabled: busy, onSelect: () => setConfirmation({ kind: 'remove', id: cardId }) },
-        { id: 'delete', label: '彻底删除卡片', icon: Trash2, danger: true, disabled: busy, onSelect: () => setConfirmation({ kind: 'delete', id: cardId }) },
+        { id: 'delete', label: '移到回收站', icon: Trash2, danger: true, disabled: busy, onSelect: () => setConfirmation({ kind: 'delete', id: cardId }) },
       ] },
     ]
     if (options.includeWorkspace) {

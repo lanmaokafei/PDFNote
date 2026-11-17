@@ -392,6 +392,7 @@ fn import_overwrite(
         "card_links",
         "card_tags",
         "page_inks",
+        "card_trash",
         "cards",
         "document_readings",
         "reading_daily",
@@ -427,6 +428,10 @@ fn import_overwrite(
         // 0.41.0 两遍阅读：一本书一行，直接整表覆盖；0.49 阅读计时按书 + 日期累计。
         copy_table_if_present(&transaction, "document_readings")?;
         copy_table_if_present(&transaction, "reading_daily")?;
+        // 0.52 回收站：旧备份没有这张表，跳过即视为没有回收内容。
+        copy_table_if_present(&transaction, "card_trash")?;
+        // review_daily 是派生缓存，导入 review_logs 之后按本地日期重建。
+        crate::review::rebuild_review_daily(&transaction)?;
         // 0.36.0 图层与手写本：父表在前，避免外键失败。
         for table in ["notebooks", "layers", "notebook_inks", "canvas_inks", "mindmap_layer_members"] {
             copy_table_if_present(&transaction, table)?;
@@ -603,6 +608,19 @@ fn import_merge(
                 [],
             )
             .map_err(|error| error.to_string())?;
+        if import_has_table(&transaction, "card_trash")? {
+            transaction
+                .execute(
+                    "INSERT INTO card_trash (card_id, deleted_at)
+                     SELECT s.card_id, s.deleted_at FROM import_src.card_trash s
+                     WHERE EXISTS (SELECT 1 FROM cards c WHERE c.id = s.card_id)
+                     ON CONFLICT(card_id) DO UPDATE SET deleted_at = excluded.deleted_at",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        // 合并进新日志后重算物化统计，避免和本地旧聚合重复累加。
+        crate::review::rebuild_review_daily(&transaction)?;
         if import_has_table(&transaction, "page_inks")? {
             // 墨迹挂在文档上，合并模式要按内容哈希重新指向本地文档。
             transaction

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Card, CreateCardInput } from '../domain/card'
 import * as api from '../services/pdfnote'
+import { notifyCardTrashed } from '../features/card/trash'
 
 interface CardState {
   cardsById: Record<string, Card>
@@ -52,5 +53,7 @@ export const useCardStore = create<CardState>((set) => ({
     // PDF 工作区的标注缓存不依赖卡片列表，必须显式通知它清理，
     // 否则页面上会残留“幽灵标注”，点击删除时后端返回 annotation not found。
     window.dispatchEvent(new CustomEvent('pdfnote:card-deleted', { detail: { cardId: id } }))
+    // 软删除：通知 App 弹出「撤销」（⌘Z 同样可用）。
+    notifyCardTrashed([id])
   },
 }))

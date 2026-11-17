@@ -158,7 +158,11 @@ pub fn create_card(state: &AppState, input: CreateCardInput) -> Result<Card, Str
 
 pub fn list_cards(state: &AppState, limit: Option<u32>) -> Result<Vec<Card>, String> {
     let database = state.db()?;
-    let query = format!("SELECT {CARD_COLUMNS} FROM cards ORDER BY created_at DESC, id LIMIT ?1");
+    let query = format!(
+        "SELECT {CARD_COLUMNS} FROM cards
+         WHERE NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = cards.id)
+         ORDER BY created_at DESC, id LIMIT ?1"
+    );
     let mut statement = database
         .prepare(&query)
         .map_err(|error| error.to_string())?;
@@ -272,8 +276,16 @@ pub fn remove_annotation(state: &AppState, id: String, delete_card: bool) -> Res
         .map_err(|error| error.to_string())?;
     let card_id = card_id.ok_or_else(|| "annotation not found".to_string())?;
     if delete_card {
+        // 与 delete_card 一致：卡片进回收站，标注行真删。
         transaction
-            .execute("DELETE FROM cards WHERE id = ?1", params![card_id])
+            .execute("DELETE FROM annotations WHERE card_id = ?1", params![card_id])
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "INSERT INTO card_trash (card_id, deleted_at) VALUES (?1, ?2)
+                 ON CONFLICT(card_id) DO UPDATE SET deleted_at = excluded.deleted_at",
+                params![card_id, now()],
+            )
             .map_err(|error| error.to_string())?;
     } else {
         transaction
@@ -495,16 +507,134 @@ pub fn remove_card_from_mindmap(
     transaction.commit().map_err(|error| error.to_string())
 }
 
+/// 删除卡片 = 移入回收站：卡片本体、复习记录、画布坐标都保留，可恢复。
+/// 标注行会真正删掉（否则 PDF 上还留着一个点了没反应的框），恢复后卡片变成孤儿卡片。
 pub fn delete_card(state: &AppState, id: String) -> Result<(), String> {
     let mut database = state.db()?;
     let transaction = database.transaction().map_err(|error| error.to_string())?;
-    let affected = transaction
-        .execute("DELETE FROM cards WHERE id = ?1", params![id])
+    let exists: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM cards WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
         .map_err(|error| error.to_string())?;
-    if affected == 0 {
+    if exists == 0 {
         return Err("card not found".into());
     }
+    let timestamp = now();
+    transaction
+        .execute("DELETE FROM annotations WHERE card_id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO card_trash (card_id, deleted_at) VALUES (?1, ?2)
+             ON CONFLICT(card_id) DO UPDATE SET deleted_at = excluded.deleted_at",
+            params![id, timestamp],
+        )
+        .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())
+}
+
+/// 回收站里的一张卡：卡片本身 + 删除时间。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashedCard {
+    pub card: Card,
+    pub deleted_at: String,
+}
+
+pub fn list_trashed_cards(state: &AppState, limit: Option<u32>) -> Result<Vec<TrashedCard>, String> {
+    let database = state.db()?;
+    let query = format!(
+        "SELECT {CARD_COLUMNS}, t.deleted_at FROM cards
+         JOIN card_trash t ON t.card_id = cards.id
+         ORDER BY t.deleted_at DESC, cards.id LIMIT ?1"
+    );
+    let mut statement = database
+        .prepare(&query)
+        .map_err(|error| error.to_string())?;
+    let mut rows = statement
+        .query_map(params![limit.unwrap_or(200).clamp(1, 1000)], |row| {
+            Ok(TrashedCard {
+                card: card_from_row(row)?,
+                deleted_at: row.get(CARD_COLUMNS.split(", ").count())?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let mut cards = rows.iter().map(|row| row.card.clone()).collect::<Vec<_>>();
+    attach_tags(&database, &mut cards).map_err(|error| error.to_string())?;
+    for (row, card) in rows.iter_mut().zip(cards) {
+        row.card = card;
+    }
+    Ok(rows)
+}
+
+/// 从回收站恢复：卡片本身没被删过，只需摘掉登记行。
+pub fn restore_card(state: &AppState, id: String) -> Result<Card, String> {
+    let database = state.db()?;
+    let affected = database
+        .execute("DELETE FROM card_trash WHERE card_id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    if affected == 0 {
+        return Err("回收站里没有这张卡片".into());
+    }
+    get_card(&database, &id)
+}
+
+/// 彻底删除：卡片本体连同标签、布局、复习记录一起删掉。
+pub fn purge_trashed_card(state: &AppState, id: String) -> Result<(), String> {
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let trashed: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM card_trash WHERE card_id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if trashed == 0 {
+        return Err("只能彻底删除回收站里的卡片".into());
+    }
+    transaction
+        .execute("DELETE FROM cards WHERE id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM card_trash WHERE card_id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+/// 清理超过 `days` 天的回收站内容，返回删除数量；App 启动与打开回收站时各跑一次。
+pub fn purge_expired_trash(state: &AppState, days: u32) -> Result<u32, String> {
+    let days = days.clamp(1, 3650);
+    let cutoff = (chrono::Utc::now() - chrono::Duration::days(days as i64))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let ids = {
+        let mut statement = transaction
+            .prepare("SELECT card_id FROM card_trash WHERE deleted_at <= ?1")
+            .map_err(|error| error.to_string())?;
+        let mapped = statement
+            .query_map(params![cutoff], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        mapped
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?
+    };
+    for id in &ids {
+        transaction
+            .execute("DELETE FROM cards WHERE id = ?1", params![id])
+            .map_err(|error| error.to_string())?;
+    }
+    transaction
+        .execute("DELETE FROM card_trash WHERE deleted_at <= ?1", params![cutoff])
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(ids.len() as u32)
 }
 
 /// 批量清空指定画布里的卡片，返回受影响数量。
@@ -526,9 +656,11 @@ pub fn clear_mindmap_cards(
         .unwrap_or_else(|| canvases::DEFAULT_CANVAS_ID.into());
     let mut database = state.db()?;
     let transaction = database.transaction().map_err(|error| error.to_string())?;
+    // 回收站里的卡片不再计入，重复清空才是幂等的。
     let count: i64 = transaction
         .query_row(
-            "SELECT COUNT(*) FROM mindmap_layout WHERE canvas_id = ?1",
+            "SELECT COUNT(*) FROM mindmap_layout l WHERE l.canvas_id = ?1
+               AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = l.card_id)",
             params![canvas_id],
             |row| row.get(0),
         )
@@ -560,17 +692,20 @@ pub fn clear_mindmap_cards(
             .map_err(|error| error.to_string())?;
         canvases::sync_mindmap_surface(&transaction)?;
     } else {
-        // cards.parent_id 是自引用外键（ON DELETE SET NULL）。逐行级联会在批量删除时
-        // 反复触发隐式 FK 更新，先把所有父子引用断开再删，避免递归卡死。
+        // 与单卡删除一致：进回收站而不是真删，保留撤销的可能。
+        // 卡片行还在，父子引用不必断开；被回收的父节点在列表里消失，子节点自然成为根。
+        let timestamp = now();
         transaction
             .execute(
-                "UPDATE cards SET parent_id = NULL WHERE parent_id IS NOT NULL",
-                [],
+                "INSERT INTO card_trash (card_id, deleted_at)
+                 SELECT card_id, ?2 FROM mindmap_layout WHERE canvas_id = ?1
+                 ON CONFLICT(card_id) DO UPDATE SET deleted_at = excluded.deleted_at",
+                params![canvas_id, timestamp],
             )
             .map_err(|error| error.to_string())?;
         transaction
             .execute(
-                "DELETE FROM cards WHERE id IN (
+                "DELETE FROM annotations WHERE card_id IN (
                     SELECT card_id FROM mindmap_layout WHERE canvas_id = ?1
                  )",
                 params![canvas_id],
@@ -1050,6 +1185,66 @@ mod tests {
     }
 
     #[test]
+    fn deleting_card_moves_it_to_trash_and_can_be_restored() {
+        let (_directory, state) = test_state();
+        let card = create_card(&state, input("回收站", None)).unwrap();
+
+        delete_card(&state, card.id.clone()).unwrap();
+        assert!(list_cards(&state, None).unwrap().is_empty(), "回收站里的卡片不出现在列表");
+        let trashed = list_trashed_cards(&state, None).unwrap();
+        assert_eq!(trashed.len(), 1);
+        assert_eq!(trashed[0].card.id, card.id);
+        assert!(!trashed[0].deleted_at.is_empty());
+
+        // 恢复后回到列表，排序与内容都没变。
+        let restored = restore_card(&state, card.id.clone()).unwrap();
+        assert_eq!(restored.id, card.id);
+        assert_eq!(list_cards(&state, None).unwrap().len(), 1);
+        assert!(list_trashed_cards(&state, None).unwrap().is_empty());
+
+        // 没进回收站的卡片不能被彻底删除，也不能被重复恢复。
+        delete_card(&state, card.id.clone()).unwrap();
+        assert!(restore_card(&state, card.id.clone()).unwrap().id == card.id);
+        assert!(restore_card(&state, "missing".into()).is_err());
+    }
+
+    #[test]
+    fn purging_trash_requires_it_to_be_trashed() {
+        let (_directory, state) = test_state();
+        let card = create_card(&state, input("彻底删除", None)).unwrap();
+        assert!(purge_trashed_card(&state, card.id.clone()).is_err(), "未进回收站不能彻底删除");
+        delete_card(&state, card.id.clone()).unwrap();
+        purge_trashed_card(&state, card.id.clone()).unwrap();
+        assert!(list_cards(&state, None).unwrap().is_empty());
+        assert!(list_trashed_cards(&state, None).unwrap().is_empty());
+        let count: i64 = state
+            .db()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "彻底删除要真的删掉卡片行");
+    }
+
+    #[test]
+    fn expired_trash_is_purged() {
+        let (_directory, state) = test_state();
+        let card = create_card(&state, input("过期", None)).unwrap();
+        delete_card(&state, card.id.clone()).unwrap();
+        // 把删除时间改成 40 天前，30 天策略应清掉它。
+        {
+            let database = state.db().unwrap();
+            database
+                .execute(
+                    "UPDATE card_trash SET deleted_at = '2020-01-01T00:00:00.000Z' WHERE card_id = ?1",
+                    params![card.id],
+                )
+                .unwrap();
+        }
+        assert_eq!(purge_expired_trash(&state, 30).unwrap(), 1);
+        assert!(list_trashed_cards(&state, None).unwrap().is_empty());
+    }
+
+    #[test]
     fn create_card_initializes_review_and_layout() {
         let (_directory, state) = test_state();
         let card = create_card(&state, input("question", None)).unwrap();
@@ -1466,15 +1661,26 @@ mod tests {
 
         let count = clear_mindmap_cards(&state, "delete".into(), None).unwrap();
         assert_eq!(count, 2);
+        assert!(list_cards(&state, None).unwrap().is_empty(), "清空后列表里不应再有卡片");
+        let trashed = list_trashed_cards(&state, None).unwrap();
+        assert_eq!(trashed.len(), 2, "清空画布现在是进回收站");
         let database = state.db().unwrap();
-        for table in ["cards", "card_tags", "card_links", "review_logs", "annotations", "mindmap_layout"] {
+        let cards_left: i64 = database
+            .query_row("SELECT COUNT(*) FROM cards", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(cards_left, 2, "卡片本体保留在库里，只是进了回收站");
+        for table in ["card_tags", "mindmap_layout"] {
             let remaining: i64 = database
                 .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(remaining, 0, "{table} 应被级联清空");
+            assert!(remaining > 0, "{table} 应保留以便恢复");
         }
+        let annotations: i64 = database
+            .query_row("SELECT COUNT(*) FROM annotations", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(annotations, 0, "标注要真删，PDF 上不能留空框");
         drop(database);
-        // 重复清空是幂等的。
+        // 重复清空是幂等的：回收站里的卡片不再计数。
         assert_eq!(clear_mindmap_cards(&state, "delete".into(), None).unwrap(), 0);
     }
 }

@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, FileText, RefreshCw, Search } from 'lucide-react'
+import { Boxes, FileText, RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-react'
 import type { Card, Document } from '../../domain/card'
-import { isTauriRuntime, listCards, listDocuments, listTags, setCardTags } from '../../services/pdfnote'
+import {
+  isTauriRuntime,
+  listCards,
+  listDocuments,
+  listTags,
+  listTrashedCards,
+  purgeExpiredTrash,
+  purgeTrashedCard,
+  restoreCard,
+  setCardTags,
+  type TrashedCard,
+} from '../../services/pdfnote'
 import {
   EMPTY_FILTERS,
   cardTitle,
@@ -73,6 +84,10 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
   const dragRef = useRef<{ card: Card; columnId: string } | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [busyCardId, setBusyCardId] = useState('')
+  // 回收站：删除是软删除，这里负责恢复或彻底删除。
+  const [trashOpen, setTrashOpen] = useState(false)
+  const [trashItems, setTrashItems] = useState<TrashedCard[]>([])
+  const [trashBusy, setTrashBusy] = useState(false)
 
   const desktop = isTauriRuntime()
 
@@ -100,6 +115,66 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
       setLoading(false)
     }
   }, [desktop])
+
+  const loadTrash = useCallback(async () => {
+    setTrashBusy(true)
+    try {
+      // 打开回收站时顺手清理 30 天前的条目，不用等启动时那一次。
+      await purgeExpiredTrash(30).catch(() => 0)
+      setTrashItems(await listTrashedCards(300))
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setTrashBusy(false)
+    }
+  }, [])
+
+  const openTrash = () => {
+    setTrashOpen(true)
+    void loadTrash()
+  }
+
+  const restore = async (id: string) => {
+    setTrashBusy(true)
+    try {
+      await restoreCard(id)
+      await Promise.all([loadTrash(), refresh()])
+      onCardsChanged()
+      setNotice('已从回收站恢复 1 张卡片')
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setTrashBusy(false)
+    }
+  }
+
+  const purge = async (id: string) => {
+    setTrashBusy(true)
+    try {
+      await purgeTrashedCard(id)
+      await loadTrash()
+      setNotice('已彻底删除 1 张卡片')
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setTrashBusy(false)
+    }
+  }
+
+  const emptyTrash = async () => {
+    if (trashItems.length === 0) return
+    if (!window.confirm(`彻底删除回收站里的 ${trashItems.length} 张卡片？此操作不可撤销。`)) return
+    setTrashBusy(true)
+    try {
+      for (const item of trashItems) await purgeTrashedCard(item.card.id)
+      await loadTrash()
+      setNotice(`已清空回收站（${trashItems.length} 张）`)
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setTrashBusy(false)
+    }
+  }
 
   // ⌘K：聚焦卡片盒搜索。
   useEffect(() => {
@@ -331,6 +406,17 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
 
         <button
           type="button"
+          className="board-toggle"
+          data-testid="board-trash"
+          title="回收站：删除的卡片保留 30 天"
+          onClick={openTrash}
+        >
+          <Trash2 size={13} strokeWidth={1.8} />
+          回收站
+        </button>
+
+        <button
+          type="button"
           className="board-refresh"
           data-testid="board-refresh"
           title="重新载入卡片"
@@ -476,6 +562,59 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
               </section>
             )
           })}
+        </div>
+      )}
+
+      {trashOpen && (
+        <div className="board-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !trashBusy) setTrashOpen(false)
+        }}>
+          <section className="board-modal" role="dialog" aria-modal="true" aria-labelledby="board-trash-title" data-testid="board-trash-modal">
+            <header>
+              <div>
+                <small>TRASH</small>
+                <h2 id="board-trash-title">回收站</h2>
+              </div>
+              <button type="button" onClick={() => setTrashOpen(false)} disabled={trashBusy} aria-label="关闭回收站">×</button>
+            </header>
+            <p className="board-modal-intro">
+              删除的卡片会在这里保留 30 天，恢复后回到原来的画布位置；彻底删除不可撤销。
+            </p>
+            {trashBusy && <p className="board-modal-empty">正在读取回收站…</p>}
+            {!trashBusy && trashItems.length === 0 && (
+              <p className="board-modal-empty" data-testid="board-trash-empty">回收站是空的。</p>
+            )}
+            {!trashBusy && trashItems.length > 0 && (
+              <ul className="board-trash-list" data-testid="board-trash-list">
+                {trashItems.map((item) => (
+                  <li key={item.card.id}>
+                    <div className="board-trash-text">
+                      <strong>{cardTitle(item.card)}</strong>
+                      <span>
+                        删除于 {new Date(item.deletedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        {item.card.source_ref?.page ? ` · 第 ${item.card.source_ref.page} 页` : ''}
+                      </span>
+                    </div>
+                    <div className="board-trash-actions">
+                      <button type="button" data-testid="board-trash-restore" onClick={() => void restore(item.card.id)} disabled={trashBusy}>
+                        <RotateCcw size={13} strokeWidth={1.8} /> 恢复
+                      </button>
+                      <button type="button" className="is-danger" data-testid="board-trash-purge" onClick={() => void purge(item.card.id)} disabled={trashBusy}>
+                        彻底删除
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <footer>
+              <button type="button" onClick={() => void emptyTrash()} disabled={trashBusy || trashItems.length === 0}>
+                清空回收站
+              </button>
+              <span />
+              <button type="button" onClick={() => setTrashOpen(false)} disabled={trashBusy}>关闭</button>
+            </footer>
+          </section>
         </div>
       )}
 

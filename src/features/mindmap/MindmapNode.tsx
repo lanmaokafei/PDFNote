@@ -192,7 +192,7 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
         >AI 解析</button>
         <button className="nodrag" type="button" disabled={context.busy} onClick={() => context.onEdit(card.id)}>编辑</button>
         <button className="nodrag" type="button" disabled={context.busy} onClick={() => context.onRemove(card.id)}>从脑图移除</button>
-        <button className="mindmap-delete-action nodrag" type="button" disabled={context.busy} onClick={() => context.onDelete(card.id)}>彻底删除</button>
+        <button className="mindmap-delete-action nodrag" type="button" disabled={context.busy} onClick={() => context.onDelete(card.id)}>移到回收站</button>
       </footer>
       <Handle className="mindmap-handle" type="source" position={Position.Right} />
     </article>

@@ -104,6 +104,9 @@ const document = {
 await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, emptyDocCanvas, styleLink, board, recallSeed, clozeSeed, readingSeedPass, readingSeedNote }) => {
   const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0))
   const cardState = cards.map((card) => ({ ...card }))
+  // 回收站：删除只把卡片挪到这里，恢复时放回原数组（与后端软删除一致）。
+  const trashState = []
+  window.__trashState = trashState
   const noteState = []
   window.__noteState = noteState
   const digestNotes = []
@@ -541,9 +544,36 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     },
     delete_card: (args) => {
       const index = cardState.findIndex((item) => item.id === args?.id)
-      if (index >= 0) cardState.splice(index, 1)
+      if (index >= 0) {
+        const [card] = cardState.splice(index, 1)
+        trashState.push({ card, deletedAt: new Date().toISOString() })
+      }
       return null
     },
+    list_trashed_cards: () => trashState.map((item) => ({ ...item })),
+    restore_card: (args) => {
+      const index = trashState.findIndex((item) => item.card.id === args?.id)
+      if (index < 0) throw new Error('回收站里没有这张卡片')
+      const [item] = trashState.splice(index, 1)
+      cardState.push(item.card)
+      return item.card
+    },
+    purge_trashed_card: (args) => {
+      const index = trashState.findIndex((item) => item.card.id === args?.id)
+      if (index >= 0) trashState.splice(index, 1)
+      return null
+    },
+    purge_expired_trash: () => 0,
+    get_study_overview: () => ({
+      cardsWritten: 3,
+      reviews: 9,
+      reviewedCards: 3,
+      correct: 6,
+      books: [
+        { documentId: 'doc-1', title: '测试教材：心肌梗死与再灌注策略', cardsWritten: 2, reviews: 9, reviewedCards: 3 },
+        { documentId: null, title: '未关联文档', cardsWritten: 1, reviews: 0, reviewedCards: 0 },
+      ],
+    }),
     create_card: (args) => {
       const input = args?.input ?? {}
       // 记录建卡入参：用来断言「首次建骨架不给坐标、增量更新给定落点」。
@@ -2323,6 +2353,23 @@ if (process.env.STEP === 'section-progress') {
   const stuckEmpty = await page.locator('[data-testid="report-stuck-empty"]').count()
   if (stuckEmpty !== 1) problems.push('空清单没有给提示')
 
+  // 跨书汇总：3 写卡 / 9 次复习 / 3 张 / 67% 记得率，按书拆两行。
+  await page.locator('[data-testid="report-tab-books"]').click()
+  await page.waitForTimeout(500)
+  const overview = await page.evaluate(() => ({
+    metrics: [...document.querySelectorAll('[data-testid="overview-metrics"] > div')].map((item) => item.textContent ?? ''),
+    books: [...document.querySelectorAll('[data-testid="overview-books"] li')].map((item) => item.textContent ?? ''),
+  }))
+  const overviewText = overview.metrics.join('|')
+  if (!overviewText.includes('3写卡')) problems.push(`跨书写卡数不对：${overviewText}`)
+  if (!overviewText.includes('9复习次数')) problems.push(`跨书复习次数不对：${overviewText}`)
+  if (!overviewText.includes('67%记得率')) problems.push(`跨书记得率不对：${overviewText}`)
+  if (overview.books.length !== 2) problems.push(`按书拆分条数不对：${overview.books.length}`)
+  if (!overview.books[0]?.includes('测试教材')) problems.push(`按书拆分第一行不对：${overview.books[0]}`)
+  if (!overview.books[1]?.includes('未关联文档')) problems.push(`没有把无文档卡片单列：${overview.books[1]}`)
+  await page.locator('[data-testid="report-tab-weekly"]').click()
+  await page.waitForTimeout(300)
+
   // 点卡住的小节回到 PDF 并收起弹窗。
   await page.locator('[data-testid="report-stuck-row"]').click()
   await page.waitForTimeout(700)
@@ -2332,7 +2379,90 @@ if (process.env.STEP === 'section-progress') {
   if (afterJump.modal !== 0) problems.push('点章节后弹窗没有关闭')
 
   await browser.close()
-  console.log(JSON.stringify({ problems, step: 'section-progress', beforeBuild, progress, emptyFiltered, doneFiltered, allFiltered, weekly, afterJump }, null, 2))
+  console.log(JSON.stringify({ problems, step: 'section-progress', beforeBuild, progress, emptyFiltered, doneFiltered, allFiltered, weekly, overview, afterJump }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=trash：删除进回收站、撤销条、回收站恢复与彻底删除。
+if (process.env.STEP === 'trash') {
+  const deleteFirstCard = async () => {
+    await page.locator('.mindmap-node').first().hover()
+    await page.locator('.mindmap-delete-action').first().click({ force: true })
+    await page.locator('.mindmap-confirm button', { hasText: '移到回收站' }).click()
+    await page.waitForTimeout(800)
+  }
+
+  await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(400)
+  const before = await page.evaluate(() => window.__cardState.length)
+
+  await deleteFirstCard()
+  const deleted = await page.evaluate(() => ({
+    cards: window.__cardState.length,
+    trash: window.__trashState.length,
+    toast: document.querySelectorAll('[data-testid="undo-toast"]').length,
+    nodes: document.querySelectorAll('.mindmap-node').length,
+  }))
+  if (deleted.cards !== before - 1) problems.push(`删除后卡片数不对：${deleted.cards}/${before}`)
+  if (deleted.trash !== 1) problems.push(`删除没有进回收站：${deleted.trash}`)
+  if (deleted.toast !== 1) problems.push('删除后没有出现撤销条')
+
+  // ⌘Z 撤销：卡片回到列表，回收站清空。
+  await page.locator('body').click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(900)
+  const undone = await page.evaluate(() => ({
+    cards: window.__cardState.length,
+    trash: window.__trashState.length,
+    toast: document.querySelectorAll('[data-testid="undo-toast"]').length,
+  }))
+  if (undone.cards !== before) problems.push(`⌘Z 没有恢复卡片：${undone.cards}/${before}`)
+  if (undone.trash !== 0) problems.push(`⌘Z 后回收站应清空：${undone.trash}`)
+  if (undone.toast !== 0) problems.push('⌘Z 后撤销条没有消失')
+
+  // 再删一次，去卡片盒的回收站里恢复。
+  await deleteFirstCard()
+  await page.locator('.app-segment').filter({ hasText: '卡片盒' }).first().click()
+  await page.waitForSelector('[data-testid="board-trash"]', { timeout: 10000 })
+  await page.locator('[data-testid="board-trash"]').click()
+  await page.waitForSelector('[data-testid="board-trash-modal"]', { timeout: 5000 })
+  await page.waitForTimeout(600)
+  const trashList = await page.locator('[data-testid="board-trash-list"] li').count()
+  if (trashList !== 1) problems.push(`回收站列表条数不对：${trashList}`)
+  await page.locator('[data-testid="board-trash-restore"]').first().click()
+  await page.waitForTimeout(900)
+  const restored = await page.evaluate(() => ({
+    cards: window.__cardState.length,
+    trash: window.__trashState.length,
+    empty: document.querySelectorAll('[data-testid="board-trash-empty"]').length,
+  }))
+  if (restored.cards !== before) problems.push(`回收站恢复后卡片数不对：${restored.cards}/${before}`)
+  if (restored.trash !== 0) problems.push('恢复后回收站没有清空')
+  if (restored.empty !== 1) problems.push('恢复后没有显示空回收站')
+
+  // 彻底删除：先回脑图删一张，再从回收站清掉。
+  await page.locator('[data-testid="board-trash-modal"] header button').click()
+  await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()
+  await page.waitForTimeout(800)
+  await deleteFirstCard()
+  await page.locator('.app-segment').filter({ hasText: '卡片盒' }).first().click()
+  await page.waitForSelector('[data-testid="board-trash"]', { timeout: 10000 })
+  await page.locator('[data-testid="board-trash"]').click()
+  await page.waitForSelector('[data-testid="board-trash-list"]', { timeout: 5000 })
+  await page.locator('[data-testid="board-trash-purge"]').first().click()
+  await page.waitForTimeout(900)
+  const purged = await page.evaluate(() => ({
+    cards: window.__cardState.length,
+    trash: window.__trashState.length,
+    empty: document.querySelectorAll('[data-testid="board-trash-empty"]').length,
+  }))
+  if (purged.cards !== before - 1) problems.push(`彻底删除后卡片数不对：${purged.cards}/${before - 1}`)
+  if (purged.trash !== 0) problems.push('彻底删除后回收站还有记录')
+  if (purged.empty !== 1) problems.push('彻底删除后没有显示空回收站')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'trash', before, deleted, undone, trashList, restored, purged }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

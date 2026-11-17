@@ -34,8 +34,10 @@ import {
   getCardReviewStats,
   getReadingStats,
   getReviewStats,
+  getStudyOverview,
   type CardReviewStat,
   type ReadingStats,
+  type StudyOverview,
   getReadingState,
   removeAnnotation,
   saveRecallNote,
@@ -89,6 +91,7 @@ import {
 } from './sectionProgress'
 import { buildWeeklyReport, collectStuckCards, weekStartIso, type StuckCard } from './weeklyReport'
 import { useReadingTimer } from '../reading/useReadingTimer'
+import { notifyCardTrashed } from '../card/trash'
 import {
   booksToGoal,
   formatReadingClock,
@@ -240,12 +243,14 @@ export function PdfWorkspace({
   const [tocPasteDraft, setTocPasteDraft] = useState('')
   // 学习报告：章节进度 + 本周复盘，只读不落库。
   const [progressOpen, setProgressOpen] = useState(false)
-  const [reportTab, setReportTab] = useState<'sections' | 'weekly'>('sections')
+  const [reportTab, setReportTab] = useState<'sections' | 'weekly' | 'books'>('sections')
   const [sectionFilter, setSectionFilter] = useState<SectionFilter>('all')
   const [reviewStats, setReviewStats] = useState<CardReviewStat[]>([])
   const [readingStats, setReadingStats] = useState<ReadingStats | null>(null)
   const [reviewDaily, setReviewDaily] = useState<Array<{ day: string; reviews: number }>>([])
   const [stuckList, setStuckList] = useState<StuckCard[] | null>(null)
+  // 跨书汇总：所有书的写卡与复习，不限于当前这本。
+  const [studyOverview, setStudyOverview] = useState<StudyOverview | null>(null)
   const [reportCopied, setReportCopied] = useState(false)
   const [reportLoading, setReportLoading] = useState(false)
   // 挖空填空：在「整块遮挡」和「揭示」之间多一层，先补关键词再评分。
@@ -1225,7 +1230,8 @@ export function PdfWorkspace({
       }))
       setSelectedAnnotationId(null)
       setDeleteTarget(null)
-      setNotice(deleteCard ? '标注与卡片已删除。' : '标注已删除，卡片已保留为孤儿卡片。')
+      if (deleteCard) notifyCardTrashed([deleteTarget.card_id])
+      setNotice(deleteCard ? '卡片已移入回收站（⌘Z 可撤销）。' : '标注已删除，卡片已保留为孤儿卡片。')
       callbacksRef.current.onCardsChanged()
       await loadCards()
     } catch (reason) {
@@ -1330,7 +1336,7 @@ export function PdfWorkspace({
     }).catch(() => undefined)
   }
 
-  /** 拉本周复盘要用的三份数据：按卡复习、阅读时长、最近 14 天复习趋势。 */
+  /** 拉报告要用的四份数据：按卡复习、阅读时长、复习趋势、跨书汇总。 */
   const refreshReport = useCallback(() => {
     setReportLoading(true)
     const now = new Date()
@@ -1339,11 +1345,13 @@ export function PdfWorkspace({
       getCardReviewStats(weekStartIso(now)).catch(() => [] as CardReviewStat[]),
       getReadingStats(localDayKey(now), yearStartKey(now)).catch(() => null),
       getReviewStats(dayStart).catch(() => null),
+      getStudyOverview(weekStartIso(now)).catch(() => null),
     ])
-      .then(([stats, reading, review]) => {
+      .then(([stats, reading, review, overview]) => {
         setReviewStats(stats)
         setReadingStats(reading)
         setReviewDaily(review?.daily?.map((item) => ({ day: item.day, reviews: item.reviews })) ?? [])
+        setStudyOverview(overview)
       })
       .finally(() => setReportLoading(false))
   }, [])
@@ -2289,6 +2297,19 @@ export function PdfWorkspace({
               >
                 本周复盘
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={reportTab === 'books'}
+                className={`pdf-report-tab${reportTab === 'books' ? ' is-active' : ''}`}
+                data-testid="report-tab-books"
+                onClick={() => {
+                  setReportTab('books')
+                  if (!studyOverview && !reportLoading) refreshReport()
+                }}
+              >
+                跨书汇总
+              </button>
             </div>
 
             <div className="pdf-report-body">
@@ -2360,6 +2381,41 @@ export function PdfWorkspace({
                   </ul>
                 )}
               </>
+            ) : reportTab === 'books' ? (
+              reportLoading || !studyOverview ? (
+                <p className="pdf-progress-empty" data-testid="report-loading">正在汇总所有书籍…</p>
+              ) : (
+                <>
+                  <div className="pdf-week-metrics" data-testid="overview-metrics">
+                    <div><strong>{studyOverview.cardsWritten}</strong><span>写卡</span></div>
+                    <div><strong>{studyOverview.reviews}</strong><span>复习次数</span></div>
+                    <div><strong>{studyOverview.reviewedCards}</strong><span>复习卡片</span></div>
+                    <div>
+                      <strong>{studyOverview.reviews === 0 ? 0 : Math.round((studyOverview.correct / studyOverview.reviews) * 100)}%</strong>
+                      <span>记得率</span>
+                    </div>
+                  </div>
+                  <p className="pdf-week-range">
+                    统计区间：本周一 00:00 起（{new Date(weekStart).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}），
+                    覆盖所有书；只算有正文的卡片，回收站里的不计入。
+                  </p>
+                  <h3 className="pdf-week-subtitle">按书拆分</h3>
+                  {studyOverview.books.length === 0 ? (
+                    <p className="pdf-progress-empty" data-testid="overview-empty">本周还没有写卡或复习记录。</p>
+                  ) : (
+                    <ul className="pdf-overview-books" data-testid="overview-books">
+                      {studyOverview.books.map((book) => (
+                        <li key={book.documentId ?? book.title}>
+                          <span className="pdf-overview-title">{book.title}</span>
+                          <span className="pdf-progress-stats">
+                            写卡 {book.cardsWritten} · 复习 {book.reviews} 次 · {book.reviewedCards} 张
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )
             ) : reportLoading ? (
               <p className="pdf-progress-empty" data-testid="report-loading">正在统计本周复习…</p>
             ) : (
@@ -2598,10 +2654,10 @@ export function PdfWorkspace({
           <div className="pdf-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-delete-title">
             <small>删除标注</small>
             <h2 id="pdf-delete-title">是否同时删除关联卡片？</h2>
-            <p>保留卡片会解除它与 PDF 的关联，卡片仍可在复习中使用；彻底删除则不可恢复。</p>
+            <p>保留卡片会解除它与 PDF 的关联，卡片仍可在复习中使用；删除则移入回收站（30 天内可恢复）。</p>
             <div className="pdf-modal-actions">
               <button type="button" onClick={() => void confirmDelete(false)} disabled={deleting}>保留卡片，仅删标注</button>
-              <button type="button" className="is-danger" onClick={() => void confirmDelete(true)} disabled={deleting}>彻底删除</button>
+              <button type="button" className="is-danger" onClick={() => void confirmDelete(true)} disabled={deleting}>移到回收站</button>
               <button type="button" onClick={() => setDeleteTarget(null)} disabled={deleting}>取消</button>
             </div>
             {deleting && <span className="pdf-modal-status">正在删除…</span>}

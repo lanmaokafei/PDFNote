@@ -138,7 +138,7 @@ export function ClearCardsDialog({ count, busy, onCancel, onConfirm }: ClearCard
         <p className="mindmap-confirm-lead">当前脑图共有 <strong>{count}</strong> 张卡片。清空前建议先做一次备份。</p>
         <p>
           <strong>仅清空脑图</strong>：卡片仍留在 PDF 标注与复习队列，只是不再显示在画布上。<br />
-          <strong>彻底删除</strong>：连同标注、复习记录、标签与布局一并删除，不可撤销。
+          <strong>移到回收站</strong>：卡片连同标签与坐标移入回收站并保留 30 天，标注会从 PDF 移除。
         </p>
         <footer className="mindmap-clear-actions">
           <button type="button" className="mindmap-button" onClick={onCancel} disabled={busy}>取消</button>
@@ -146,7 +146,7 @@ export function ClearCardsDialog({ count, busy, onCancel, onConfirm }: ClearCard
             仅清空脑图
           </button>
           <button type="button" className="mindmap-button danger" onClick={() => onConfirm('delete')} disabled={busy || !count}>
-            彻底删除
+            移到回收站
           </button>
         </footer>
       </section>
@@ -160,18 +160,18 @@ export function ConfirmationDialog({ kind, cardTitle, busy, onCancel, onConfirm 
     <div className="mindmap-overlay confirmation">
       <section className="mindmap-confirm" role="alertdialog" aria-modal="true" aria-labelledby="mindmap-confirm-title">
         <span className={`mindmap-confirm-mark ${kind}`} aria-hidden="true">{removing ? '−' : '!'}</span>
-        <span className="mindmap-eyebrow">{removing ? 'REMOVE PROJECTION' : 'PERMANENT DELETE'}</span>
-        <h2 id="mindmap-confirm-title">{removing ? '仅从脑图移除？' : '彻底删除这张卡片？'}</h2>
+        <span className="mindmap-eyebrow">{removing ? 'REMOVE PROJECTION' : 'MOVE TO TRASH'}</span>
+        <h2 id="mindmap-confirm-title">{removing ? '仅从脑图移除？' : '移到回收站？'}</h2>
         <p className="mindmap-confirm-quote">“{cardTitle}”</p>
         {removing ? (
           <p>只关闭此卡片的脑图投影，<strong>PDF 标注与复习记录都会保留</strong>。子节点将按现有数据规则重新连接。</p>
         ) : (
-          <p>将永久删除卡片及其内容，<strong>PDF 与复习视图也无法再使用它</strong>。此操作不可撤销。</p>
+          <p>卡片会移入回收站并<strong>保留 30 天</strong>，标注同时从 PDF 移除；这期间可以在卡片盒的「回收站」里恢复，也可以按 ⌘Z 撤销。</p>
         )}
         <footer className="mindmap-confirm-actions">
           <button type="button" className="mindmap-button" onClick={onCancel} disabled={busy}>取消</button>
           <button type="button" className={`mindmap-button ${removing ? 'warning' : 'danger'}`} onClick={onConfirm} disabled={busy}>
-            {busy ? '处理中…' : removing ? '确认移除脑图' : '确认彻底删除'}
+            {busy ? '处理中…' : removing ? '确认移除脑图' : '移到回收站'}
           </button>
         </footer>
       </section>

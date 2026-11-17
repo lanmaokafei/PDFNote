@@ -17,7 +17,17 @@ const fields = await page.locator('.settings-dialog > label input').count()
 if (fields !== 4) problems.push(`设置字段数量异常：${fields}`)
 
 const title = await page.locator('#settings-title').innerText()
-if (!title.includes('AI 识别')) problems.push(`标题异常：${title}`)
+if (!title.includes('设置')) problems.push(`标题异常：${title}`)
+
+// 复习计划（FSRS）：三组下拉都在，改动即时写入 localStorage。
+for (const testid of ['fsrs-retention', 'fsrs-interval', 'fsrs-steps']) {
+  if (await page.locator(`[data-testid="${testid}"]`).count() !== 1) problems.push(`缺少复习计划控件：${testid}`)
+}
+await page.locator('[data-testid="fsrs-retention"]').selectOption('0.95')
+await page.waitForTimeout(200)
+const fsrsSaved = await page.evaluate(() => localStorage.getItem('pdfnote.fsrs'))
+if (!fsrsSaved?.includes('0.95')) problems.push(`复习参数没有保存：${fsrsSaved}`)
+await page.locator('[data-testid="fsrs-retention"]').selectOption('0.9')
 
 // 非 Tauri 环境应显示明确错误，而不是空白或崩溃
 const statusText = await page.locator('.settings-dialog').innerText()

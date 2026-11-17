@@ -228,6 +228,30 @@ pub fn delete_card(state: State<'_, AppState>, id: String) -> Result<(), String>
     cards::delete_card(&state, id)
 }
 
+#[tauri::command]
+pub fn list_trashed_cards(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<cards::TrashedCard>, String> {
+    cards::list_trashed_cards(&state, limit)
+}
+
+#[tauri::command]
+pub fn restore_card(state: State<'_, AppState>, id: String) -> Result<models::Card, String> {
+    cards::restore_card(&state, id)
+}
+
+#[tauri::command]
+pub fn purge_trashed_card(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    cards::purge_trashed_card(&state, id)
+}
+
+/// 清理过期回收站（默认 30 天），返回删除数量。
+#[tauri::command(async)]
+pub fn purge_expired_trash(state: State<'_, AppState>, days: Option<u32>) -> Result<u32, String> {
+    cards::purge_expired_trash(&state, days.unwrap_or(30))
+}
+
 /// 批量清空指定画布的卡片：remove 仅移除该画布布局，delete 彻底删除卡片。
 #[tauri::command(async)]
 pub fn clear_mindmap_cards(
@@ -378,6 +402,14 @@ pub fn get_review_stats(
     day_start: String,
 ) -> Result<models::ReviewStats, String> {
     review::get_review_stats(&state, day_start)
+}
+
+#[tauri::command]
+pub fn get_study_overview(
+    state: State<'_, AppState>,
+    since: String,
+) -> Result<review::StudyOverview, String> {
+    review::get_study_overview(&state, &since)
 }
 
 #[tauri::command(async)]

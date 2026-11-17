@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
 
-pub const SCHEMA_VERSION: u32 = 13;
+pub const SCHEMA_VERSION: u32 = 15;
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
 const DOCUMENT_PROGRESS_SQL: &str = include_str!("../../migrations/002_document_progress.sql");
 const COLLABORATION_SQL: &str = include_str!("../../migrations/003_collaboration.sql");
@@ -15,6 +15,8 @@ const NOTEBOOKS_SQL: &str = include_str!("../../migrations/010_notebooks.sql");
 const CANVAS_LAYERS_SQL: &str = include_str!("../../migrations/011_canvas_layers.sql");
 const DOCUMENT_READINGS_SQL: &str = include_str!("../../migrations/012_document_readings.sql");
 const READING_DAILY_SQL: &str = include_str!("../../migrations/013_reading_daily.sql");
+const CARD_TRASH_SQL: &str = include_str!("../../migrations/014_card_trash.sql");
+const REVIEW_DAILY_SQL: &str = include_str!("../../migrations/015_review_daily.sql");
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
@@ -55,7 +57,7 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
             "数据库 schema 版本 {version} 高于当前应用支持的版本 {SCHEMA_VERSION}"
         ));
     }
-    let migrations: [(&str, u32); 13] = [
+    let migrations: [(&str, u32); 15] = [
         (INIT_SQL, 1),
         (DOCUMENT_PROGRESS_SQL, 2),
         (COLLABORATION_SQL, 3),
@@ -69,6 +71,8 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
         (CANVAS_LAYERS_SQL, 11),
         (DOCUMENT_READINGS_SQL, 12),
         (READING_DAILY_SQL, 13),
+        (CARD_TRASH_SQL, 14),
+        (REVIEW_DAILY_SQL, 15),
     ];
     for (sql, target_version) in migrations {
         if target_version > version {
@@ -124,7 +128,7 @@ mod tests {
         assert!(columns(&connection, "documents").contains(&"last_page".to_string()));
         assert!(columns(&connection, "cards").contains(&"excerpt_image".to_string()));
         assert!(columns(&connection, "cards").contains(&"link_aliases".to_string()));
-        for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr", "book_analysis", "book_outline", "mindmap_canvases", "document_readings", "reading_daily"] {
+        for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr", "book_analysis", "book_outline", "mindmap_canvases", "document_readings", "reading_daily", "card_trash", "review_daily"] {
             let count: i64 = connection
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",

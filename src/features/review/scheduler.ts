@@ -1,9 +1,8 @@
-import { fsrs, State, type Card as FsrsCard } from 'ts-fsrs'
+import { State, type Card as FsrsCard } from 'ts-fsrs'
 import type { Card, Rating, ReviewSource } from '../../domain/card'
 import { recordReview } from '../../services/pdfnote'
+import { currentScheduler, schedulerVersion } from './fsrsSettings'
 
-export const SCHEDULER_VERSION = 'ts-fsrs-5.4.2'
-const scheduler = fsrs()
 const states = [State.New, State.Learning, State.Review, State.Relearning] as const
 const stateNames = ['new', 'learning', 'review', 'relearning'] as const
 
@@ -31,7 +30,8 @@ export async function reviewCard(
   const requestedTime = new Date()
   const previousReview = card.last_review ? new Date(card.last_review) : null
   const reviewTime = previousReview && requestedTime < previousReview ? previousReview : requestedTime
-  const result = scheduler.next(toFsrsCard(card), reviewTime, rating)
+  // 每次按当前设置取调度器：改保留率/步骤后下一张卡就生效。
+  const result = currentScheduler().next(toFsrsCard(card), reviewTime, rating)
   const next = result.card
 
   return recordReview({
@@ -40,7 +40,7 @@ export async function reviewCard(
     session_id: sessionId,
     rating,
     source,
-    scheduler_version: SCHEDULER_VERSION,
+    scheduler_version: schedulerVersion(),
     expected_updated_at: card.updated_at,
     reviewed_at: reviewTime.toISOString(),
     stability: next.stability,

@@ -2214,3 +2214,105 @@
   color: #8b9689;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- 目录页 OCR（0.53.0） ---------- */
+
+.pdf-toc-ocr {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px dashed #e0e7da;
+  border-radius: 9px;
+  color: #7b877a;
+  background: #fafcf8;
+  font-size: 11.5px;
+}
+
+.pdf-toc-ocr label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pdf-toc-ocr input {
+  width: 54px;
+  padding: 4px 6px;
+  border: 1px solid #dbe4d6;
+  border-radius: 6px;
+  color: #3f4f42;
+  background: #fff;
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.pdf-toc-ocr button {
+  padding: 5px 10px;
+  border: 1px solid #cfdcc8;
+  border-radius: 7px;
+  color: #3f5a44;
+  background: #f2f7ef;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.pdf-toc-ocr button:hover:not(:disabled) {
+  background: #e7f1e2;
+}
+
+.pdf-toc-ocr small {
+  color: #9aa496;
+  font-size: 10.5px;
+}
+
+/* ---------- 留白嵌入页面：正文下方的留白区（0.53.0） ---------- */
+
+.pdf-surface {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.pdf-page[data-note-layout="gutter"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.pdf-note-strip {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px 14px;
+  border-top: 1px dashed #e4ddc7;
+  background: #fbfaf4;
+}
+
+.pdf-note-strip::before {
+  content: '本页留白';
+  color: #b0a37e;
+  font-size: 10.5px;
+  letter-spacing: .08em;
+}
+
+.pdf-note-strip .pdf-note {
+  position: relative;
+  right: auto;
+  width: 100%;
+  max-height: none;
+  flex: 0 0 auto;
+  box-shadow: 0 2px 6px rgba(60, 52, 32, .08);
+}
+
+.pdf-note-strip .pdf-note textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.pdf-note-strip .pdf-note.is-collapsed {
+  width: auto;
+  align-self: flex-start;
+}

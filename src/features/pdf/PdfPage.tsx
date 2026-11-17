@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { OPS, type PDFPageProxy, type RenderTask } from './pdfjs'
 import type { Annotation, AnnotationGeometry, NormalizedBBox, PageInk, PageNote } from '../../domain/card'
 import type { OcrLine } from '../../services/pdfnote'
+import { useNoteLayout } from './noteLayout'
 import {
   clampRect,
   displayPointToNormalized,
@@ -145,6 +146,60 @@ async function pageHasImages(page: PDFPageProxy): Promise<boolean> {
   }
 }
 
+interface NoteCardProps {
+  note: PageNote
+  draft: string | undefined
+  inGutter: boolean
+  onDraft: (value: string) => void
+  onSave: (value: string) => void
+  onToggle: (collapsed: boolean) => void
+  onDelete: () => void
+}
+
+/** 一张留白便签：浮在页边与排进留白带共用同一套交互。 */
+function NoteCard({ note, draft, inGutter, onDraft, onSave, onToggle, onDelete }: NoteCardProps) {
+  return (
+    <article
+      className={`pdf-note is-${note.color}${note.collapsed ? ' is-collapsed' : ''}${inGutter ? ' is-gutter' : ''}`}
+      style={inGutter ? undefined : { top: `${Math.min(88, Math.max(2, note.anchor_y * 100))}%` }}
+      data-note-id={note.id}
+    >
+      {note.collapsed ? (
+        <button
+          type="button"
+          className="pdf-note-dot"
+          title="展开留白"
+          aria-label="展开留白"
+          onClick={() => onToggle(false)}
+        >
+          <StickyNote size={13} strokeWidth={1.8} />
+        </button>
+      ) : (
+        <>
+          <header>
+            <span>留白</span>
+            <div>
+              <button type="button" title="折叠留白" aria-label="折叠留白" onClick={() => onToggle(true)}>−</button>
+              <button type="button" title="删除留白" aria-label="删除留白" onClick={onDelete}>×</button>
+            </div>
+          </header>
+          <textarea
+            value={draft ?? note.content}
+            placeholder="页边草稿：不绑定文字，随手记下想法…"
+            rows={4}
+            spellCheck={false}
+            onChange={(event) => onDraft(event.target.value)}
+            onBlur={(event) => {
+              const value = event.currentTarget.value
+              if (value !== note.content) onSave(value)
+            }}
+          />
+        </>
+      )}
+    </article>
+  )
+}
+
 export function PdfPage({
   pageNumber,
   documentId,
@@ -199,6 +254,8 @@ export function PdfPage({
   const [selection, setSelection] = useState<TextSelectionInfo | null>(null)
   // 留白编辑草稿：输入中不回写数据库，失焦时才保存。
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
+  // 留白排法：浮在页边，或长成右侧一条带子（不遮正文）。
+  const [noteLayout, setNoteLayout] = useNoteLayout()
   const { menu, show, close } = useContextMenu()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -814,18 +871,23 @@ export function PdfPage({
         { id: 'copy-page', label: '复制本页文字', icon: ClipboardCopy, disabled: !pageText, hint: pageText ? `${lines.length} 行` : '文字层未就绪', onSelect: () => void copyText(pageText) },
         { id: 'titlelink', label: titleLinkIndex ? '关闭标题链接' : '开启标题链接', icon: Link2, checked: !!titleLinkIndex, onSelect: () => onContextAction({ type: 'title-link-toggle' }) },
         { id: 'recall', label: recallMode ? '退出文档回忆' : '开始文档回忆', icon: MessageSquare, checked: recallMode, onSelect: () => onContextAction({ type: 'recall-toggle' }) },
+        { id: 'note-layout', label: noteLayout === 'gutter' ? '留白改回页边浮层' : '留白嵌入页面（右侧留白带）', icon: StickyNote, checked: noteLayout === 'gutter', onSelect: () => setNoteLayout(noteLayout === 'gutter' ? 'overlay' : 'gutter') },
       ] },
     ])
   }
 
   const showSurface = shouldRender && page && viewport && view
+  // 有留白且选了「嵌入」时，页面在正文下方长出一条留白区（纸面变长，不遮正文）。
+  const showNoteStrip = !recallMode && noteLayout === 'gutter' && notes.length > 0
+  const pageWidth = cssWidth
   const textMode = tool === 'text' && !recallMode
   return (
     <section
       ref={pageRef}
       className={`pdf-page ${tool !== 'select' && tool !== 'text' && !recallMode ? 'is-drawing' : ''} ${textMode ? 'is-text-mode' : ''}`}
-      style={{ width: cssWidth, height: cssHeight }}
+      style={{ width: pageWidth, height: showNoteStrip ? undefined : cssHeight }}
       data-page={pageNumber}
+      data-note-layout={showNoteStrip ? 'gutter' : 'overlay'}
       aria-label={`第 ${pageNumber} 页`}
       onContextMenu={handleContextMenu}
     >
@@ -843,7 +905,7 @@ export function PdfPage({
       )}
 
       {showSurface && (
-        <>
+        <div className="pdf-surface" style={{ width: cssWidth, height: cssHeight }}>
           <canvas ref={canvasRef} className="pdf-canvas" aria-hidden="true" />
           <PageTextLayer
             lines={lines}
@@ -1021,63 +1083,59 @@ export function PdfPage({
               ))}
             </div>
           )}
-          {!recallMode && notes.length > 0 && (
+          {!recallMode && notes.length > 0 && noteLayout === 'overlay' && (
             <div className="pdf-note-layer">
               {notes.map((note) => (
-                <article
+                <NoteCard
                   key={note.id}
-                  className={`pdf-note is-${note.color}${note.collapsed ? ' is-collapsed' : ''}`}
-                  style={{ top: `${Math.min(88, Math.max(2, note.anchor_y * 100))}%` }}
-                  data-note-id={note.id}
-                >
-                  {note.collapsed ? (
-                    <button
-                      type="button"
-                      className="pdf-note-dot"
-                      title="展开留白"
-                      aria-label="展开留白"
-                      onClick={() => onNoteToggle(note.id, false)}
-                    >
-                      <StickyNote size={13} strokeWidth={1.8} />
-                    </button>
-                  ) : (
-                    <>
-                      <header>
-                        <span>留白</span>
-                        <div>
-                          <button type="button" title="折叠留白" aria-label="折叠留白" onClick={() => onNoteToggle(note.id, true)}>−</button>
-                          <button type="button" title="删除留白" aria-label="删除留白" onClick={() => onNoteDelete(note.id)}>×</button>
-                        </div>
-                      </header>
-                      <textarea
-                        value={noteDrafts[note.id] ?? note.content}
-                        placeholder="页边草稿：不绑定文字，随手记下想法…"
-                        rows={4}
-                        spellCheck={false}
-                        onChange={(event) => {
-                          const value = event.target.value
-                          setNoteDrafts((current) => ({ ...current, [note.id]: value }))
-                        }}
-                        onBlur={(event) => {
-                          const value = event.currentTarget.value
-                          if (value !== note.content) onNoteSave(note.id, value)
-                          setNoteDrafts((current) => {
-                            if (!(note.id in current)) return current
-                            const next = { ...current }
-                            delete next[note.id]
-                            return next
-                          })
-                        }}
-                      />
-                    </>
-                  )}
-                </article>
+                  note={note}
+                  draft={noteDrafts[note.id]}
+                  inGutter={false}
+                  onDraft={(value) => setNoteDrafts((current) => ({ ...current, [note.id]: value }))}
+                  onSave={(value) => {
+                    onNoteSave(note.id, value)
+                    setNoteDrafts((current) => {
+                      if (!(note.id in current)) return current
+                      const next = { ...current }
+                      delete next[note.id]
+                      return next
+                    })
+                  }}
+                  onToggle={(collapsed) => onNoteToggle(note.id, collapsed)}
+                  onDelete={() => onNoteDelete(note.id)}
+                />
               ))}
             </div>
           )}
           {rendering && <div className="pdf-render-status">正在渲染…</div>}
           {pageError && <div className="pdf-render-error">渲染失败：{pageError}</div>}
-        </>
+        </div>
+      )}
+      {showSurface && showNoteStrip && (
+        <aside className="pdf-note-strip" data-testid="note-gutter">
+          {[...notes]
+            .sort((a, b) => a.anchor_y - b.anchor_y || a.created_at.localeCompare(b.created_at))
+            .map((note) => (
+              <NoteCard
+                key={note.id}
+                note={note}
+                draft={noteDrafts[note.id]}
+                inGutter
+                onDraft={(value) => setNoteDrafts((current) => ({ ...current, [note.id]: value }))}
+                onSave={(value) => {
+                  onNoteSave(note.id, value)
+                  setNoteDrafts((current) => {
+                    if (!(note.id in current)) return current
+                    const next = { ...current }
+                    delete next[note.id]
+                    return next
+                  })
+                }}
+                onToggle={(collapsed) => onNoteToggle(note.id, collapsed)}
+                onDelete={() => onNoteDelete(note.id)}
+              />
+            ))}
+        </aside>
       )}
       <span className="pdf-page-number">{pageNumber}</span>
       <ContextMenu state={menu} onClose={close} />

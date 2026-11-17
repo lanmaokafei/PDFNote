@@ -798,7 +798,8 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     },
     auto_backup: () => null,
     get_page_ocr: () => null,
-    ocr_page_lines: () => [],
+    // 目录页 OCR：由 STEP=toc-ocr 注入 window.__tocOcrLines，其余场景返回空。
+    ocr_page_lines: () => window.__tocOcrLines ?? [],
     save_page_ocr: () => null,
     update_document_progress: () => null,
     update_document_metadata: () => null,
@@ -2383,6 +2384,123 @@ if (process.env.STEP === 'section-progress') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=note-gutter：粗读精读的整页宽度下检查留白带排版。
+if (process.env.STEP === 'note-gutter') {
+  await page.locator('.app-segment').filter({ hasText: '粗读精读' }).first().click()
+  await page.waitForSelector('.close-reading-list', { timeout: 10000 })
+  await page.locator('.close-reading-list button').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+
+  const box = await page.locator('.pdf-page').first().boundingBox()
+  await page.mouse.click(box.x + box.width * 0.35, box.y + 60, { button: 'right' })
+  await page.waitForSelector('.context-menu', { timeout: 3000 })
+  await page.locator('.context-menu-item', { hasText: '在此页添加留白' }).first().click()
+  await page.waitForSelector('.pdf-note', { timeout: 3000 })
+  await page.locator('.pdf-note textarea').fill('整页宽度下检查留白带')
+  await page.locator('.pdf-note header').click()
+  await page.waitForTimeout(400)
+
+  await page.mouse.click(box.x + 40, box.y + 40, { button: 'right' })
+  await page.waitForSelector('.context-menu', { timeout: 3000 })
+  await page.locator('.context-menu-item').filter({ hasText: /留白嵌入页面/ }).first().click()
+  await page.waitForTimeout(600)
+  await page.locator('.pdf-scroll').evaluate((el) => { el.scrollTop = el.scrollHeight })
+  await page.waitForTimeout(300)
+
+  const layout = await page.evaluate(() => {
+    const page = document.querySelector('.pdf-page')
+    const surface = page?.querySelector('.pdf-surface')
+    const canvas = page?.querySelector('canvas')
+    const aside = page?.querySelector('[data-testid="note-gutter"]')
+    const rect = (el) => {
+      if (!el) return null
+      const box = el.getBoundingClientRect()
+      return { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.width), h: Math.round(box.height) }
+    }
+    return {
+      layout: page?.getAttribute('data-note-layout'),
+      page: rect(page), surface: rect(surface), canvas: rect(canvas), aside: rect(aside),
+      overlayNotes: page?.querySelectorAll('.pdf-note-layer .pdf-note').length ?? 0,
+      stripNotes: aside?.querySelectorAll('.pdf-note').length ?? 0,
+      scrollTop: Math.round(document.querySelector('.pdf-scroll')?.scrollTop ?? -1),
+    }
+  })
+  if (layout.layout !== 'gutter') problems.push('整页视图下留白带没有生效')
+  if (!layout.canvas || layout.canvas.w !== layout.surface.w) problems.push(`canvas 宽度没有跟随正文区：${JSON.stringify(layout)}`)
+  if (!layout.aside || layout.aside.y < layout.surface.y + layout.surface.h - 2) {
+    problems.push(`留白区没有排在正文下方：${JSON.stringify(layout)}`)
+  }
+  if (layout.aside && Math.abs(layout.aside.w - layout.surface.w) > 2) {
+    problems.push(`留白区应与正文同宽：${layout.aside.w} / ${layout.surface.w}`)
+  }
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'note-gutter', layout }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=toc-ocr：目录页整页 OCR → 填进粘贴框 → 同一套建骨架。
+if (process.env.STEP === 'toc-ocr') {
+  await page.locator('.app-segment').filter({ hasText: '粗读精读' }).first().click()
+  await page.waitForSelector('.close-reading-list', { timeout: 10000 })
+  await page.locator('.close-reading-list button').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1500)
+
+  await page.locator('[data-testid="pdf-pass-chip"]').click()
+  await page.waitForTimeout(700)
+  await page.locator('[data-testid="toc-paste-open"]').click()
+  await page.waitForSelector('[data-testid="toc-paste-modal"]', { timeout: 5000 })
+
+  const defaultPage = await page.locator('[data-testid="toc-ocr-page"]').inputValue()
+  if (defaultPage !== '1') problems.push(`OCR 页码没有默认当前页：${defaultPage}`)
+
+  // Vision 给的是乱序、标题与页码分开的框；前端要按 y/x 拼回一行。
+  await page.evaluate(() => {
+    window.__tocOcrLines = [
+      { text: '第一章 绪论', x: 0.1, y: 0.1, width: 0.3, height: 0.02, confidence: 0.9 },
+      { text: '1', x: 0.82, y: 0.104, width: 0.02, height: 0.012, confidence: 0.9 },
+      { text: '3', x: 0.82, y: 0.144, width: 0.02, height: 0.012, confidence: 0.9 },
+      { text: '1.1 研究背景', x: 0.1, y: 0.14, width: 0.3, height: 0.02, confidence: 0.9 },
+      { text: '6', x: 0.82, y: 0.184, width: 0.02, height: 0.012, confidence: 0.9 },
+      { text: '1.2 研究问题', x: 0.1, y: 0.18, width: 0.3, height: 0.02, confidence: 0.9 },
+      { text: '第二章 方法', x: 0.1, y: 0.24, width: 0.3, height: 0.02, confidence: 0.9 },
+      { text: '20', x: 0.8, y: 0.244, width: 0.04, height: 0.012, confidence: 0.9 },
+    ]
+  })
+  await page.locator('[data-testid="toc-ocr-run"]').click()
+  await page.waitForTimeout(900)
+
+  const ocrText = await page.locator('[data-testid="toc-paste-input"]').inputValue()
+  const ocrPreview = await page.locator('[data-testid="toc-paste-preview"]').textContent()
+  if (!ocrText.includes('第一章 绪论 1')) problems.push(`OCR 文本没有拼回标题与页码：${ocrText}`)
+  if (ocrText.split('\n').length !== 4) problems.push(`OCR 文本行数不对：${ocrText}`)
+  if (!ocrPreview.includes('识别到 4 条')) problems.push(`OCR 后预览条数不对：${ocrPreview}`)
+  if (!ocrPreview.includes('一级 2 / 二级 2')) problems.push(`OCR 后预览层级不对：${ocrPreview}`)
+
+  await page.locator('[data-testid="toc-paste-build"]').click()
+  await page.waitForTimeout(1500)
+  const built = await page.evaluate(() => ({
+    cards: (window.__cardState ?? []).map((card) => ({ id: card.id, question: card.question, page: card.source_ref?.page ?? null, parent: card.parent_id ?? null })),
+    notice: document.querySelector('.pdf-operation-bar')?.textContent ?? '',
+  }))
+  // 只看这次 OCR 新建的骨架卡，别把种子卡片算进来。
+  const skeleton = built.cards.filter((card) => card.id.startsWith('new-card-') && card.page !== null)
+  if (skeleton.length !== 4) problems.push(`OCR 骨架数量不对：${skeleton.length}`)
+  if (skeleton[0]?.question !== '第一章 绪论' || skeleton[0]?.page !== 1) {
+    problems.push(`OCR 骨架第一条不对：${JSON.stringify(skeleton[0])}`)
+  }
+  if (skeleton[1]?.page !== 3 || skeleton[3]?.page !== 20) {
+    problems.push(`OCR 骨架页码不对：${JSON.stringify(skeleton.map((card) => card.page))}`)
+  }
+  if (!built.notice.includes('已按目录建了 4 个骨架节点')) problems.push(`OCR 建骨架缺少提示：${built.notice}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'toc-ocr', defaultPage, ocrText, ocrPreview, skeleton }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // STEP=trash：删除进回收站、撤销条、回收站恢复与彻底删除。
 if (process.env.STEP === 'trash') {
   const deleteFirstCard = async () => {
@@ -3565,6 +3683,67 @@ if (STEP === 'notes') {
   const saved = await page.evaluate(() => window.__noteState?.[0]?.content ?? '')
   if (!saved.includes('bit')) problems.push(`留白未保存：${saved}`)
 
+  // 留白嵌入页面：页面整体加宽，正文区宽度不变，便签排进右侧带子。
+  // 嵌入视图没有工具栏，走页面右键菜单切换排法。
+  const toggleNoteLayout = async () => {
+    const box = await page.locator('.pdf-page').first().boundingBox()
+    if (!box) {
+      problems.push('PDF 页面不可见，无法切换留白排法')
+      return
+    }
+    await page.mouse.click(box.x + 40, box.y + 40, { button: 'right' })
+    await page.waitForSelector('.context-menu', { timeout: 3000 })
+    const item = page.locator('.context-menu-item').filter({ hasText: /留白嵌入页面|留白改回页边浮层/ }).first()
+    if (!(await item.count())) {
+      problems.push('右键菜单缺少留白排法入口')
+      return
+    }
+    await item.click()
+    await page.waitForTimeout(500)
+  }
+  await toggleNoteLayout()
+  const gutter = await page.evaluate(() => {
+    const page = document.querySelector('.pdf-page')
+    const surface = page?.querySelector('.pdf-surface')
+    const aside = page?.querySelector('[data-testid="note-gutter"]')
+    const rect = (element) => (element ? Math.round(element.getBoundingClientRect().width) : 0)
+    const height = (element) => (element ? Math.round(element.getBoundingClientRect().height) : 0)
+    return {
+      layout: page?.getAttribute('data-note-layout') ?? '',
+      pageWidth: rect(page),
+      surfaceWidth: rect(surface),
+      pageHeight: height(page),
+      surfaceHeight: height(surface),
+      asideWidth: rect(aside),
+      notesInGutter: aside?.querySelectorAll('.pdf-note').length ?? 0,
+      overlayNotes: page?.querySelectorAll('.pdf-note-layer .pdf-note').length ?? 0,
+      stored: localStorage.getItem('pdfnote.pdf.noteLayout'),
+    }
+  })
+  if (gutter.layout !== 'gutter') problems.push(`留白带没有生效：${gutter.layout}`)
+  if (gutter.stored !== 'gutter') problems.push(`留白排法没有记住：${gutter.stored}`)
+  if (gutter.notesInGutter !== 1) problems.push(`留白带里没有便签：${gutter.notesInGutter}`)
+  if (gutter.overlayNotes !== 0) problems.push(`留白带模式下不该再有浮层便签：${gutter.overlayNotes}`)
+  if (Math.abs(gutter.pageWidth - gutter.surfaceWidth) > 2) {
+    problems.push(`正文宽度不该被撑开：${gutter.pageWidth} / ${gutter.surfaceWidth}`)
+  }
+  if (gutter.pageHeight <= gutter.surfaceHeight) {
+    problems.push(`留白没有让纸面变长：${gutter.pageHeight} / ${gutter.surfaceHeight}`)
+  }
+  const gutterSaved = await page.evaluate(() => window.__noteState?.[0]?.content ?? '')
+  if (!gutterSaved.includes('bit')) problems.push(`切到留白带后内容丢了：${gutterSaved}`)
+
+  // 切回页边浮层：aside 消失，便签回浮层。
+  await toggleNoteLayout()
+  const backToOverlay = await page.evaluate(() => ({
+    layout: document.querySelector('.pdf-page')?.getAttribute('data-note-layout') ?? '',
+    aside: document.querySelectorAll('[data-testid="note-gutter"]').length,
+    overlay: document.querySelectorAll('.pdf-note-layer .pdf-note').length,
+  }))
+  if (backToOverlay.layout !== 'overlay') problems.push(`没有切回浮层：${backToOverlay.layout}`)
+  if (backToOverlay.aside !== 0) problems.push('切回浮层后留白带仍在')
+  if (backToOverlay.overlay !== 1) problems.push(`切回浮层后便签数量不对：${backToOverlay.overlay}`)
+
   await page.locator('.pdf-note header button[aria-label="折叠留白"]').click()
   await page.waitForTimeout(500)
   const collapsed = await page.locator('.pdf-note.is-collapsed').count()
@@ -3578,7 +3757,7 @@ if (STEP === 'notes') {
   if (remaining !== 0) problems.push(`删除留白后仍显示：${remaining}`)
 
   await browser.close()
-  console.log(JSON.stringify({ problems, step: STEP, noteCount, saved, collapsed, remaining }, null, 2))
+  console.log(JSON.stringify({ problems, step: STEP, noteCount, saved, gutter, backToOverlay, collapsed, remaining }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

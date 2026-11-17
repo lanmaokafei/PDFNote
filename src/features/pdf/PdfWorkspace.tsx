@@ -31,6 +31,7 @@ import {
   listPageInks,
   listPageNotes,
   readPdfChunk,
+  recognizePageLines,
   getCardReviewStats,
   getReadingStats,
   getReviewStats,
@@ -101,6 +102,8 @@ import {
   YEARLY_BOOK_GOAL,
 } from '../reading/readingStats'
 import { parseTocText } from './tocText'
+import { ocrLinesToText, renderPageImage } from './tocOcr'
+import { useNoteLayout } from './noteLayout'
 import {
   bumpClozeTurn,
   buildCloze,
@@ -241,6 +244,9 @@ export function PdfWorkspace({
   // 没有内置书签的扫描书：把目录页复制进来，走同一套建骨架 + 自动挂接。
   const [tocPasteOpen, setTocPasteOpen] = useState(false)
   const [tocPasteDraft, setTocPasteDraft] = useState('')
+  // 没有书签也没有可复制的文字时，直接对整页做 Vision OCR。
+  const [tocOcrPage, setTocOcrPage] = useState(1)
+  const [tocOcrBusy, setTocOcrBusy] = useState(false)
   // 学习报告：章节进度 + 本周复盘，只读不落库。
   const [progressOpen, setProgressOpen] = useState(false)
   const [reportTab, setReportTab] = useState<'sections' | 'weekly' | 'books'>('sections')
@@ -294,6 +300,7 @@ export function PdfWorkspace({
   const [aiTimeoutSecs, setAiTimeoutSecs] = useState(120)
 
   const firstPass = readingPass === 1
+  const [noteLayout, setNoteLayout] = useNoteLayout()
 
   // 阅读计时：PDF 打开且不在回忆态时累计（回忆算复习，不算阅读）。
   useReadingTimer(document.id, Boolean(pdf) && !recallMode)
@@ -1626,6 +1633,7 @@ export function PdfWorkspace({
     try {
       const entries = await readPdfOutline(pdf, { maxDepth: 2, maxEntries: 120 })
       if (entries.length === 0) {
+        setTocOcrPage(currentPage)
         setTocPasteOpen(true)
         setOperationError('这个 PDF 没有内置书签；把目录复制粘贴进来，一样能建骨架。')
         return
@@ -1706,6 +1714,30 @@ export function PdfWorkspace({
     return { root, child: tocPastePreview.entries.length - root }
   }, [tocPastePreview])
 
+  /** 识别目录页：整页渲染后交给 Apple Vision，结果填进粘贴框（可再手工修）。 */
+  const runTocOcr = async () => {
+    if (!pdf || tocOcrBusy) return
+    setTocOcrBusy(true)
+    setOperationError('')
+    try {
+      const page = Math.min(Math.max(1, Math.round(tocOcrPage)), pdf.numPages)
+      const image = await renderPageImage(pdf, page)
+      const lines = await recognizePageLines(image)
+      const text = ocrLinesToText(lines)
+      if (!text.trim()) {
+        setOperationError('这一页没认出文字：换一页，或直接把目录复制粘贴进来。')
+        return
+      }
+      setTocPasteDraft((current) => (current.trim() ? `${current.trim()}\n${text}` : text))
+      setTocOcrPage(page)
+      setNotice(`已识别第 ${page} 页的 ${lines.length} 行文字，确认条数无误再建骨架。`)
+    } catch (reason) {
+      setOperationError(`识别目录页失败：${errorMessage(reason)}`)
+    } finally {
+      setTocOcrBusy(false)
+    }
+  }
+
   /** 阶段条：非嵌入模式贴在工具栏下方，嵌入模式浮在 PDF 左上角。 */
   const passBar = (
     <div className={`pdf-pass-bar${embedded ? ' is-floating' : ''}`} data-pass-bar data-pass={readingPass}>
@@ -1738,6 +1770,7 @@ export function PdfWorkspace({
             data-testid="toc-paste-open"
             onClick={() => {
               setOperationError('')
+              setTocOcrPage(currentPage)
               setTocPasteOpen(true)
             }}
             disabled={!pdf || tocBuilding}
@@ -1870,6 +1903,18 @@ export function PdfWorkspace({
 
         <button type="button" className={`pdf-recall-toggle ${recallMode ? 'is-active' : ''}`} aria-pressed={recallMode} onClick={toggleRecall} disabled={!pdf}>
           {recallMode ? '退出回忆' : '文档回忆'}
+        </button>
+
+        <button
+          type="button"
+          className={`pdf-recall-toggle ${noteLayout === 'gutter' ? 'is-active' : ''}`}
+          data-testid="note-layout-toggle"
+          aria-pressed={noteLayout === 'gutter'}
+          onClick={() => setNoteLayout(noteLayout === 'gutter' ? 'overlay' : 'gutter')}
+          disabled={!pdf}
+          title={noteLayout === 'gutter' ? '留白排在页面右侧，不遮正文；点击改回页边浮层' : '把留白排到页面右侧的带子里，不遮挡正文'}
+        >
+          留白{noteLayout === 'gutter' ? '嵌入' : '浮层'}
         </button>
 
         {recallMode && (
@@ -2578,6 +2623,31 @@ export function PdfWorkspace({
               从目录页或出版社网站复制过来，一行一条；标题和页码之间用点线、Tab 或空格分开都行。
               只建前两级、最多 200 条，认不出页码的行会列在下面。
             </p>
+            <div className="pdf-toc-ocr" data-testid="toc-ocr">
+              <span>没有可复制的文字？</span>
+              <label>
+                第
+                <input
+                  type="number"
+                  min={1}
+                  max={pageCount || undefined}
+                  value={tocOcrPage}
+                  data-testid="toc-ocr-page"
+                  disabled={tocOcrBusy || tocBuilding}
+                  onChange={(event) => setTocOcrPage(Number(event.target.value) || 1)}
+                />
+                页
+              </label>
+              <button
+                type="button"
+                data-testid="toc-ocr-run"
+                onClick={() => void runTocOcr()}
+                disabled={!pdf || tocOcrBusy || tocBuilding}
+              >
+                {tocOcrBusy ? '识别中…' : '用 Vision 识别这一页'}
+              </button>
+              <small>整页识别，结果填进下面，可再手工改。</small>
+            </div>
             <textarea
               data-testid="toc-paste-input"
               value={tocPasteDraft}

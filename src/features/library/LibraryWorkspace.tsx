@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { pushUndo } from '../undo/undoStack'
 import { open } from '@tauri-apps/plugin-dialog'
 import {
   Copy,
@@ -18,6 +19,12 @@ import {
   deleteDocument,
   getBootstrapStatus,
   importDocument,
+  listTrashedDocuments,
+  purgeDocument,
+  purgeExpiredDocumentTrash,
+  restoreDocument,
+  trashDocument,
+  type TrashedDocument,
   isTauriRuntime,
   listDocuments,
   relocateDocument,
@@ -71,7 +78,11 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
   const [notice, setNotice] = useState('')
   const [query, setQuery] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Document | null>(null)
-  const [keepCards, setKeepCards] = useState(true)
+  // 默认移入回收站；勾「保留卡片」才是永久解除文档（卡片留下）。
+  const [keepCards, setKeepCards] = useState(false)
+  const [trashOpen, setTrashOpen] = useState(false)
+  const [trashed, setTrashed] = useState<TrashedDocument[]>([])
+  const [trashBusy, setTrashBusy] = useState(false)
   const { menu, show, close } = useContextMenu()
   const desktop = isTauriRuntime()
   const searchRef = useRef<HTMLInputElement>(null)
@@ -188,13 +199,79 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
     }
   }
 
+  const loadTrash = useCallback(async () => {
+    setTrashBusy(true)
+    try {
+      await purgeExpiredDocumentTrash(30).catch(() => 0)
+      setTrashed(await listTrashedDocuments(200))
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setTrashBusy(false)
+    }
+  }, [])
+
+  function openTrash() {
+    setTrashOpen(true)
+    void loadTrash()
+  }
+
+  async function handleRestore(document: Document) {
+    setTrashBusy(true)
+    try {
+      await restoreDocument(document.id)
+      await loadTrash()
+      await refresh()
+      onChanged()
+      setNotice(`《${document.title}》已从回收站恢复`)
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setTrashBusy(false)
+    }
+  }
+
+  async function handlePurge(document: Document) {
+    if (!window.confirm(`彻底删除《${document.title}》？卡片、标注与复习记录都会消失。`)) return
+    setTrashBusy(true)
+    try {
+      await purgeDocument(document.id)
+      await loadTrash()
+      setNotice(`《${document.title}》已彻底删除`)
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setTrashBusy(false)
+    }
+  }
+
   async function handleDelete() {
     if (!deleteTarget) return
     setBusy({ kind: 'delete', id: deleteTarget.id })
+    const target = deleteTarget
     try {
-      await deleteDocument(deleteTarget.id, keepCards)
+      if (keepCards) {
+        await deleteDocument(target.id, true)
+        setNotice('文档已移出资料库，关联卡片与复习记录已保留')
+      } else {
+        await trashDocument(target.id)
+        // 整本书进回收站也可以撤销：恢复文档即恢复它的全部卡片。
+        pushUndo({
+          label: `删除文档《${target.title}》`,
+          undo: async () => {
+            await restoreDocument(target.id)
+            await refresh()
+            onChanged()
+          },
+          redo: async () => {
+            await trashDocument(target.id)
+            await refresh()
+            onChanged()
+          },
+        })
+        setNotice(`《${target.title}》已移入回收站（⌘Z 可撤销）`)
+      }
       setDeleteTarget(null)
-      setNotice(keepCards ? '文档已移除，关联卡片已保留' : '文档及其卡片已删除')
       await refresh()
       onChanged()
     } catch (reason) {
@@ -225,7 +302,7 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
           { id: 'import', label: '导入新 PDF…', icon: Plus, disabled: !desktop, onSelect: () => void handleImport() },
         ] },
         { id: 'danger', items: [
-          { id: 'delete', label: '移除文档…', icon: Trash2, danger: true, onSelect: () => { setKeepCards(true); setDeleteTarget(document) } },
+          { id: 'delete', label: '删除文档…', icon: Trash2, danger: true, onSelect: () => { setKeepCards(false); setDeleteTarget(document) } },
         ] },
       ],
     })
@@ -281,6 +358,9 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
             aria-label="搜索文档标题"
           />
         </label>
+        <button type="button" className="library-quiet" onClick={openTrash} data-testid="library-trash">
+          <Trash2 size={14} /> 回收站
+        </button>
         <button type="button" className="library-quiet" onClick={() => void refresh()}>
           <RefreshCw size={14} /> 刷新
         </button>
@@ -344,7 +424,7 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
                     type="button"
                     className="is-danger"
                     onClick={() => {
-                      setKeepCards(true)
+                      setKeepCards(false)
                       setDeleteTarget(document)
                     }}
                     title="删除文档"
@@ -359,6 +439,48 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
         </div>
       )}
 
+      {trashOpen && (
+        <div className="library-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !trashBusy) setTrashOpen(false)
+        }}>
+          <div className="library-modal library-trash-modal" role="dialog" aria-modal="true" aria-labelledby="doc-trash-title" data-testid="library-trash-modal">
+            <small>TRASH</small>
+            <h2 id="doc-trash-title">文档回收站</h2>
+            <p>删除的文档保留 30 天，PDF 副本与卡片都在这段时间内可恢复；彻底删除不可撤销。</p>
+            {trashBusy && <p className="library-trash-empty">正在读取回收站…</p>}
+            {!trashBusy && trashed.length === 0 && (
+              <p className="library-trash-empty" data-testid="library-trash-empty">回收站是空的。</p>
+            )}
+            {!trashBusy && trashed.length > 0 && (
+              <ul className="library-trash-list" data-testid="library-trash-list">
+                {trashed.map((item) => (
+                  <li key={item.document.id}>
+                    <div className="library-trash-text">
+                      <strong>{item.document.title}</strong>
+                      <span>
+                        删除于 {new Date(item.deletedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        {item.document.page_count ? ` · ${item.document.page_count} 页` : ''}
+                      </span>
+                    </div>
+                    <div className="library-trash-actions">
+                      <button type="button" data-testid="library-trash-restore" onClick={() => void handleRestore(item.document)} disabled={trashBusy}>
+                        恢复
+                      </button>
+                      <button type="button" className="is-danger" data-testid="library-trash-purge" onClick={() => void handlePurge(item.document)} disabled={trashBusy}>
+                        彻底删除
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="library-modal-actions">
+              <button type="button" onClick={() => setTrashOpen(false)} disabled={trashBusy}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ContextMenu state={menu} onClose={close} />
 
       {deleteTarget && (
@@ -368,19 +490,25 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
           <div className="library-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title">
             <small>移除文档</small>
             <h2 id="delete-title">{deleteTarget.title}</h2>
-            <p>应用数据目录中的 PDF 副本会被删除。请选择关联卡片的处理方式。</p>
-            <label className={`library-option ${keepCards ? 'is-selected' : ''}`}>
-              <input type="radio" checked={keepCards} onChange={() => setKeepCards(true)} />
-              <div><strong>保留卡片与复习记录</strong><span>解除 PDF 来源关联，卡片仍可脑图组织与复习。</span></div>
-            </label>
+            <p>默认移入回收站，PDF 副本与卡片都会保留；彻底删除请到回收站里操作。</p>
             <label className={`library-option ${!keepCards ? 'is-selected' : ''}`}>
               <input type="radio" checked={!keepCards} onChange={() => setKeepCards(false)} />
-              <div><strong>删除文档及其全部卡片</strong><span>标注、脑图节点与复习记录一并删除，不可恢复。</span></div>
+              <div>
+                <strong>移入回收站（推荐）</strong>
+                <span>文档与卡片从列表消失，保留 30 天，可随时恢复；⌘Z 也能撤销。</span>
+              </div>
+            </label>
+            <label className={`library-option ${keepCards ? 'is-selected' : ''}`}>
+              <input type="radio" checked={keepCards} onChange={() => setKeepCards(true)} />
+              <div>
+                <strong>仅移出资料库，保留卡片</strong>
+                <span>PDF 副本会立即删除、有卡片解除来源关联但继续留在脑图与复习里；文档本身不可恢复。</span>
+              </div>
             </label>
             <div className="library-modal-actions">
               <button type="button" onClick={() => setDeleteTarget(null)} disabled={busy?.kind === 'delete'}>取消</button>
               <button type="button" className="is-danger" onClick={() => void handleDelete()} disabled={busy?.kind === 'delete'}>
-                {busy?.kind === 'delete' ? '正在删除…' : '确认移除'}
+                {busy?.kind === 'delete' ? '处理中…' : keepCards ? '确认移出' : '移入回收站'}
               </button>
             </div>
           </div>

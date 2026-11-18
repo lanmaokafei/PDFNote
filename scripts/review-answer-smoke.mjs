@@ -98,6 +98,13 @@ await page.addInitScript(({ cards }) => {
       const card = state.find((item) => item.id === args?.input?.card_id)
       return card ? { ...card, due: '2026-12-01T00:00:00.000Z' } : null
     },
+    // 撤销评分：按日志里的 card_id 把卡片原样还回去（mock 不改 state，天然是评分前状态）。
+    revert_review: (args) => {
+      window.__reverted = (window.__reverted ?? 0) + 1
+      const log = window.__reviewCalls.find((call) => call.client_event_id === args?.clientEventId)
+      const card = state.find((item) => item.id === log?.card_id)
+      return card ? { ...card } : null
+    },
     auto_backup: () => null,
   }
   window.__TAURI_INTERNALS__ = {
@@ -183,6 +190,18 @@ try {
   check(await feedback.count() === 0, '切卡后仍显示上一张的对比反馈')
   check((await page.evaluate(() => window.__reviewCalls.length)) === 1, '评分没有提交一次复习记录')
 
+  // 撤销评分：卡片回到队首、提交数不变；重做再收回去。
+  await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur() })
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(800)
+  check((await page.evaluate(() => window.__reverted)) === 1, '撤销评分没有调用 revert_review')
+  check((await page.locator('.review-question h2').innerText()).includes('线粒体'), '撤销后没有回到刚评的卡')
+  check((await page.evaluate(() => window.__reviewCalls.length)) === 1, '撤销不应新增复习记录')
+  await page.keyboard.press('Meta+Shift+z')
+  await page.waitForTimeout(800)
+  check((await page.locator('.review-question h2').innerText()).includes('没有文字答案'), '重做后没有回到下一张卡')
+  check((await page.evaluate(() => window.__reviewCalls.length)) === 2, '重做应重新提交一次复习记录')
+
   // 无文字答案的降级反馈
   await page.locator('[data-testid="review-reveal"]').click()
   await feedback.waitFor({ timeout: 4000 })
@@ -195,7 +214,7 @@ try {
   await page.keyboard.press('4')
   await page.waitForTimeout(900)
   const callsAfterKey = await page.evaluate(() => window.__reviewCalls.length)
-  check(callsAfterKey === 2, `键盘评分没有提交：${callsAfterKey}`)
+  check(callsAfterKey === 3, `键盘评分没有提交：${callsAfterKey}`)
   check(await page.locator('.review-card').count() === 0, '键盘评分后没有进入空队列')
 
   // 只复习指定卡片：派发学习报告的事件，队列应只剩 r1。
@@ -215,6 +234,7 @@ try {
   check(await page.locator('[data-testid="review-filter-banner"]').count() === 0, '清除筛选后横幅仍在')
   const clearedHeading = await page.locator('.review-session-heading').innerText()
   check(clearedHeading.includes('/ 2 已完成'), `清除筛选后应回到 2 张队列：${clearedHeading}`)
+
 } catch (error) {
   problems.push(`smoke aborted: ${error.stack ?? error.message}`)
 }

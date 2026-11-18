@@ -404,6 +404,12 @@ pub fn get_review_stats(
     review::get_review_stats(&state, day_start)
 }
 
+/// 撤销一次评分：恢复评分前的调度状态并删除那条日志。
+#[tauri::command]
+pub fn revert_review(state: State<'_, AppState>, client_event_id: String) -> Result<models::Card, String> {
+    review::revert_review(&state, client_event_id)
+}
+
 #[tauri::command]
 pub fn get_study_overview(
     state: State<'_, AppState>,
@@ -608,6 +614,38 @@ pub fn delete_document(
     keep_cards: bool,
 ) -> Result<(), String> {
     documents::delete_document(&state, id, keep_cards)
+}
+
+#[tauri::command]
+pub fn trash_document(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    documents::trash_document(&state, id)
+}
+
+#[tauri::command]
+pub fn list_trashed_documents(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<documents::TrashedDocument>, String> {
+    documents::list_trashed_documents(&state, limit)
+}
+
+#[tauri::command]
+pub fn restore_document(state: State<'_, AppState>, id: String) -> Result<models::Document, String> {
+    documents::restore_document(&state, id)
+}
+
+#[tauri::command]
+pub fn purge_document(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    documents::purge_document(&state, id)
+}
+
+/// 清理过期文档回收站（默认 30 天），返回删除数量。
+#[tauri::command(async)]
+pub fn purge_expired_document_trash(
+    state: State<'_, AppState>,
+    days: Option<u32>,
+) -> Result<u32, String> {
+    documents::purge_expired_document_trash(&state, days.unwrap_or(30))
 }
 
 #[tauri::command(async)]

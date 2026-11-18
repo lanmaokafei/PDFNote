@@ -7,7 +7,7 @@ import { useContextMenu } from '../../ui/contextMenuCore'
 import { getReviewStats, listDueCards, updateCardContent } from '../../services/pdfnote'
 import { useCardStore } from '../../store/cardStore'
 import { MATCH_LABELS, evaluateAnswer } from './answerMatch'
-import { reviewCard } from './scheduler'
+import { REVIEW_SCHEDULE_EVENT, reviewCard, type ReviewScheduleChange } from './scheduler'
 import { ClozePanel } from '../pdf/ClozePanel'
 import {
   bumpClozeTurn,
@@ -165,6 +165,26 @@ export function ReviewWorkspace({ onCardsChanged, cardIds = null, onClearFilter 
     setClozeResult(null)
     if (clozeMode) setClozeTurn(bumpClozeTurn())
   }, [clozeMode, current?.id])
+
+  // 撤销/重做评分：把卡片放回队列（撤销）或移出（重做），不动会话内的其它状态。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const change = (event as CustomEvent<ReviewScheduleChange>).detail
+      if (!change?.card) return
+      if (change.action === 'undo') {
+        setQueue((items) => (items.some((item) => item.id === change.card.id) ? items : [change.card, ...items]))
+        setCompleted((count) => Math.max(0, count - 1))
+        setRevealed(false)
+        setAnswerDraft('')
+        setLastReviewed(null)
+      } else {
+        setQueue((items) => items.filter((item) => item.id !== change.card.id))
+        setCompleted((count) => count + 1)
+      }
+    }
+    window.addEventListener(REVIEW_SCHEDULE_EVENT, handler)
+    return () => window.removeEventListener(REVIEW_SCHEDULE_EVENT, handler)
+  }, [])
 
   const refreshCommittedData = useCallback(async () => {
     const [cardsResult, statsResult] = await Promise.allSettled([

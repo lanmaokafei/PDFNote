@@ -198,6 +198,39 @@ export async function deleteDocument(id: string, keepCards: boolean): Promise<vo
   return invoke('delete_document', { id, keepCards })
 }
 
+/** 回收站里的一本书：文档本体 + 删除时间（PDF 副本仍保留）。 */
+export interface TrashedDocument {
+  document: Document
+  deletedAt: string
+}
+
+/** 移入回收站：文档与它的卡片一起从列表消失，30 天内可恢复。 */
+export async function trashDocument(id: string): Promise<void> {
+  desktopOnly()
+  return invoke('trash_document', { id })
+}
+
+export async function listTrashedDocuments(limit = 200): Promise<TrashedDocument[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_trashed_documents', { limit })
+}
+
+export async function restoreDocument(id: string): Promise<Document> {
+  desktopOnly()
+  return invoke('restore_document', { id })
+}
+
+/** 彻底删除回收站里的文档：卡片、标注、复习记录与 PDF 副本一起删掉。 */
+export async function purgeDocument(id: string): Promise<void> {
+  desktopOnly()
+  return invoke('purge_document', { id })
+}
+
+export async function purgeExpiredDocumentTrash(days = 30): Promise<number> {
+  if (!isTauriRuntime()) return 0
+  return invoke('purge_expired_document_trash', { days })
+}
+
 /** 默认取满 10000 张：Anki 牌组导入后单库可能有数千张卡片，不能漏掉后面的画布。 */
 export async function listCards(limit = 10000): Promise<Card[]> {
   if (!isTauriRuntime()) return []
@@ -351,6 +384,12 @@ export interface StudyOverview {
   reviewedCards: number
   correct: number
   books: StudyBookStat[]
+}
+
+/** 撤销一次评分：后端恢复评分前的调度状态并删除那条日志。 */
+export async function revertReview(clientEventId: string): Promise<Card> {
+  desktopOnly()
+  return invoke('revert_review', { clientEventId })
 }
 
 export async function getStudyOverview(since: string): Promise<StudyOverview> {

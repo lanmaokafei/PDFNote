@@ -209,7 +209,11 @@ pub fn update_document_progress(
 
 pub fn list_documents(state: &AppState) -> Result<Vec<Document>, String> {
     let database = state.db()?;
-    let query = format!("SELECT {DOCUMENT_COLUMNS} FROM documents ORDER BY updated_at DESC");
+    let query = format!(
+        "SELECT {DOCUMENT_COLUMNS} FROM documents
+         WHERE NOT EXISTS (SELECT 1 FROM document_trash t WHERE t.document_id = documents.id)
+         ORDER BY updated_at DESC"
+    );
     let mut statement = database
         .prepare(&query)
         .map_err(|error| error.to_string())?;
@@ -283,6 +287,104 @@ pub fn relocate_document(
             .map_err(|error| error.to_string())?;
     }
     verify_document(state, id)
+}
+
+/// 回收站里的一本书：文档本身 + 删除时间。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashedDocument {
+    pub document: Document,
+    pub deleted_at: String,
+}
+
+/// 移入回收站：只登记一行，PDF 副本与卡片都保留，可恢复。
+pub fn trash_document(state: &AppState, id: String) -> Result<(), String> {
+    let database = state.db()?;
+    let exists: i64 = database
+        .query_row("SELECT COUNT(*) FROM documents WHERE id = ?1", params![id], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    if exists == 0 {
+        return Err("文档不存在".into());
+    }
+    database
+        .execute(
+            "INSERT INTO document_trash (document_id, deleted_at) VALUES (?1, ?2)
+             ON CONFLICT(document_id) DO UPDATE SET deleted_at = excluded.deleted_at",
+            params![id, now()],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub fn list_trashed_documents(state: &AppState, limit: Option<u32>) -> Result<Vec<TrashedDocument>, String> {
+    let database = state.db()?;
+    let query = format!(
+        "SELECT {DOCUMENT_COLUMNS}, t.deleted_at FROM documents
+         JOIN document_trash t ON t.document_id = documents.id
+         ORDER BY t.deleted_at DESC, documents.id LIMIT ?1"
+    );
+    let mut statement = database.prepare(&query).map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![limit.unwrap_or(200).clamp(1, 1000)], |row| {
+            Ok(TrashedDocument {
+                document: document_from_row(row)?,
+                deleted_at: row.get(DOCUMENT_COLUMNS.split(", ").count())?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(rows)
+}
+
+pub fn restore_document(state: &AppState, id: String) -> Result<Document, String> {
+    let database = state.db()?;
+    let affected = database
+        .execute("DELETE FROM document_trash WHERE document_id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    if affected == 0 {
+        return Err("回收站里没有这本书".into());
+    }
+    get_document_by_id(&database, &id)?.ok_or_else(|| "文档不存在".into())
+}
+
+/// 彻底删除：卡片、标注、复习记录、PDF 副本一起清掉，不可恢复。
+pub fn purge_document(state: &AppState, id: String) -> Result<(), String> {
+    {
+        let database = state.db()?;
+        let trashed: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM document_trash WHERE document_id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if trashed == 0 {
+            return Err("只能彻底删除回收站里的文档".into());
+        }
+    }
+    delete_document(state, id, false)
+}
+
+/// 清理超过 `days` 天的文档回收站，返回删除数量。
+pub fn purge_expired_document_trash(state: &AppState, days: u32) -> Result<u32, String> {
+    let days = days.clamp(1, 3650);
+    let cutoff = (chrono::Utc::now() - chrono::Duration::days(days as i64))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let ids = {
+        let database = state.db()?;
+        let mut statement = database
+            .prepare("SELECT document_id FROM document_trash WHERE deleted_at <= ?1")
+            .map_err(|error| error.to_string())?;
+        let mapped = statement
+            .query_map(params![cutoff], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        mapped.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?
+    };
+    for id in &ids {
+        purge_document(state, id.clone())?;
+    }
+    Ok(ids.len() as u32)
 }
 
 pub fn delete_document(state: &AppState, id: String, keep_cards: bool) -> Result<(), String> {
@@ -434,6 +536,81 @@ mod tests {
         let error = import_document(&state, source.to_string_lossy().to_string()).unwrap_err();
         assert!(error.contains("PDF"));
         let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn trashed_document_hides_its_cards_and_can_be_restored() {
+        let (directory, state) = test_state();
+        let source = directory.join("trash.pdf");
+        write_pdf(&source, b"%PDF-1.7 trash me");
+        let document =
+            import_document(&state, source.to_string_lossy().to_string()).unwrap();
+        {
+            let database = state.db().unwrap();
+            database
+                .execute(
+                    "INSERT INTO cards (id, document_id, page, bbox_x, bbox_y, bbox_width, bbox_height, excerpt, question, surface_review, due, created_at, updated_at)
+                     VALUES ('card-1', ?1, 1, 0.1, 0.1, 0.2, 0.2, '摘录', '问题', 1, '2020-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                    params![document.id],
+                )
+                .unwrap();
+        }
+        assert_eq!(crate::cards::list_cards(&state, None).unwrap().len(), 1);
+
+        trash_document(&state, document.id.clone()).unwrap();
+        assert!(list_documents(&state).unwrap().is_empty(), "回收站里的文档不出现");
+        assert!(crate::cards::list_cards(&state, None).unwrap().is_empty(), "文档进回收站后其卡片也不出现");
+        let due = crate::review::list_due_cards(&state, now(), None, None).unwrap();
+        assert!(due.is_empty(), "回收站文档的卡片不进复习队列");
+        let trashed = list_trashed_documents(&state, None).unwrap();
+        assert_eq!(trashed.len(), 1);
+        assert_eq!(trashed[0].document.id, document.id);
+
+        // 恢复后文档与卡片都回来，PDF 副本一直在。
+        restore_document(&state, document.id.clone()).unwrap();
+        assert_eq!(list_documents(&state).unwrap().len(), 1);
+        assert_eq!(crate::cards::list_cards(&state, None).unwrap().len(), 1);
+        assert!(state.data_dir.join(&document.stored_path).exists());
+    }
+
+    #[test]
+    fn purging_trashed_document_deletes_cards_and_file() {
+        let (directory, state) = test_state();
+        let source = directory.join("purge.pdf");
+        write_pdf(&source, b"%PDF-1.7 purge me");
+        let document =
+            import_document(&state, source.to_string_lossy().to_string()).unwrap();
+        let path = state.data_dir.join(&document.stored_path);
+
+        assert!(purge_document(&state, document.id.clone()).is_err(), "未进回收站不能彻底删除");
+        trash_document(&state, document.id.clone()).unwrap();
+        purge_document(&state, document.id.clone()).unwrap();
+
+        assert!(!path.exists(), "彻底删除要删掉 PDF 副本");
+        let database = state.db().unwrap();
+        let documents: i64 = database.query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0)).unwrap();
+        let trash: i64 = database.query_row("SELECT COUNT(*) FROM document_trash", [], |row| row.get(0)).unwrap();
+        assert_eq!((documents, trash), (0, 0));
+    }
+
+    #[test]
+    fn expired_document_trash_is_purged() {
+        let (directory, state) = test_state();
+        let source = directory.join("expired.pdf");
+        write_pdf(&source, b"%PDF-1.7 expired");
+        let document = import_document(&state, source.to_string_lossy().to_string()).unwrap();
+        trash_document(&state, document.id.clone()).unwrap();
+        {
+            let database = state.db().unwrap();
+            database
+                .execute(
+                    "UPDATE document_trash SET deleted_at = '2020-01-01T00:00:00.000Z' WHERE document_id = ?1",
+                    params![document.id],
+                )
+                .unwrap();
+        }
+        assert_eq!(purge_expired_document_trash(&state, 30).unwrap(), 1);
+        assert!(list_trashed_documents(&state, None).unwrap().is_empty());
     }
 
     #[test]

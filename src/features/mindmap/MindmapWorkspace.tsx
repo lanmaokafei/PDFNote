@@ -60,7 +60,7 @@ import {
   updateCardContent,
 } from '../../services/pdfnote'
 import { useCardStore } from '../../store/cardStore'
-import { reviewCard } from '../review/scheduler'
+import { REVIEW_SCHEDULE_EVENT, reviewCard, type ReviewScheduleChange } from '../review/scheduler'
 import {
   CardEditor,
   ClearCardsDialog,
@@ -1484,6 +1484,22 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
    * 结构变更 + 撤销记录：先把当前顺序拍个快照，改完再拍一次，
    * 两次的差就是撤销/重做要写回的行；没有变化就不占撤销栈。
    */
+  // 撤销/重做评分：把节点从「本会话已评分」里放回或重新标记。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const change = (event as CustomEvent<ReviewScheduleChange>).detail
+      if (!change?.card) return
+      setRatedIds((current) => {
+        const next = new Set(current)
+        if (change.action === 'undo') next.delete(change.card.id)
+        else next.add(change.card.id)
+        return next
+      })
+    }
+    window.addEventListener(REVIEW_SCHEDULE_EVENT, handler)
+    return () => window.removeEventListener(REVIEW_SCHEDULE_EVENT, handler)
+  }, [])
+
   const applyOrderUndoable = useCallback(async (label: string, plan: CardOrderUpdate[]) => {
     const before = snapshotOrder(cards)
     await applyCardOrder(plan)

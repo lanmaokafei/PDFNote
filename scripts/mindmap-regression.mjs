@@ -107,6 +107,9 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
   // 回收站：删除只把卡片挪到这里，恢复时放回原数组（与后端软删除一致）。
   const trashState = []
   window.__trashState = trashState
+  // 文档回收站（独立于卡片回收站）。
+  const docTrash = []
+  window.__docTrash = docTrash
   const noteState = []
   window.__noteState = noteState
   const digestNotes = []
@@ -235,7 +238,13 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       if (card) card.collapsed = Boolean(args?.collapsed)
       return card ?? null
     },
-    list_documents: () => [document],
+    list_documents: () => (docTrash.length > 0 ? [] : [document]),
+    trash_document: () => { docTrash.push({ document, deletedAt: new Date().toISOString() }); return null },
+    list_trashed_documents: () => docTrash.map((item) => ({ ...item })),
+    restore_document: () => { docTrash.length = 0; return document },
+    purge_document: () => { docTrash.length = 0; return null },
+    purge_expired_document_trash: () => 0,
+    delete_document: () => null,
     list_due_cards: () => [],
     list_book_notes: () => digestNotes,
     analyze_book_chunk: (args) => {
@@ -2542,6 +2551,65 @@ if (process.env.STEP === 'toc-ocr') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'toc-ocr', defaultPage, ocrText, ocrPreview, skeleton }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=doc-trash：整本文档进回收站、恢复、彻底删除。
+if (process.env.STEP === 'doc-trash') {
+  await page.waitForSelector('.document-card', { timeout: 10000 })
+  page.on('dialog', (dialog) => void dialog.accept())
+
+  const removeDoc = async () => {
+    await page.locator('.document-actions button[title="删除文档"]').first().click()
+    await page.waitForSelector('.library-modal', { timeout: 5000 })
+    const checked = await page.locator('.library-modal .library-option').first().getAttribute('class')
+    if (!checked?.includes('is-selected')) problems.push('删除对话框默认不是「移入回收站」')
+    await page.locator('.library-modal-actions button', { hasText: '移入回收站' }).click()
+    await page.waitForTimeout(800)
+  }
+
+  await removeDoc()
+  const afterTrash = await page.evaluate(() => ({
+    cards: document.querySelectorAll('.document-card').length,
+    trash: window.__docTrash.length,
+  }))
+  if (afterTrash.cards !== 0) problems.push(`移入回收站后资料库仍有文档：${afterTrash.cards}`)
+  if (afterTrash.trash !== 1) problems.push(`文档没有进回收站：${afterTrash.trash}`)
+
+  await page.locator('[data-testid="library-trash"]').click()
+  await page.waitForSelector('[data-testid="library-trash-modal"]', { timeout: 5000 })
+  await page.waitForTimeout(400)
+  const trashRows = await page.locator('[data-testid="library-trash-list"] li').count()
+  if (trashRows !== 1) problems.push(`文档回收站条数不对：${trashRows}`)
+  await page.locator('[data-testid="library-trash-restore"]').first().click()
+  await page.waitForTimeout(900)
+  const restored = await page.evaluate(() => ({
+    cards: document.querySelectorAll('.document-card').length,
+    trash: window.__docTrash.length,
+    empty: document.querySelectorAll('[data-testid="library-trash-empty"]').length,
+  }))
+  if (restored.cards !== 1) problems.push(`恢复后资料库没有文档：${restored.cards}`)
+  if (restored.trash !== 0) problems.push('恢复后回收站没有清空')
+  if (restored.empty !== 1) problems.push('恢复后没有显示空回收站')
+
+  // 再删一次，这次彻底删除：文档与 PDF 副本一起消失。
+  await page.locator('[data-testid="library-trash-modal"] .library-modal-actions button').click()
+  await removeDoc()
+  await page.locator('[data-testid="library-trash"]').click()
+  await page.waitForSelector('[data-testid="library-trash-list"]', { timeout: 5000 })
+  await page.locator('[data-testid="library-trash-purge"]').first().click()
+  await page.waitForTimeout(900)
+  const purged = await page.evaluate(() => ({
+    cards: document.querySelectorAll('.document-card').length,
+    trash: window.__docTrash.length,
+    empty: document.querySelectorAll('[data-testid="library-trash-empty"]').length,
+  }))
+  if (purged.cards !== 0) problems.push(`彻底删除后资料库仍有文档：${purged.cards}`)
+  if (purged.trash !== 0) problems.push('彻底删除后回收站仍有记录')
+  if (purged.empty !== 1) problems.push('彻底删除后没有显示空回收站')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'doc-trash', afterTrash, trashRows, restored, purged }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

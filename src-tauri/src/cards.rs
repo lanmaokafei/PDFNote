@@ -161,6 +161,7 @@ pub fn list_cards(state: &AppState, limit: Option<u32>) -> Result<Vec<Card>, Str
     let query = format!(
         "SELECT {CARD_COLUMNS} FROM cards
          WHERE NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = cards.id)
+           AND NOT EXISTS (SELECT 1 FROM document_trash d WHERE d.document_id = cards.document_id)
          ORDER BY created_at DESC, id LIMIT ?1"
     );
     let mut statement = database

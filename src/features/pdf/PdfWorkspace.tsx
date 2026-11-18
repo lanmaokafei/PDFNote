@@ -68,7 +68,7 @@ import {
 } from 'lucide-react'
 import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { useCardStore } from '../../store/cardStore'
-import { reviewCard } from '../review/scheduler'
+import { REVIEW_SCHEDULE_EVENT, reviewCard, type ReviewScheduleChange } from '../review/scheduler'
 import { PdfPage, type PageSize, type PdfContextAction, type PdfTool } from './PdfPage'
 import { linesFromTextContent } from './pageText'
 import { pageViewBox } from './geometry'
@@ -985,6 +985,23 @@ export function PdfWorkspace({
     }
     goToPage(page)
   }
+
+  // 评分被撤销/重做后，卡片回到「未评分」或重新标记，并换上最新调度状态。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const change = (event as CustomEvent<ReviewScheduleChange>).detail
+      if (!change?.card) return
+      setReviewedCards((current) => ({ ...current, [change.card.id]: change.card }))
+      setRatedCardIds((current) => {
+        const next = new Set(current)
+        if (change.action === 'undo') next.delete(change.card.id)
+        else next.add(change.card.id)
+        return next
+      })
+    }
+    window.addEventListener(REVIEW_SCHEDULE_EVENT, handler)
+    return () => window.removeEventListener(REVIEW_SCHEDULE_EVENT, handler)
+  }, [])
 
   const addInkToState = useCallback((page: number, ink: PageInk) => {
     setInksByPage((previous) => ({ ...previous, [page]: [...(previous[page] ?? []), ink] }))

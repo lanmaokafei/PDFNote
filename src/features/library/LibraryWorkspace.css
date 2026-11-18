@@ -83,3 +83,79 @@
   .document-file-status { left: 23px; }
   .library-toolbar { align-items: stretch; flex-direction: column; }
 }
+
+/* ---------- 文档回收站（0.56.0） ---------- */
+
+.library-trash-modal {
+  width: min(560px, 100%);
+}
+
+.library-trash-empty {
+  margin: 14px 0;
+  padding: 22px;
+  border: 1px dashed #e0e7da;
+  border-radius: 10px;
+  color: #9aa496;
+  font-size: 12px;
+  text-align: center;
+}
+
+.library-trash-list {
+  max-height: min(46vh, 360px);
+  overflow-y: auto;
+  margin: 12px 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.library-trash-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid #f0f3ed;
+}
+
+.library-trash-text {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.library-trash-text strong {
+  overflow: hidden;
+  color: #3f4f42;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-trash-text span {
+  color: #9aa496;
+  font-size: 11px;
+}
+
+.library-trash-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.library-trash-actions button {
+  padding: 5px 10px;
+  border: 1px solid #d7e0d2;
+  border-radius: 7px;
+  color: #3f5a44;
+  background: #f4f8f1;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.library-trash-actions button.is-danger {
+  border-color: #efd9d3;
+  color: #a2543f;
+  background: #fdf6f4;
+}

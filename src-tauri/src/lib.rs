@@ -85,6 +85,7 @@ pub fn run() {
             commands::record_review,
             commands::get_review_stats,
             commands::get_study_overview,
+            commands::revert_review,
             commands::get_card_review_stats,
             commands::import_document,
             commands::list_documents,
@@ -96,6 +97,11 @@ pub fn run() {
             commands::verify_document,
             commands::relocate_document,
             commands::delete_document,
+            commands::trash_document,
+            commands::list_trashed_documents,
+            commands::restore_document,
+            commands::purge_document,
+            commands::purge_expired_document_trash,
             commands::export_backup,
             commands::import_backup,
             commands::auto_backup,
@@ -151,6 +157,7 @@ pub fn run() {
             let state = AppState::new(database, database_path, data_dir);
             // 回收站默认保留 30 天：启动时顺手清一次过期项，失败不阻塞启动。
             let _ = cards::purge_expired_trash(&state, 30);
+            let _ = documents::purge_expired_document_trash(&state, 30);
             app.manage(state);
             Ok(())
         })

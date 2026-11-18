@@ -544,6 +544,7 @@ pub fn export_anki_txt(state: &AppState, input: AnkiExportInput) -> Result<u32, 
                     COALESCE((SELECT d.title FROM documents d WHERE d.id = c.document_id), 'PDFNote')
              FROM cards c
              WHERE c.surface_review = 1
+               AND NOT EXISTS (SELECT 1 FROM document_trash dt WHERE dt.document_id = c.document_id)
                AND (?1 IS NULL OR c.id IN (SELECT card_id FROM mindmap_layout WHERE canvas_id = ?1))
              ORDER BY c.sort_order, c.created_at
              LIMIT 5000",

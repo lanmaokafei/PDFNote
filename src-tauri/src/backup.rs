@@ -396,6 +396,7 @@ fn import_overwrite(
         "cards",
         "document_readings",
         "reading_daily",
+        "document_trash",
         "documents",
     ] {
         transaction
@@ -430,6 +431,7 @@ fn import_overwrite(
         copy_table_if_present(&transaction, "reading_daily")?;
         // 0.52 回收站：旧备份没有这张表，跳过即视为没有回收内容。
         copy_table_if_present(&transaction, "card_trash")?;
+        copy_table_if_present(&transaction, "document_trash")?;
         // review_daily 是派生缓存，导入 review_logs 之后按本地日期重建。
         crate::review::rebuild_review_daily(&transaction)?;
         // 0.36.0 图层与手写本：父表在前，避免外键失败。
@@ -608,6 +610,17 @@ fn import_merge(
                 [],
             )
             .map_err(|error| error.to_string())?;
+        if import_has_table(&transaction, "document_trash")? {
+            transaction
+                .execute(
+                    "INSERT INTO document_trash (document_id, deleted_at)
+                     SELECT s.document_id, s.deleted_at FROM import_src.document_trash s
+                     WHERE EXISTS (SELECT 1 FROM documents d WHERE d.id = s.document_id)
+                     ON CONFLICT(document_id) DO UPDATE SET deleted_at = excluded.deleted_at",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
         if import_has_table(&transaction, "card_trash")? {
             transaction
                 .execute(

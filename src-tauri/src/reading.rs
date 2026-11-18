@@ -262,6 +262,7 @@ pub fn get_reading_stats(state: &AppState, day: &str, year_start: &str) -> Resul
                     SUM(CASE WHEN r.day = ?2 THEN r.seconds ELSE 0 END) AS today_seconds
              FROM reading_daily r JOIN documents d ON d.id = r.document_id
              WHERE r.day >= ?1 AND r.day <= ?2
+               AND NOT EXISTS (SELECT 1 FROM document_trash t WHERE t.document_id = r.document_id)
              GROUP BY r.document_id, d.title
              HAVING year_seconds > 0
              ORDER BY year_seconds DESC, d.title

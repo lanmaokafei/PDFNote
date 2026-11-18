@@ -30,7 +30,8 @@ pub fn list_due_cards(
     let mut query = format!(
         "SELECT {CARD_COLUMNS} FROM cards
          WHERE surface_review = 1 AND due <= ?1
-           AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = cards.id)"
+           AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = cards.id)
+           AND NOT EXISTS (SELECT 1 FROM document_trash d WHERE d.document_id = cards.document_id)"
     );
     if let Some(ids) = &filtered {
         let placeholders = vec!["?"; ids.len()].join(", ");
@@ -60,6 +61,87 @@ pub fn list_due_cards(
         .map_err(|error| error.to_string())?;
     crate::models::attach_tags(&database, &mut cards).map_err(|error| error.to_string())?;
     Ok(cards)
+}
+
+/// 撤销一次评分：把卡片调度字段恢复成评分前，删掉这条日志，并回退当天统计。
+///
+/// 只允许撤销该卡片**最近一次**评分——否则会覆盖之后的新记录。
+pub fn revert_review(state: &AppState, client_event_id: String) -> Result<Card, String> {
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let log: Option<(String, i64, String, Option<f64>, Option<f64>, Option<f64>, Option<f64>,
+        Option<i64>, Option<i64>, Option<i64>, Option<String>, String, String, String)> = transaction
+        .query_row(
+            "SELECT card_id, rating, reviewed_at, previous_stability, previous_difficulty,
+                    previous_elapsed_days, previous_scheduled_days, previous_learning_steps,
+                    previous_reps, previous_lapses, previous_last_review, previous_state,
+                    previous_due, id
+             FROM review_logs WHERE client_event_id = ?1",
+            params![client_event_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?,
+                row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?,
+                row.get(12)?, row.get(13)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((card_id, rating, reviewed_at, stability, difficulty, elapsed_days, scheduled_days,
+        learning_steps, reps, lapses, last_review, previous_state, previous_due, log_id)) = log else {
+        return Err("这条评分记录不存在（可能已经撤销过）".into());
+    };
+    let stability = stability.ok_or("这条评分记录来自旧版本，缺少评分前状态，无法撤销")?;
+    let difficulty = difficulty.ok_or("这条评分记录来自旧版本，缺少评分前状态，无法撤销")?;
+
+    let newer: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM review_logs
+             WHERE card_id = ?1 AND id <> ?2
+               AND (reviewed_at > ?3 OR (reviewed_at = ?3 AND id > ?2))",
+            params![card_id, log_id, reviewed_at],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if newer > 0 {
+        return Err("这张卡之后又有新的评分，撤销会覆盖更新的记录".into());
+    }
+
+    transaction
+        .execute(
+            "UPDATE cards SET stability = ?1, difficulty = ?2, elapsed_days = ?3,
+                scheduled_days = ?4, learning_steps = ?5, reps = ?6, lapses = ?7,
+                last_review = ?8, review_state = ?9, due = ?10, updated_at = ?11
+             WHERE id = ?12",
+            params![
+                stability,
+                difficulty,
+                elapsed_days.unwrap_or(0.0),
+                scheduled_days.unwrap_or(0.0),
+                learning_steps.unwrap_or(0),
+                reps.unwrap_or(0),
+                lapses.unwrap_or(0),
+                last_review,
+                previous_state,
+                previous_due,
+                now(),
+                card_id,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM review_logs WHERE id = ?1", params![log_id])
+        .map_err(|error| error.to_string())?;
+    // 回退物化统计（按日志所在本地日期），不删行，只把计数减回去。
+    let day = local_day(&reviewed_at)?;
+    transaction
+        .execute(
+            "UPDATE review_daily SET reviews = MAX(0, reviews - 1),
+                correct = MAX(0, correct - CASE WHEN ?2 >= 3 THEN 1 ELSE 0 END)
+             WHERE day = ?1",
+            params![day, rating],
+        )
+        .map_err(|error| error.to_string())?;
+    let card = get_card(&transaction, &card_id)?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(card)
 }
 
 fn validate_review(input: &ReviewInput) -> Result<(), String> {
@@ -169,10 +251,14 @@ pub fn record_review(state: &AppState, input: ReviewInput) -> Result<Card, Strin
                 id, card_id, client_event_id, session_id, rating, source,
                 previous_state, previous_due, new_due, stability, difficulty,
                 elapsed_days, scheduler_version, reviewed_at, scheduled_days,
-                learning_steps, reps, lapses, new_state, payload_json
+                learning_steps, reps, lapses, new_state, payload_json,
+                previous_stability, previous_difficulty, previous_elapsed_days,
+                previous_scheduled_days, previous_learning_steps, previous_reps,
+                previous_lapses, previous_last_review
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-                ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20
+                ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+                ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
              )",
             params![
                 Uuid::new_v4().to_string(),
@@ -195,6 +281,14 @@ pub fn record_review(state: &AppState, input: ReviewInput) -> Result<Card, Strin
                 input.lapses,
                 input.review_state,
                 payload,
+                previous.stability,
+                previous.difficulty,
+                previous.elapsed_days,
+                previous.scheduled_days,
+                previous.learning_steps,
+                previous.reps,
+                previous.lapses,
+                previous.last_review,
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -261,7 +355,8 @@ pub fn get_review_stats(state: &AppState, day_start: String) -> Result<ReviewSta
     let due_now = database
         .query_row(
             "SELECT COUNT(*) FROM cards WHERE surface_review = 1 AND due <= ?1
-               AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = cards.id)",
+               AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = cards.id)
+               AND NOT EXISTS (SELECT 1 FROM document_trash d WHERE d.document_id = cards.document_id)",
             params![current_time],
             |row| row.get(0),
         )
@@ -269,7 +364,8 @@ pub fn get_review_stats(state: &AppState, day_start: String) -> Result<ReviewSta
     let backlog = database
         .query_row(
             "SELECT COUNT(*) FROM cards WHERE surface_review = 1 AND due < ?1
-               AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = cards.id)",
+               AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = cards.id)
+               AND NOT EXISTS (SELECT 1 FROM document_trash d WHERE d.document_id = cards.document_id)",
             params![day_start],
             |row| row.get(0),
         )
@@ -344,6 +440,7 @@ pub fn get_study_overview(state: &AppState, since: &str) -> Result<StudyOverview
                              THEN 1 ELSE 0 END) AS written
              FROM cards c LEFT JOIN documents d ON d.id = c.document_id
              WHERE NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = c.id)
+               AND NOT EXISTS (SELECT 1 FROM document_trash dt WHERE dt.document_id = c.document_id)
              GROUP BY c.document_id, d.title",
         )
         .map_err(|error| error.to_string())?;
@@ -366,6 +463,7 @@ pub fn get_study_overview(state: &AppState, since: &str) -> Result<StudyOverview
              FROM review_logs r JOIN cards c ON c.id = r.card_id
              WHERE r.reviewed_at >= ?1
                AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = c.id)
+               AND NOT EXISTS (SELECT 1 FROM document_trash dt WHERE dt.document_id = c.document_id)
              GROUP BY c.document_id",
         )
         .map_err(|error| error.to_string())?;
@@ -614,6 +712,72 @@ mod tests {
             .single()
             .unwrap()
             .to_rfc3339()
+    }
+
+    #[test]
+    fn reverting_a_review_restores_the_card_and_logs() {
+        let (_directory, state) = test_state();
+        let card = make_card(&state, "撤销评分");
+        let before = {
+            let database = state.db().unwrap();
+            get_card(&database, &card.id).unwrap()
+        };
+        let mut input = review(&before, "revert-1");
+        input.rating = 1;
+        input.reviewed_at = chrono::Local::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        let day = local_day(&input.reviewed_at).unwrap();
+        let after = record_review(&state, input).unwrap();
+        assert_ne!(after.stability, before.stability);
+        let logged: i64 = state
+            .db()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM review_logs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(logged, 1);
+
+        let restored = revert_review(&state, "revert-1".into()).unwrap();
+        assert_eq!(restored.stability, before.stability);
+        assert_eq!(restored.difficulty, before.difficulty);
+        assert_eq!(restored.due, before.due);
+        assert_eq!(restored.reps, before.reps);
+        assert_eq!(restored.review_state, "new");
+        let (logs, reviews): (i64, i64) = state
+            .db()
+            .unwrap()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM review_logs),
+                        (SELECT COALESCE(SUM(reviews), 0) FROM review_daily WHERE day = ?1)",
+                params![day],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((logs, reviews), (0, 0), "日志与当天统计都要回退");
+
+        assert!(revert_review(&state, "revert-1".into()).is_err(), "同一条日志不能撤销两次");
+    }
+
+    #[test]
+    fn reverting_requires_the_latest_review() {
+        let (_directory, state) = test_state();
+        let card = make_card(&state, "覆盖保护");
+        let current = {
+            let database = state.db().unwrap();
+            get_card(&database, &card.id).unwrap()
+        };
+        let mut first = review(&current, "older");
+        first.reviewed_at = "2026-03-01T00:00:00.000Z".into();
+        record_review(&state, first).unwrap();
+        let second_base = {
+            let database = state.db().unwrap();
+            get_card(&database, &card.id).unwrap()
+        };
+        let mut second = review(&second_base, "newer");
+        second.reviewed_at = "2026-03-02T00:00:00.000Z".into();
+        record_review(&state, second).unwrap();
+
+        let error = revert_review(&state, "older".into()).unwrap_err();
+        assert!(error.contains("新的评分"), "应拦住旧记录，实际：{error}");
+        assert!(revert_review(&state, "newer".into()).is_ok(), "最近一次应可撤销");
     }
 
     #[test]

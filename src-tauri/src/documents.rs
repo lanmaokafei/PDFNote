@@ -158,6 +158,28 @@ pub fn resolve_document_path(state: &AppState, id: String) -> Result<String, Str
         .into_owned())
 }
 
+/// 只改书名：不动页数、进度与文件状态。
+pub fn rename_document(state: &AppState, id: String, title: String) -> Result<Document, String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("书名不能为空".into());
+    }
+    if title.chars().count() > 120 {
+        return Err("书名最多 120 个字符".into());
+    }
+    let database = state.db()?;
+    let affected = database
+        .execute(
+            "UPDATE documents SET title = ?1, updated_at = ?2 WHERE id = ?3",
+            params![title, now(), id],
+        )
+        .map_err(|error| error.to_string())?;
+    if affected == 0 {
+        return Err("文档不存在".into());
+    }
+    get_document_by_id(&database, &id)?.ok_or_else(|| "文档不存在".into())
+}
+
 pub fn update_document_metadata(
     state: &AppState,
     id: String,
@@ -536,6 +558,22 @@ mod tests {
         let error = import_document(&state, source.to_string_lossy().to_string()).unwrap_err();
         assert!(error.contains("PDF"));
         let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn renaming_document_keeps_pages_and_rejects_bad_titles() {
+        let (directory, state) = test_state();
+        let source = directory.join("rename.pdf");
+        write_pdf(&source, b"%PDF-1.7 rename");
+        let document = import_document(&state, source.to_string_lossy().to_string()).unwrap();
+        let pages = document.page_count;
+
+        let renamed = rename_document(&state, document.id.clone(), "  新书名  ".into()).unwrap();
+        assert_eq!(renamed.title, "新书名");
+        assert_eq!(renamed.page_count, pages);
+        assert!(rename_document(&state, document.id.clone(), "   ".into()).is_err());
+        assert!(rename_document(&state, document.id.clone(), "x".repeat(121)).is_err());
+        assert!(rename_document(&state, "missing".into(), "书名".into()).is_err());
     }
 
     #[test]

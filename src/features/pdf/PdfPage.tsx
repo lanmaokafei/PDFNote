@@ -124,6 +124,8 @@ interface PdfPageProps {
   onTitleLink: (hit: TitleLinkHit) => void
   /** 本页的留白（页边草稿）。 */
   notes: PageNote[]
+  /** 全书搜索命中的矩形（只传当前命中页）。 */
+  searchRects?: NormalizedBBox[]
   onNoteCreate: (anchorY: number) => void
   onNoteSave: (id: string, content: string) => void
   onNoteToggle: (id: string, collapsed: boolean) => void
@@ -232,6 +234,7 @@ export function PdfPage({
   titleLinkIndex,
   onTitleLink,
   notes,
+  searchRects,
   onNoteCreate,
   onNoteSave,
   onNoteToggle,
@@ -1078,6 +1081,21 @@ export function PdfPage({
                   onClick={(event) => {
                     event.stopPropagation()
                     onTitleLink(hit)
+                  }}
+                />
+              ))}
+            </div>
+          )}
+          {!recallMode && searchRects && searchRects.length > 0 && (
+            <div className="pdf-search-layer" data-testid="pdf-search-layer" aria-hidden="true">
+              {searchRects.map((rect, index) => (
+                <span
+                  key={`${rect.x}-${rect.y}-${index}`}
+                  style={{
+                    left: `${rect.x * 100}%`,
+                    top: `${rect.y * 100}%`,
+                    width: `${rect.width * 100}%`,
+                    height: `${rect.height * 100}%`,
                   }}
                 />
               ))}

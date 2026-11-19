@@ -59,6 +59,7 @@ import {
   MoreHorizontal,
   MousePointer2,
   PenLine,
+  Search,
   Sparkles,
   Square,
   Tag,
@@ -103,6 +104,8 @@ import {
 } from '../reading/readingStats'
 import { parseTocText } from './tocText'
 import { ocrLinesToText, renderPageImage } from './tocOcr'
+import { findHits, type SearchHit, type SearchLine, type SearchProgress } from './pageSearch'
+import { indexDocument } from './pageIndex'
 import { useNoteLayout } from './noteLayout'
 import { pushUndo } from '../undo/undoStack'
 import {
@@ -254,6 +257,16 @@ export function PdfWorkspace({
   // 没有书签也没有可复制的文字时，直接对整页做 Vision OCR。
   const [tocOcrPage, setTocOcrPage] = useState(1)
   const [tocOcrBusy, setTocOcrBusy] = useState(false)
+  // 全书搜索：索引懒建一次，查询在内存索引上跑。
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([])
+  const [searchProgress, setSearchProgress] = useState<SearchProgress>({ indexed: 0, total: 0, done: false })
+  const [searchActive, setSearchActive] = useState<SearchHit | null>(null)
+  const searchIndexRef = useRef<Map<number, SearchLine[]> | null>(null)
+  const searchSignalRef = useRef<{ cancelled: boolean } | null>(null)
+  const searchQueryRef = useRef('')
+  const searchInputRef = useRef<HTMLInputElement>(null)
   // 学习报告：章节进度 + 本周复盘，只读不落库。
   const [progressOpen, setProgressOpen] = useState(false)
   const [reportTab, setReportTab] = useState<'sections' | 'weekly' | 'books'>('sections')
@@ -936,6 +949,124 @@ export function PdfWorkspace({
   useEffect(() => {
     goToPageRef.current = goToPage
   })
+
+  /** 在已建好的索引上重跑查询；索引没建完也给部分结果。 */
+  const recomputeSearch = useCallback((query: string) => {
+    const index = searchIndexRef.current
+    const needle = query.trim()
+    if (!needle) {
+      setSearchHits([])
+      setSearchActive(null)
+      return
+    }
+    if (!index) {
+      setSearchHits([])
+      return
+    }
+    const hits: SearchHit[] = []
+    for (const [page, lines] of [...index.entries()].sort((left, right) => left[0] - right[0])) {
+      hits.push(...findHits(lines, needle, page, Math.max(1, 500 - hits.length)))
+      if (hits.length >= 500) break
+    }
+    setSearchHits(hits)
+    setSearchActive((current) => (current && hits.some((hit) => hit.page === current.page && hit.index === current.index) ? current : hits[0] ?? null))
+  }, [])
+
+  /** 懒建索引：同一份 PDF 只建一次，边建边刷新结果。 */
+  const startSearchIndex = useCallback(() => {
+    if (!pdf || searchIndexRef.current || searchSignalRef.current) return
+    const signal = { cancelled: false }
+    searchSignalRef.current = signal
+    void indexDocument(pdf, document.id, {
+      signal,
+      onProgress: (progress) => {
+        if (signal.cancelled) return
+        setSearchProgress(progress)
+        const query = searchQueryRef.current
+        if (!query.trim()) return
+        // 用「已索引到的页」临时拼一份索引给查询用，结果随进度增长。
+        if (!searchIndexRef.current) {
+          searchIndexRef.current = new Map()
+        }
+      },
+      onPage: (page, lines) => {
+        if (signal.cancelled) return
+        if (!searchIndexRef.current) searchIndexRef.current = new Map()
+        searchIndexRef.current.set(page, lines)
+        const query = searchQueryRef.current
+        if (query.trim()) recomputeSearch(query)
+        else setSearchProgress((current) => current)
+      },
+    })
+      .then((index) => {
+        if (signal.cancelled) return
+        searchIndexRef.current = index
+        searchSignalRef.current = null
+        recomputeSearch(searchQueryRef.current)
+      })
+      .catch((reason: unknown) => {
+        if (signal.cancelled) return
+        searchSignalRef.current = null
+        setOperationError(`建立搜索索引失败：${errorMessage(reason)}`)
+      })
+  }, [document.id, pdf, recomputeSearch])
+
+  const openSearch = useCallback(() => {
+    setSearchOpen(true)
+    startSearchIndex()
+    window.setTimeout(() => searchInputRef.current?.focus(), 30)
+  }, [startSearchIndex])
+
+  const openSearchRef = useRef(openSearch)
+  useEffect(() => {
+    openSearchRef.current = openSearch
+  })
+
+  // 换文档：取消索引、清空查询与命中。
+  useEffect(() => {
+    if (searchSignalRef.current) searchSignalRef.current.cancelled = true
+    searchSignalRef.current = null
+    searchIndexRef.current = null
+    searchQueryRef.current = ''
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchHits([])
+    setSearchActive(null)
+    setSearchProgress({ indexed: 0, total: 0, done: false })
+  }, [document.id])
+
+  // ⌘⇧F 打开搜索（⌘F 留给 WebKit 原生查找），Esc 关闭。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isFind = (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'f'
+      if (isFind) {
+        event.preventDefault()
+        openSearchRef.current()
+        return
+      }
+      if (event.key === 'Escape' && searchOpen) {
+        setSearchOpen(false)
+        setSearchActive(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [searchOpen])
+
+  const selectSearchHit = useCallback((hit: SearchHit) => {
+    setSearchActive(hit)
+    goToPageRef.current(hit.page)
+  }, [])
+
+  const stepSearch = useCallback((delta: number) => {
+    setSearchActive((current) => {
+      if (searchHits.length === 0) return null
+      const index = current ? searchHits.findIndex((hit) => hit.page === current.page && hit.index === current.index) : -1
+      const next = searchHits[(index + delta + searchHits.length) % searchHits.length]
+      if (next) goToPageRef.current(next.page)
+      return next
+    })
+  }, [searchHits])
 
   // ← / → 翻页；输入框聚焦、回忆态或没打开 PDF 时不抢键。
   useEffect(() => {
@@ -1918,6 +2049,74 @@ export function PdfWorkspace({
 
   return (
     <div className={`pdf-workspace${embedded ? ' is-embedded' : ''}`}>
+
+      {searchOpen && (
+        <div className="pdf-search" data-testid="pdf-search">
+          <div className="pdf-search-bar">
+            <Search size={14} strokeWidth={1.8} />
+            <input
+              ref={searchInputRef}
+              data-testid="pdf-search-input"
+              value={searchQuery}
+              placeholder="全书搜索（⌘⇧F）"
+              spellCheck={false}
+              onChange={(event) => {
+                const value = event.target.value
+                setSearchQuery(value)
+                searchQueryRef.current = value
+                recomputeSearch(value)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  stepSearch(event.shiftKey ? -1 : 1)
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setSearchOpen(false)
+                  setSearchActive(null)
+                }
+              }}
+            />
+            <small data-testid="pdf-search-count">
+              {searchProgress.total > 0 && !searchProgress.done
+                ? `${searchProgress.indexed}/${searchProgress.total} 页`
+                : searchQuery.trim()
+                  ? `${searchHits.length} 处`
+                  : ''}
+            </small>
+            <button type="button" onClick={() => stepSearch(-1)} disabled={searchHits.length === 0} aria-label="上一处">↑</button>
+            <button type="button" onClick={() => stepSearch(1)} disabled={searchHits.length === 0} aria-label="下一处">↓</button>
+            <button type="button" onClick={() => { setSearchOpen(false); setSearchActive(null) }} aria-label="关闭搜索">×</button>
+          </div>
+          {searchQuery.trim() !== '' && (
+            <ul className="pdf-search-results" data-testid="pdf-search-results">
+              {searchHits.length === 0 && searchProgress.done && (
+                <li className="pdf-search-empty">全书没有找到「{searchQuery.trim()}」</li>
+              )}
+              {searchHits.slice(0, 80).map((hit, index) => {
+                const active = searchActive?.page === hit.page && searchActive?.index === hit.index
+                return (
+                  <li key={`${hit.page}-${hit.index}-${index}`}>
+                    <button
+                      type="button"
+                      className={active ? 'is-active' : ''}
+                      onClick={() => selectSearchHit(hit)}
+                      data-search-page={hit.page}
+                    >
+                      <span className="pdf-search-page">P{hit.page}</span>
+                      <span className="pdf-search-snippet">{hit.snippet}</span>
+                    </button>
+                  </li>
+                )
+              })}
+              {searchHits.length > 80 && (
+                <li className="pdf-search-more">只显示前 80 处，继续输入可以缩小范围</li>
+              )}
+            </ul>
+          )}
+        </div>
+      )}
       {!embedded && (
       <header className="pdf-toolbar">
         <div className="pdf-document-heading">
@@ -1933,6 +2132,7 @@ export function PdfWorkspace({
           <button type="button" className={tool === 'highlight' ? 'is-active' : ''} aria-pressed={tool === 'highlight'} onClick={() => setTool('highlight')} disabled={recallMode}>高亮</button>
           <button type="button" className={tool === 'rectangle' ? 'is-active' : ''} aria-pressed={tool === 'rectangle'} onClick={() => setTool('rectangle')} disabled={recallMode || firstPass} title={firstPass ? '粗读只标关键词，精读再框选' : undefined}>矩形</button>
           <button type="button" className={tool === 'text' ? 'is-active' : ''} aria-pressed={tool === 'text'} onClick={() => setTool('text')} disabled={recallMode || firstPass} title={firstPass ? '粗读只标关键词，精读再拖选文字' : undefined}>文字</button>
+          <button type="button" data-testid="pdf-search-open" onClick={openSearch} disabled={!pdf} title="全书搜索（⌘⇧F）">搜索</button>
         </div>
 
         <div className="pdf-zoom-group" aria-label="缩放">
@@ -2101,6 +2301,7 @@ export function PdfWorkspace({
                   onReveal={handleReveal}
                   onContextAction={handleContextAction}
                   notes={notesByPage[pageNumber] ?? EMPTY_NOTES}
+                  searchRects={searchActive && searchActive.page === pageNumber ? searchActive.rects : undefined}
                   onNoteCreate={(anchorY) => void handleNoteCreate(pageNumber, anchorY)}
                   onNoteSave={(id, content) => void handleNoteSave(id, content)}
                   onNoteToggle={(id, collapsed) => void handleNoteToggle(id, collapsed)}
@@ -2257,6 +2458,7 @@ export function PdfWorkspace({
             )}
             <button type="button" className={recallMode ? 'is-active' : ''} onClick={toggleRecall} disabled={!pdf} aria-pressed={recallMode} title="文档遮挡回忆"><MessageSquare size={17} /><span>{recallMode ? '退出' : '对话'}</span></button>
             <button type="button" onClick={() => { if (selectedAnnotation) setDeleteTarget(selectedAnnotation) }} disabled={!selectedAnnotation} title="删除选中的标注"><Trash2 size={17} /><span>删除</span></button>
+            <button type="button" data-testid="pdf-search-open" onClick={openSearch} disabled={!pdf} title="全书搜索（⌘⇧F）"><Search size={17} /><span>搜索</span></button>
             <button type="button" className={dockMenuOpen ? 'is-active' : ''} onClick={() => setDockMenuOpen((open) => !open)} aria-expanded={dockMenuOpen} title="更多：缩放与跳页"><MoreHorizontal size={17} /><span>更多</span></button>
           </div>
 

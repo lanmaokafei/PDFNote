@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, FileText, RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-react'
+import { Boxes, FileText, Pencil, RefreshCw, RotateCcw, Search, Tags, Trash2 } from 'lucide-react'
 import type { Card, Document } from '../../domain/card'
 import { pushUndo } from '../undo/undoStack'
 import {
   isTauriRuntime,
   listCards,
   listDocuments,
+  listTagStats,
   listTags,
+  deleteTag,
+  renameTag,
+  type TagStat,
   listTrashedCards,
   purgeExpiredTrash,
   purgeTrashedCard,
@@ -69,6 +73,12 @@ function errorMessage(reason: unknown): string {
 export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspaceProps) {
   const searchRef = useRef<HTMLInputElement>(null)
   const [cards, setCards] = useState<Card[]>([])
+  // 标签管理：改名 / 删除；用量从后端汇总。
+  const [tagManagerOpen, setTagManagerOpen] = useState(false)
+  const [tagStats, setTagStats] = useState<TagStat[]>([])
+  const [tagEditing, setTagEditing] = useState<string | null>(null)
+  const [tagDraft, setTagDraft] = useState('')
+  const [tagBusy, setTagBusy] = useState(false)
   const [documents, setDocuments] = useState<Document[]>([])
   const [tags, setTags] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -116,6 +126,49 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
       setLoading(false)
     }
   }, [desktop])
+
+  const loadTagStats = useCallback(async () => {
+    try {
+      setTagStats(await listTagStats())
+    } catch (reason) {
+      setError(errorMessage(reason))
+    }
+  }, [])
+
+  async function handleRenameTag(from: string) {
+    const to = tagDraft.trim()
+    if (!to || to === from) {
+      setTagEditing(null)
+      return
+    }
+    setTagBusy(true)
+    try {
+      const affected = await renameTag(from, to)
+      setNotice(`已把 #${from} 改名为 #${to}（${affected} 张卡）`)
+      setTagEditing(null)
+      await Promise.all([refresh(), loadTagStats()])
+      onCardsChanged()
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setTagBusy(false)
+    }
+  }
+
+  async function handleDeleteTag(tag: string) {
+    if (!window.confirm(`删除标签 #${tag}？卡片本身与内容不会受影响。`)) return
+    setTagBusy(true)
+    try {
+      const affected = await deleteTag(tag)
+      setNotice(`已删除标签 #${tag}（${affected} 张卡）`)
+      await Promise.all([refresh(), loadTagStats()])
+      onCardsChanged()
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setTagBusy(false)
+    }
+  }
 
   const loadTrash = useCallback(async () => {
     setTrashBusy(true)
@@ -442,6 +495,21 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
         >
           <RefreshCw size={14} strokeWidth={1.8} className={loading ? 'is-spinning' : ''} />
         </button>
+
+        <button
+          type="button"
+          className="board-refresh"
+          data-testid="board-tag-manage"
+          title="标签管理：改名或删除标签"
+          aria-label="标签管理"
+          onClick={() => {
+            setTagManagerOpen(true)
+            void loadTagStats()
+          }}
+          disabled={!desktop}
+        >
+          <Tags size={14} strokeWidth={1.8} />
+        </button>
       </div>
 
       {error && <p className="board-banner is-error" role="alert">{error}</p>}
@@ -629,6 +697,81 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
               </button>
               <span />
               <button type="button" onClick={() => setTrashOpen(false)} disabled={trashBusy}>关闭</button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {tagManagerOpen && (
+        <div className="board-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !tagBusy) setTagManagerOpen(false)
+        }}>
+          <section className="board-modal" role="dialog" aria-modal="true" aria-labelledby="tag-manager-title" data-testid="tag-manager">
+            <header>
+              <div>
+                <small>TAGS</small>
+                <h2 id="tag-manager-title">标签管理</h2>
+              </div>
+              <button type="button" onClick={() => setTagManagerOpen(false)} disabled={tagBusy} aria-label="关闭标签管理">×</button>
+            </header>
+            <p className="board-modal-intro">改名会合并到目标标签（同一张卡不会重复）；删除只解除标签关系，不动卡片内容。</p>
+            {tagStats.length === 0 ? (
+              <p className="board-modal-empty" data-testid="tag-manager-empty">还没有任何标签。把卡片拖到标签列就会创建。</p>
+            ) : (
+              <ul className="board-tag-list" data-testid="tag-manager-list">
+                {tagStats.map((item) => (
+                  <li key={item.tag}>
+                    {tagEditing === item.tag ? (
+                      <input
+                        className="board-tag-input"
+                        data-testid="tag-manager-input"
+                        value={tagDraft}
+                        autoFocus
+                        maxLength={24}
+                        onChange={(event) => setTagDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            void handleRenameTag(item.tag)
+                          }
+                          if (event.key === 'Escape') setTagEditing(null)
+                        }}
+                      />
+                    ) : (
+                      <span className="board-tag-name">#{item.tag}</span>
+                    )}
+                    <em>{item.count} 张</em>
+                    <div className="board-tag-actions">
+                      <button
+                        type="button"
+                        data-testid="tag-manager-rename"
+                        disabled={tagBusy}
+                        onClick={() => {
+                          setTagEditing(item.tag)
+                          setTagDraft(item.tag)
+                        }}
+                        title="重命名"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="is-danger"
+                        data-testid="tag-manager-delete"
+                        disabled={tagBusy}
+                        onClick={() => void handleDeleteTag(item.tag)}
+                        title="删除标签"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <footer>
+              <span />
+              <button type="button" onClick={() => setTagManagerOpen(false)} disabled={tagBusy}>关闭</button>
             </footer>
           </section>
         </div>

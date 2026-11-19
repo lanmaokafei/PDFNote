@@ -533,6 +533,21 @@ pub fn list_tags(state: State<'_, AppState>) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+pub fn list_tag_stats(state: State<'_, AppState>) -> Result<Vec<cards::TagStat>, String> {
+    cards::list_tag_stats(&state)
+}
+
+#[tauri::command]
+pub fn rename_tag(state: State<'_, AppState>, from: String, to: String) -> Result<u32, String> {
+    cards::rename_tag(&state, from, to)
+}
+
+#[tauri::command]
+pub fn delete_tag(state: State<'_, AppState>, tag: String) -> Result<u32, String> {
+    cards::delete_tag(&state, tag)
+}
+
+#[tauri::command]
 pub fn list_card_links(state: State<'_, AppState>) -> Result<Vec<models::CardLink>, String> {
     cards::list_card_links(&state)
 }
@@ -614,6 +629,15 @@ pub fn delete_document(
     keep_cards: bool,
 ) -> Result<(), String> {
     documents::delete_document(&state, id, keep_cards)
+}
+
+#[tauri::command]
+pub fn rename_document(
+    state: State<'_, AppState>,
+    id: String,
+    title: String,
+) -> Result<models::Document, String> {
+    documents::rename_document(&state, id, title)
 }
 
 #[tauri::command]

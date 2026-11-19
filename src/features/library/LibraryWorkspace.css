@@ -159,3 +159,21 @@
   color: #a2543f;
   background: #fdf6f4;
 }
+
+/* ---------- 重命名文档（0.57.0） ---------- */
+
+.library-rename-input {
+  width: 100%;
+  margin: 12px 0 4px;
+  padding: 9px 11px;
+  border: 1px solid #dbe4d6;
+  border-radius: 8px;
+  color: #33463a;
+  background: #fff;
+  font-size: 13px;
+}
+
+.library-rename-input:focus {
+  outline: 2px solid #c5ddc9;
+  outline-offset: 1px;
+}

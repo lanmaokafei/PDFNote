@@ -104,6 +104,7 @@ const document = {
 await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, emptyDocCanvas, styleLink, board, recallSeed, clozeSeed, readingSeedPass, readingSeedNote }) => {
   const bytes = Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0))
   const cardState = cards.map((card) => ({ ...card }))
+  window.__documentTitle = () => document.title
   // 回收站：删除只把卡片挪到这里，恢复时放回原数组（与后端软删除一致）。
   const trashState = []
   window.__trashState = trashState
@@ -749,6 +750,37 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       ? [{ id: 'link-1', source_card_id: 'c1', target_card_id: 'c2', label: '', created_at: '2026-11-03T00:00:00.000Z' }]
       : []),
     list_tags: () => (board ? ['心内', '药理', '空标签'] : []),
+    list_tag_stats: () => {
+      const counts = new Map()
+      for (const card of cardState) for (const tag of card.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+      return [...counts.entries()]
+        .map(([tag, count]) => ({ tag, count }))
+        .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh-CN'))
+    },
+    rename_tag: (args) => {
+      let affected = 0
+      for (const card of cardState) {
+        if ((card.tags ?? []).includes(args?.from)) {
+          card.tags = [...new Set(card.tags.map((tag) => (tag === args.from ? args.to : tag)))]
+          affected += 1
+        }
+      }
+      return affected
+    },
+    delete_tag: (args) => {
+      let affected = 0
+      for (const card of cardState) {
+        if ((card.tags ?? []).includes(args?.tag)) {
+          card.tags = card.tags.filter((tag) => tag !== args.tag)
+          affected += 1
+        }
+      }
+      return affected
+    },
+    rename_document: (args) => {
+      if (args?.title) document.title = args.title
+      return { ...document }
+    },
     get_ai_settings: () => ({ baseUrl: '', model: '', apiKey: '' }),
     explain_card: () => explainText,
     update_card_content: (args) => {
@@ -2551,6 +2583,126 @@ if (process.env.STEP === 'toc-ocr') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'toc-ocr', defaultPage, ocrText, ocrPreview, skeleton }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=pdf-search：全书搜索、命中高亮、键盘跳下一处。
+if (process.env.STEP === 'pdf-search') {
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+
+  await page.locator('[data-testid="pdf-search-open"]').first().click()
+  await page.waitForSelector('[data-testid="pdf-search-input"]', { timeout: 5000 })
+  await page.locator('[data-testid="pdf-search-input"]').fill('line')
+  // 等索引跑完：计数从「N/M 页」变成「N 处」。
+  await page.waitForFunction(() => {
+    const text = document.querySelector('[data-testid="pdf-search-count"]')?.textContent ?? ''
+    return /\d+ 处/u.test(text)
+  }, null, { timeout: 90000 })
+
+  const search = await page.evaluate(() => ({
+    count: document.querySelector('[data-testid="pdf-search-count"]')?.textContent ?? '',
+    hits: document.querySelectorAll('[data-testid="pdf-search-results"] li button').length,
+    firstPage: document.querySelector('[data-testid="pdf-search-results"] button')?.getAttribute('data-search-page') ?? '',
+    firstText: document.querySelector('[data-testid="pdf-search-results"] button')?.textContent ?? '',
+  }))
+  if (search.hits < 1) problems.push(`没有搜到 line：${JSON.stringify(search)}`)
+  if (!search.firstText.toLowerCase().includes('line')) problems.push(`命中文本不对：${search.firstText}`)
+
+  await page.locator('[data-testid="pdf-search-results"] button').first().click()
+  await page.waitForTimeout(500)
+  const highlighted = await page.evaluate(() => {
+    const span = document.querySelector('[data-testid="pdf-search-layer"] span')
+    const surface = document.querySelector('.pdf-surface')
+    return {
+      rects: document.querySelectorAll('[data-testid="pdf-search-layer"] span').length,
+      active: document.querySelectorAll('[data-testid="pdf-search-results"] button.is-active').length,
+      style: span ? { left: span.style.left, top: span.style.top, width: span.style.width, height: span.style.height } : null,
+      surface: surface ? { w: Math.round(surface.getBoundingClientRect().width), h: Math.round(surface.getBoundingClientRect().height) } : null,
+    }
+  })
+  if (highlighted.rects < 1) problems.push('命中后页面没有高亮层')
+  if (highlighted.active !== 1) problems.push('命中后结果项没有选中态')
+
+  // 回车跳下一处：仍然只保留一个高亮层。
+  await page.locator('[data-testid="pdf-search-input"]').press('Enter')
+  await page.waitForTimeout(400)
+  const afterEnter = await page.evaluate(() => ({
+    rects: document.querySelectorAll('[data-testid="pdf-search-layer"] span').length,
+    active: document.querySelectorAll('[data-testid="pdf-search-results"] button.is-active').length,
+  }))
+  if (afterEnter.rects < 1) problems.push('回车跳转后高亮消失')
+  if (afterEnter.active !== 1) problems.push('回车跳转后没有保持一个选中项')
+
+  // 关闭后面板消失、高亮清空。
+  await page.locator('[data-testid="pdf-search-input"]').press('Escape')
+  await page.waitForTimeout(300)
+  const closed = await page.evaluate(() => ({
+    panel: document.querySelectorAll('[data-testid="pdf-search"]').length,
+    rects: document.querySelectorAll('[data-testid="pdf-search-layer"] span').length,
+  }))
+  if (closed.panel !== 0) problems.push('Esc 没有关闭搜索面板')
+  if (closed.rects !== 0) problems.push('关闭搜索后高亮仍在')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'pdf-search', search, highlighted, afterEnter, closed }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=rename-tag：文档重命名 + 标签改名/删除。
+if (process.env.STEP === 'rename-tag') {
+  page.on('dialog', (dialog) => void dialog.accept())
+  await page.waitForSelector('.document-card', { timeout: 10000 })
+
+  await page.locator('.document-card').first().click({ button: 'right' })
+  await page.waitForSelector('.context-menu', { timeout: 3000 })
+  await page.locator('.context-menu-item', { hasText: '重命名…' }).first().click()
+  await page.waitForSelector('[data-testid="library-rename-input"]', { timeout: 3000 })
+  await page.locator('[data-testid="library-rename-input"]').fill('重命名后的书名')
+  await page.locator('[data-testid="library-rename-save"]').click()
+  await page.waitForTimeout(700)
+  const renamed = await page.evaluate(() => ({
+    title: window.__documentTitle?.() ?? '',
+    card: document.querySelector('.document-card .document-cover-title')?.textContent ?? '',
+  }))
+  if (renamed.card !== '重命名后的书名') problems.push(`列表没有显示新书名：${renamed.card}`)
+  if (renamed.title !== '重命名后的书名') problems.push(`后端书名没有更新：${renamed.title}`)
+
+  await page.locator('.app-segment').filter({ hasText: '卡片盒' }).first().click()
+  await page.waitForSelector('[data-testid="board-tag-manage"]', { timeout: 10000 })
+  await page.locator('[data-testid="board-tag-manage"]').click()
+  await page.waitForSelector('[data-testid="tag-manager"]', { timeout: 5000 })
+  await page.waitForTimeout(400)
+  const before = await page.evaluate(() => ({
+    rows: document.querySelectorAll('[data-testid="tag-manager-list"] li').length,
+    first: document.querySelector('[data-testid="tag-manager-list"] li')?.textContent ?? '',
+    tags: [...new Set(window.__cardState.flatMap((card) => card.tags ?? []))],
+  }))
+  if (before.rows < 1) problems.push('标签管理没有列出标签')
+
+  await page.locator('[data-testid="tag-manager-rename"]').first().click()
+  await page.locator('[data-testid="tag-manager-input"]').fill('改过的标签')
+  await page.locator('[data-testid="tag-manager-input"]').press('Enter')
+  await page.waitForTimeout(900)
+  const renamedTag = await page.evaluate(() => ({
+    stats: [...document.querySelectorAll('[data-testid="tag-manager-list"] li')].map((item) => item.textContent ?? ''),
+    tags: [...new Set(window.__cardState.flatMap((card) => card.tags ?? []))],
+  }))
+  if (!renamedTag.tags.includes('改过的标签')) problems.push(`标签没有改名：${JSON.stringify(renamedTag.tags)}`)
+  if (renamedTag.tags.includes(before.tags[0])) problems.push('旧标签仍然存在')
+
+  const targetRow = page.locator('[data-testid="tag-manager-list"] li', { hasText: '改过的标签' }).first()
+  await targetRow.locator('[data-testid="tag-manager-delete"]').click()
+  await page.waitForTimeout(900)
+  const deleted = await page.evaluate(() => ({
+    tags: [...new Set(window.__cardState.flatMap((card) => card.tags ?? []))],
+    rows: document.querySelectorAll('[data-testid="tag-manager-list"] li').length,
+  }))
+  if (deleted.tags.includes('改过的标签')) problems.push('标签没有删除')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'rename-tag', renamed, before, renamedTag, deleted }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

@@ -780,6 +780,80 @@ pub fn list_tags(state: &AppState) -> Result<Vec<String>, String> {
         .map_err(|error| error.to_string())
 }
 
+/// 标签 + 使用次数：标签管理面板用。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagStat {
+    pub tag: String,
+    pub count: i64,
+}
+
+pub fn list_tag_stats(state: &AppState) -> Result<Vec<TagStat>, String> {
+    let database = state.db()?;
+    let mut statement = database
+        .prepare(
+            "SELECT tag, COUNT(*) FROM card_tags
+             GROUP BY tag
+             ORDER BY COUNT(*) DESC, tag
+             LIMIT 500",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| Ok(TagStat { tag: row.get(0)?, count: row.get(1)? }))
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+fn validate_tag(tag: &str) -> Result<String, String> {
+    let tag = tag.trim().to_string();
+    if tag.is_empty() {
+        return Err("标签不能为空".into());
+    }
+    if tag.chars().count() > 24 {
+        return Err("标签最多 24 个字符".into());
+    }
+    Ok(tag)
+}
+
+/// 重命名标签：整体替换，目标标签已存在时自动合并（不产生重复行）。
+pub fn rename_tag(state: &AppState, from: String, to: String) -> Result<u32, String> {
+    let from = validate_tag(&from)?;
+    let to = validate_tag(&to)?;
+    if from == to {
+        return Ok(0);
+    }
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let affected: i64 = transaction
+        .query_row("SELECT COUNT(*) FROM card_tags WHERE tag = ?1", params![from], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    if affected == 0 {
+        return Err("这个标签已经不存在".into());
+    }
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO card_tags (card_id, tag, created_at)
+             SELECT card_id, ?2, ?3 FROM card_tags WHERE tag = ?1",
+            params![from, to, now()],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM card_tags WHERE tag = ?1", params![from])
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(affected as u32)
+}
+
+/// 删除标签：只解除标签关系，不动卡片内容。
+pub fn delete_tag(state: &AppState, tag: String) -> Result<u32, String> {
+    let tag = validate_tag(&tag)?;
+    let database = state.db()?;
+    let affected = database
+        .execute("DELETE FROM card_tags WHERE tag = ?1", params![tag])
+        .map_err(|error| error.to_string())?;
+    Ok(affected as u32)
+}
+
 pub fn list_card_links(state: &AppState) -> Result<Vec<CardLink>, String> {
     let database = state.db()?;
     let query = format!("SELECT {CARD_LINK_COLUMNS} FROM card_links ORDER BY created_at, id");
@@ -1342,6 +1416,36 @@ mod tests {
         assert_eq!(card.source_ref.as_ref().map(|source| source.page), Some(1));
         assert!(card.excerpt.is_empty());
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    #[test]
+    fn renaming_and_deleting_tags_merges_cleanly() {
+        let (_directory, state) = test_state();
+        let card = create_card(&state, input("标签测试", None)).unwrap();
+        let other = create_card(&state, input("另一个", None)).unwrap();
+        {
+            let database = state.db().unwrap();
+            database
+                .execute("INSERT INTO card_tags (card_id, tag, created_at) VALUES (?1, '算法', '2026-01-01T00:00:00.000Z')", params![card.id])
+                .unwrap();
+            database
+                .execute("INSERT INTO card_tags (card_id, tag, created_at) VALUES (?1, '算法', '2026-01-01T00:00:00.000Z')", params![other.id])
+                .unwrap();
+            database
+                .execute("INSERT INTO card_tags (card_id, tag, created_at) VALUES (?1, '数据结构', '2026-01-01T00:00:00.000Z')", params![other.id])
+                .unwrap();
+        }
+        assert_eq!(rename_tag(&state, "数据结构".into(), "算法".into()).unwrap(), 1);
+        let stats = list_tag_stats(&state).unwrap();
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].tag, "算法");
+        assert_eq!(stats[0].count, 2, "合并后同一张卡不重复计数");
+
+        assert_eq!(delete_tag(&state, "算法".into()).unwrap(), 2);
+        assert!(list_tag_stats(&state).unwrap().is_empty());
+        assert!(rename_tag(&state, "不存在".into(), "新名".into()).is_err());
+        assert!(delete_tag(&state, "   ".into()).is_err());
     }
 
     #[test]

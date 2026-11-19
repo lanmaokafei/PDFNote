@@ -130,6 +130,28 @@ export async function setCardTags(cardId: string, tags: string[]): Promise<Card>
   desktopOnly()
   return invoke('set_card_tags', { cardId, tags })
 }
+/** 标签 + 使用次数：标签管理面板用。 */
+export interface TagStat {
+  tag: string
+  count: number
+}
+
+export async function listTagStats(): Promise<TagStat[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_tag_stats')
+}
+
+/** 重命名标签；目标已存在时自动合并。返回受影响的卡片数。 */
+export async function renameTag(from: string, to: string): Promise<number> {
+  desktopOnly()
+  return invoke('rename_tag', { from, to })
+}
+
+export async function deleteTag(tag: string): Promise<number> {
+  desktopOnly()
+  return invoke('delete_tag', { tag })
+}
+
 export async function listTags(): Promise<string[]> {
   if (!isTauriRuntime()) return []
   return invoke('list_tags')
@@ -196,6 +218,12 @@ export async function relocateDocument(id: string, sourcePath: string): Promise<
 export async function deleteDocument(id: string, keepCards: boolean): Promise<void> {
   desktopOnly()
   return invoke('delete_document', { id, keepCards })
+}
+
+/** 只改书名，不动页数、进度与文件状态。 */
+export async function renameDocument(id: string, title: string): Promise<Document> {
+  desktopOnly()
+  return invoke('rename_document', { id, title })
 }
 
 /** 回收站里的一本书：文档本体 + 删除时间（PDF 副本仍保留）。 */

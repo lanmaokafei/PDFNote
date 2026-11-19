@@ -6,6 +6,7 @@ import {
   FileText,
   FolderOpen,
   HardDrive,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -22,6 +23,7 @@ import {
   listTrashedDocuments,
   purgeDocument,
   purgeExpiredDocumentTrash,
+  renameDocument,
   restoreDocument,
   trashDocument,
   type TrashedDocument,
@@ -39,7 +41,7 @@ interface LibraryWorkspaceProps {
   focusSearchToken?: number
 }
 
-type BusyState = { kind: 'import' | 'verify' | 'relocate' | 'delete'; id?: string } | null
+type BusyState = { kind: 'import' | 'verify' | 'relocate' | 'delete' | 'rename'; id?: string } | null
 
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
@@ -83,6 +85,8 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
   const [trashOpen, setTrashOpen] = useState(false)
   const [trashed, setTrashed] = useState<TrashedDocument[]>([])
   const [trashBusy, setTrashBusy] = useState(false)
+  const [renameTarget, setRenameTarget] = useState<Document | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
   const { menu, show, close } = useContextMenu()
   const desktop = isTauriRuntime()
   const searchRef = useRef<HTMLInputElement>(null)
@@ -245,6 +249,27 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
     }
   }
 
+  async function handleRename() {
+    if (!renameTarget) return
+    const title = renameDraft.trim()
+    if (!title) {
+      setError('书名不能为空')
+      return
+    }
+    setBusy({ kind: 'rename', id: renameTarget.id })
+    try {
+      await renameDocument(renameTarget.id, title)
+      setRenameTarget(null)
+      setNotice(`已重命名为《${title}》`)
+      await refresh()
+      onChanged()
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function handleDelete() {
     if (!deleteTarget) return
     setBusy({ kind: 'delete', id: deleteTarget.id })
@@ -302,6 +327,7 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
           { id: 'import', label: '导入新 PDF…', icon: Plus, disabled: !desktop, onSelect: () => void handleImport() },
         ] },
         { id: 'danger', items: [
+          { id: 'rename', label: '重命名…', icon: Pencil, disabled: busy !== null || !desktop, onSelect: () => { setRenameTarget(document); setRenameDraft(document.title) } },
           { id: 'delete', label: '删除文档…', icon: Trash2, danger: true, onSelect: () => { setKeepCards(false); setDeleteTarget(document) } },
         ] },
       ],
@@ -482,6 +508,39 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
       )}
 
       <ContextMenu state={menu} onClose={close} />
+
+      {renameTarget && (
+        <div className="library-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && busy?.kind !== 'rename') setRenameTarget(null)
+        }}>
+          <div className="library-modal" role="dialog" aria-modal="true" aria-labelledby="rename-title" data-testid="library-rename-modal">
+            <small>RENAME</small>
+            <h2 id="rename-title">重命名文档</h2>
+            <p>只改书名，页数、阅读进度与卡片都不受影响。</p>
+            <input
+              className="library-rename-input"
+              data-testid="library-rename-input"
+              value={renameDraft}
+              maxLength={120}
+              autoFocus
+              onChange={(event) => setRenameDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  void handleRename()
+                }
+                if (event.key === 'Escape') setRenameTarget(null)
+              }}
+            />
+            <div className="library-modal-actions">
+              <button type="button" onClick={() => setRenameTarget(null)} disabled={busy?.kind === 'rename'}>取消</button>
+              <button type="button" className="library-primary" data-testid="library-rename-save" onClick={() => void handleRename()} disabled={busy?.kind === 'rename'}>
+                {busy?.kind === 'rename' ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteTarget && (
         <div className="library-modal-backdrop" role="presentation" onMouseDown={(event) => {

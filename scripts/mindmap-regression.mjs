@@ -108,6 +108,11 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
   // 回收站：删除只把卡片挪到这里，恢复时放回原数组（与后端软删除一致）。
   const trashState = []
   window.__trashState = trashState
+  // 关联链接：可增删，反向链接面板依赖它。
+  const linkState = styleLink
+    ? [{ id: 'link-1', source_card_id: 'c1', target_card_id: 'c2', label: '', created_at: '2026-11-03T00:00:00.000Z' }]
+    : []
+  window.__linkState = linkState
   // 文档回收站（独立于卡片回收站）。
   const docTrash = []
   window.__docTrash = docTrash
@@ -756,9 +761,23 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       return args?.destination ?? ''
     },
     // STYLE_LINK=1：给 c1→c2 建一条关联链接，用来验证虚线颜色与「链接」标签开关。
-    list_card_links: () => (styleLink
-      ? [{ id: 'link-1', source_card_id: 'c1', target_card_id: 'c2', label: '', created_at: '2026-11-03T00:00:00.000Z' }]
-      : []),
+    list_card_links: () => linkState.map((link) => ({ ...link })),
+    create_card_link: (args) => {
+      const link = {
+        id: `link-${linkState.length + 1}`,
+        source_card_id: args?.sourceCardId,
+        target_card_id: args?.targetCardId,
+        label: '',
+        created_at: new Date().toISOString(),
+      }
+      linkState.push(link)
+      return { ...link }
+    },
+    delete_card_link: (args) => {
+      const index = linkState.findIndex((link) => link.id === args?.id)
+      if (index >= 0) linkState.splice(index, 1)
+      return null
+    },
     list_tags: () => (board ? ['心内', '药理', '空标签'] : []),
     list_tag_stats: () => {
       const counts = new Map()
@@ -2613,6 +2632,58 @@ if (process.env.STEP === 'toc-ocr') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'toc-ocr', defaultPage, ocrText, ocrPreview, skeleton }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=backlinks：入链角标、反向链接面板、取消链接后角标消失。
+if (process.env.STEP === 'backlinks') {
+  await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(900)
+
+  const badges = await page.locator('[data-testid="node-backlink-badge"]').count()
+  if (badges !== 1) problems.push(`入链角标数量应为 1：${badges}`)
+  const badgeText = await page.locator('[data-testid="node-backlink-badge"]').first().innerText()
+  if (!badgeText.includes('1')) problems.push(`角标数字不对：${badgeText}`)
+
+  await page.locator('[data-testid="node-backlink-badge"]').first().click()
+  await page.waitForSelector('[data-testid="backlink-inbound-count"]', { timeout: 5000 })
+  const panel = await page.evaluate(() => ({
+    inbound: document.querySelector('[data-testid="backlink-inbound-count"]')?.textContent ?? '',
+    outbound: document.querySelector('[data-testid="backlink-outbound-count"]')?.textContent ?? '',
+    rows: [...document.querySelectorAll('[data-testid^="backlink-in-"]')].map((row) => row.textContent ?? ''),
+  }))
+  if (panel.inbound !== '1') problems.push(`被引用计数不对：${panel.inbound}`)
+  if (panel.outbound !== '0') problems.push(`出链计数不对：${panel.outbound}`)
+  if (!panel.rows.join(' ').includes('概念卡片 1')) problems.push(`来源卡片不对：${panel.rows.join(' / ')}`)
+
+  // 打开来源卡：面板关闭并把视口对准它
+  await page.locator('[data-testid="backlink-in-c1"] button', { hasText: '打开' }).click()
+  await page.waitForTimeout(700)
+  if (await page.locator('[data-testid="backlink-inbound-count"]').count() !== 0) problems.push('打开卡片后面板没有关闭')
+  const focused = await page.evaluate(() => ({
+    selected: document.querySelectorAll('.mindmap-node.is-selected').length,
+  }))
+  if (focused.selected !== 1) problems.push(`打开来源卡后没有选中：${focused.selected}`)
+
+  // 再打开面板取消链接：角标应消失
+  await page.locator('[data-testid="node-backlink-badge"]').first().click()
+  await page.waitForSelector('[data-testid="backlink-inbound-count"]', { timeout: 5000 })
+  await page.locator('[data-testid="backlink-in-c1"] button', { hasText: '取消链接' }).click()
+  await page.waitForTimeout(800)
+  const afterRemove = await page.evaluate(() => ({
+    inbound: document.querySelector('[data-testid="backlink-inbound-count"]')?.textContent ?? '',
+    links: window.__linkState.length,
+  }))
+  if (afterRemove.inbound !== '0') problems.push(`取消链接后入链计数应为 0：${afterRemove.inbound}`)
+  if (afterRemove.links !== 0) problems.push(`取消链接后链接应清空：${afterRemove.links}`)
+  await page.locator('.card-dialog footer button').click()
+  await page.waitForTimeout(500)
+  const badgesAfter = await page.locator('[data-testid="node-backlink-badge"]').count()
+  if (badgesAfter !== 0) problems.push(`取消链接后角标仍存在：${badgesAfter}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'backlinks', badges, badgeText, panel, focused, afterRemove, badgesAfter }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

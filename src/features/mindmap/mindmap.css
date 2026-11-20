@@ -1348,3 +1348,23 @@ button.mindmap-field-label:hover { color: #456c43; }
 .mindmap-search button:hover {
   background: #eef4e9;
 }
+
+/* 入链角标：有卡片引用它时才出现，点击打开反向链接面板。 */
+.mindmap-node-backlink {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid #d8e2d4;
+  border-radius: 4px;
+  color: #5c7a63;
+  background: #f4f9f1;
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.mindmap-node-backlink:hover {
+  border-color: var(--tone-bar);
+  color: var(--tone-ink);
+  background: var(--tone-wash);
+}

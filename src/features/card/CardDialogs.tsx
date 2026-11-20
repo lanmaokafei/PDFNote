@@ -8,6 +8,7 @@ import {
   mergeCards,
   setCardTags,
 } from '../../services/pdfnote'
+import { buildLinkIndex, neighborsOf } from './backlinks'
 import './CardDialogs.css'
 
 function errorMessage(reason: unknown): string {
@@ -152,6 +153,101 @@ export function TagDialog({ card, onClose, onSaved }: TagDialogProps) {
         </div>
       )}
       {error && <p className="card-dialog-error">{error}</p>}
+    </DialogShell>
+  )
+}
+
+interface BacklinkDialogProps {
+  card: Card
+  cards: Card[]
+  onClose: () => void
+  /** 点某张卡：在不同视图里表现不同（脑图聚焦 / 打开编辑器）。 */
+  onOpenCard?: (id: string) => void
+  onChanged?: () => void
+}
+
+/**
+ * 反向链接面板：谁引用我（入链）+ 我引用谁（出链）。
+ * 两个方向都允许直接取消链接，不用回到「关联卡片」里找。
+ */
+export function BacklinkDialog({ card, cards, onClose, onOpenCard, onChanged }: BacklinkDialogProps) {
+  const [links, setLinks] = useState<CardLink[] | null>(null)
+  const [busyId, setBusyId] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    void listCardLinks()
+      .then(setLinks)
+      .catch((reason) => setError(errorMessage(reason)))
+  }, [card.id])
+
+  const byId = useMemo(() => new Map(cards.map((item) => [item.id, item])), [cards])
+  const neighbors = useMemo(() => neighborsOf(buildLinkIndex(links ?? []), card.id), [links, card.id])
+
+  async function remove(link: CardLink) {
+    if (busyId) return
+    setBusyId(link.id)
+    setError('')
+    try {
+      await deleteCardLink(link.id)
+      setLinks((current) => (current ?? []).filter((item) => item.id !== link.id))
+      window.dispatchEvent(new Event('pdfnote:links-changed'))
+      onChanged?.()
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setBusyId('')
+    }
+  }
+
+  const row = (link: CardLink, direction: 'in' | 'out') => {
+    const otherId = direction === 'in' ? link.source_card_id : link.target_card_id
+    const other = byId.get(otherId)
+    return (
+      <div className="card-link-row is-backlink" key={link.id} data-testid={`backlink-${direction}-${otherId}`}>
+        <div>
+          <strong>{other ? cardTitle(other) : '卡片已删除'}</strong>
+          <small>{direction === 'in' ? '引用了本卡' : '本卡引用它'}</small>
+        </div>
+        <div className="card-backlink-actions">
+          {other && onOpenCard && (
+            <button type="button" onClick={() => onOpenCard(other.id)}>打开</button>
+          )}
+          <button type="button" onClick={() => void remove(link)} disabled={busyId === link.id}>
+            {busyId === link.id ? '处理中…' : '取消链接'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <DialogShell
+      eyebrow="BACKLINKS"
+      title="反向链接"
+      description={cardTitle(card)}
+      onClose={onClose}
+      wide
+      footer={<button type="button" onClick={onClose}>关闭</button>}
+    >
+      {error && <p className="card-dialog-error">{error}</p>}
+      {links === null && <span className="card-dialog-empty">正在读取链接…</span>}
+      {links !== null && (
+        <>
+          <section className="card-backlink-section">
+            <h3>被引用 <em data-testid="backlink-inbound-count">{neighbors.inbound.length}</em></h3>
+            {neighbors.inbound.length === 0
+              ? <span className="card-dialog-empty">还没有卡片引用它。用「关联卡片」给别的卡加上指向这里的链接。</span>
+              : <div className="card-link-list">{neighbors.inbound.map((link) => row(link, 'in'))}</div>}
+          </section>
+          <section className="card-backlink-section">
+            <h3>引用出去 <em data-testid="backlink-outbound-count">{neighbors.outbound.length}</em></h3>
+            {neighbors.outbound.length === 0
+              ? <span className="card-dialog-empty">这张卡还没有指向任何卡片。</span>
+              : <div className="card-link-list">{neighbors.outbound.map((link) => row(link, 'out'))}</div>}
+          </section>
+        </>
+      )}
     </DialogShell>
   )
 }

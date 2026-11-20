@@ -9,6 +9,7 @@ import { MindmapNodeContext } from './MindmapContext'
 import { hasMathContent } from '../../ui/latex'
 import { ExpandableField } from './ExpandableField'
 import { toneAt } from './tone'
+import { inboundBadgeLabel } from '../card/backlinks'
 
 const ratings: Array<{ value: Rating; label: string }> = [
   { value: 1, label: '重来' },
@@ -54,6 +55,7 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
 
   // 子节点数由工作区预算好：节点内部不再扫全表（否则 1000+ 卡时是 O(n²)）。
   const childCount = context.childCounts.get(card.id) ?? 0
+  const inboundLabel = inboundBadgeLabel(context.inboundCounts.get(card.id) ?? 0)
   // 与后端 build_explain_prompt 同一判定顺序：问题 → 摘录 → 笔记，任一非空即可解析。
   const hasContent = Boolean(
     card.question.trim() || card.excerpt.trim() || card.user_note.trim(),
@@ -83,6 +85,21 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
           }}
         >Q</button>
         <h3 title={cardTitle(card)}>{cardTitle(card)}</h3>
+        {inboundLabel && (
+          <button
+            type="button"
+            className="mindmap-node-backlink nodrag"
+            data-testid="node-backlink-badge"
+            title={`${context.inboundCounts.get(card.id) ?? 0} 张卡引用了它，点击查看反向链接`}
+            aria-label="查看反向链接"
+            onClick={(event) => {
+              event.stopPropagation()
+              window.dispatchEvent(new CustomEvent('pdfnote:open-backlinks', { detail: { cardId: card.id } }))
+            }}
+          >
+            ←{inboundLabel}
+          </button>
+        )}
         {card.source_ref && (
           <button
             type="button"

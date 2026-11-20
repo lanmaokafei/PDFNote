@@ -17,6 +17,8 @@ export interface MindmapNodeContextValue {
    * 现在由工作区一次性算好传下来，节点只做 O(1) 查表。
    */
   childCounts: ReadonlyMap<string, number>
+  /** 每张卡的入链数（谁引用了它），节点右上角画「←N」。 */
+  inboundCounts: ReadonlyMap<string, number>
   recallActive: boolean
   revealedIds: ReadonlySet<string>
   ratedIds: ReadonlySet<string>

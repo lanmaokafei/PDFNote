@@ -245,3 +245,58 @@
   font-style: normal;
   text-align: right;
 }
+
+/* ---------- 反向链接（0.59.0） ---------- */
+
+.card-backlink-section {
+  margin-bottom: 16px;
+}
+
+.card-backlink-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  color: #556253;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.card-backlink-section h3 em {
+  color: #7ba983;
+  font-size: 12px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-link-row.is-backlink {
+  align-items: center;
+}
+
+.card-link-row.is-backlink small {
+  display: block;
+  margin-top: 2px;
+  color: #9aa496;
+  font-size: 10.5px;
+}
+
+.card-backlink-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.card-backlink-actions button {
+  padding: 4px 9px;
+  border: 1px solid #dde5d8;
+  border-radius: 6px;
+  color: #4f6353;
+  background: #f8fbf5;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.card-backlink-actions button:disabled {
+  opacity: .55;
+  cursor: default;
+}

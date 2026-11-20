@@ -34,6 +34,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Repeat2,
   Search,
   Tag,
   Trash2,
@@ -69,7 +70,8 @@ import {
   type ClearCardsMode,
   type ConfirmationKind,
 } from './CardEditor'
-import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
+import { BacklinkDialog, LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
+import { buildLinkIndex } from '../card/backlinks'
 import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
 import { InkEdge } from './MindmapEdge'
@@ -213,6 +215,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     getIntersectingNodes,
     fitView: fitViewInstance,
     getViewport,
+    getZoom,
+    setCenter,
   } = useReactFlow<MindmapFlowNode, Edge>()
 
   // 当前画布：全局独立视图只用 main，文档工作台按 documentId 记住上次选的画布；
@@ -327,6 +331,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   const [links, setLinks] = useState<CardLink[]>([])
   const [tagTarget, setTagTarget] = useState<string | null>(null)
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
+  const [backlinkCardId, setBacklinkCardId] = useState<string | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
   const { menu, show, close } = useContextMenu()
@@ -1484,6 +1489,16 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
    * 结构变更 + 撤销记录：先把当前顺序拍个快照，改完再拍一次，
    * 两次的差就是撤销/重做要写回的行；没有变化就不占撤销栈。
    */
+  // 节点角标点击：事件从 MindmapNode 派发，避免把回调塞进每个节点。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const cardId = (event as CustomEvent<{ cardId?: string }>).detail?.cardId
+      if (cardId) setBacklinkCardId(cardId)
+    }
+    window.addEventListener('pdfnote:open-backlinks', handler)
+    return () => window.removeEventListener('pdfnote:open-backlinks', handler)
+  }, [])
+
   // 撤销/重做评分：把节点从「本会话已评分」里放回或重新标记。
   useEffect(() => {
     const handler = (event: Event) => {
@@ -1818,6 +1833,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       { id: 'relations', title: '卡片关系', items: [
         { id: 'tags', label: '编辑标签…', icon: Tag, onSelect: () => setTagTarget(cardId) },
         { id: 'link', label: '关联其他卡片…', icon: Link2, onSelect: () => setLinkTarget(cardId) },
+        { id: 'backlink', label: '反向链接…', icon: Repeat2, onSelect: () => setBacklinkCardId(cardId) },
         { id: 'merge', label: '合并所选卡片…', icon: Merge, disabled: selectedIds.size < 2 || busy, onSelect: () => setMergeOpen(true) },
       ] },
       { id: 'appearance', title: '外观', items: [
@@ -1920,10 +1936,13 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
    * 节点 context 必须 memo：以前每次渲染都新建对象和内联回调，父组件任何状态
    * （提示条、busy、选中）变化都会让上千个挂载节点全部重渲染。
    */
+  const linkIndex = useMemo(() => buildLinkIndex(links), [links])
+
   const nodeContext = useMemo(() => ({
     busy,
     collapsedIds,
     childCounts,
+    inboundCounts: linkIndex.inboundCounts,
     lite,
     recallActive,
     revealedIds,
@@ -1942,7 +1961,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     onExplain: (id: string) => void explainCard(id),
     onCycleTone: cycleTone,
   }), [
-    busy, childCounts, collapsedIds, cycleTone, explainCard, lite, openSource, rateCard,
+    busy, childCounts, collapsedIds, cycleTone, explainCard, linkIndex, lite, openSource, rateCard,
     ratedIds, ratingPendingIds, recallActive, recallErrors, revealedIds, revealAnswer, toggleCard,
   ])
 
@@ -2381,6 +2400,26 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
           card={cardsById[tagTarget]}
           onClose={() => setTagTarget(null)}
           onSaved={() => { void syncCards() }}
+        />
+      )}
+
+      {backlinkCardId && cardsById[backlinkCardId] && (
+        <BacklinkDialog
+          card={cardsById[backlinkCardId]}
+          cards={Object.values(cardsById)}
+          onClose={() => setBacklinkCardId(null)}
+          onOpenCard={(id) => {
+            setBacklinkCardId(null)
+            const point = positions[id]
+            setSelectedIds(new Set([id]))
+            if (point) {
+              const width = compact ? COMPACT_NODE_WIDTH : NODE_WIDTH
+              void setCenter(point.x + width / 2, point.y + NODE_ESTIMATED_HEIGHT / 2, {
+                zoom: Math.max(1, getZoom()),
+                duration: 300,
+              })
+            }
+          }}
         />
       )}
 

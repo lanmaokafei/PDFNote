@@ -300,3 +300,126 @@
   opacity: .55;
   cursor: default;
 }
+
+/* ---------- AI 问答与出题（0.61.0） ---------- */
+
+.card-ai-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(40vh, 320px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  padding: 4px 2px;
+}
+
+.card-ai-message {
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.card-ai-message small {
+  display: block;
+  margin-bottom: 2px;
+  color: #9aa496;
+  font-size: 10px;
+}
+
+.card-ai-message p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.card-ai-message.is-user {
+  align-self: flex-end;
+  max-width: 86%;
+  background: #eef6ea;
+  color: #33503c;
+}
+
+.card-ai-message.is-ai {
+  align-self: flex-start;
+  max-width: 94%;
+  border: 1px solid #e6ece0;
+  background: #fbfdf8;
+  color: #3c4a3e;
+}
+
+.card-ai-input {
+  display: flex;
+  gap: 8px;
+}
+
+.card-ai-input input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #dbe4d6;
+  border-radius: 8px;
+  color: #33463a;
+  font-size: 12.5px;
+}
+
+.card-ai-input button,
+.card-dialog footer button {
+  padding: 7px 14px;
+  border: 1px solid #d7e0d2;
+  border-radius: 8px;
+  color: #3f5a44;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.card-ai-input button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.card-ai-drafts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(46vh, 380px);
+  overflow-y: auto;
+}
+
+.card-ai-draft {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e4eae0;
+  border-radius: 10px;
+  background: #fbfdf8;
+  cursor: pointer;
+}
+
+.card-ai-draft.is-selected {
+  border-color: #bdd6bb;
+  background: #f4faf1;
+}
+
+.card-ai-draft input {
+  margin-top: 2px;
+  accent-color: #6d9a76;
+}
+
+.card-ai-draft strong {
+  display: block;
+  margin-bottom: 3px;
+  color: #33463a;
+  font-size: 12.5px;
+}
+
+.card-ai-draft p {
+  margin: 0;
+  color: #6f7c70;
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}

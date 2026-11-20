@@ -498,6 +498,110 @@ pub async fn explain_card(state: &AppState, card_id: String) -> Result<String, S
     complete_text(state, &system, &user, 900).await
 }
 
+/// 基于一张卡片向模型提问，答案直接回显，不写回笔记。
+pub async fn ask_card(state: &AppState, card_id: String, question: String) -> Result<String, String> {
+    let question = question.trim().to_string();
+    if question.is_empty() {
+        return Err("问题不能为空".into());
+    }
+    let (title, excerpt, note): (String, String, String) = {
+        let connection = state.db()?;
+        connection
+            .query_row(
+                "SELECT question, excerpt, user_note FROM cards WHERE id = ?1",
+                rusqlite::params![card_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|error| format!("读取卡片失败: {error}"))?
+    };
+    if title.trim().is_empty() && excerpt.trim().is_empty() && note.trim().is_empty() {
+        return Err("这张卡片还没有内容，无法问答".into());
+    }
+    let system = "你是学习助手。只依据用户提供的卡片内容回答，用简体中文，简洁、分点，必要时给例子。卡片里没有的信息不要编造；不确定时直接说「卡片里没有提到」。不要输出 Markdown 标题符号或代码围栏。";
+    let user = format!(
+        "卡片标题：{}\n\n原文摘录：{}\n\n我的笔记：{}\n\n我的问题：{}",
+        if title.trim().is_empty() { "（无）" } else { title.trim() },
+        if excerpt.trim().is_empty() { "（无）" } else { excerpt.trim() },
+        if note.trim().is_empty() { "（无）" } else { note.trim() },
+        question,
+    );
+    complete_text(state, system, &user, 900).await
+}
+
+/// 容忍 ```json 围栏与前后寒暄，只取数组里的 question / answer。
+/// 单条缺字段就跳过——宁可少几道，也不往卡片库塞半截内容。
+pub fn parse_question_list(raw: &str, limit: usize) -> Vec<(String, String)> {
+    let trimmed = raw.trim();
+    let start = trimmed.find('[').unwrap_or(0);
+    let end = trimmed.rfind(']').map(|index| index + 1).unwrap_or(trimmed.len());
+    let slice = &trimmed[start.min(trimmed.len())..end.min(trimmed.len())];
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(slice) else {
+        return Vec::new();
+    };
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    let mut result = Vec::new();
+    for item in items {
+        let question = item
+            .get("question")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let answer = item
+            .get("answer")
+            .or_else(|| item.get("excerpt"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if question.is_empty() || answer.is_empty() {
+            continue;
+        }
+        result.push((question, answer));
+        if result.len() >= limit {
+            break;
+        }
+    }
+    result
+}
+
+pub async fn generate_questions(
+    state: &AppState,
+    card_id: String,
+    count: u32,
+) -> Result<Vec<(String, String)>, String> {
+    let count = count.clamp(1, 8);
+    let (title, excerpt, note): (String, String, String) = {
+        let connection = state.db()?;
+        connection
+            .query_row(
+                "SELECT question, excerpt, user_note FROM cards WHERE id = ?1",
+                rusqlite::params![card_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|error| format!("读取卡片失败: {error}"))?
+    };
+    if title.trim().is_empty() && excerpt.trim().is_empty() && note.trim().is_empty() {
+        return Err("这张卡片还没有内容，无法出题".into());
+    }
+    let system = "你是出题助手。根据给定材料出复习问答题，用简体中文，题目要能脱离原文独立理解，答案给要点而不是整段原文。只输出 JSON 数组，不要任何解释或代码围栏。数组元素格式：{\"question\":\"问题\",\"answer\":\"答案要点\"}。";
+    let user = format!(
+        "材料标题：{}\n\n原文：{}\n\n笔记：{}\n\n请出 {} 道题，覆盖不同角度（定义、机制、应用、易错点）。",
+        if title.trim().is_empty() { "（无）" } else { title.trim() },
+        if excerpt.trim().is_empty() { "（无）" } else { excerpt.trim() },
+        if note.trim().is_empty() { "（无）" } else { note.trim() },
+        count,
+    );
+    let raw = complete_text(state, system, &user, 1200).await?;
+    let items = parse_question_list(&raw, count as usize);
+    if items.is_empty() {
+        return Err("模型没有返回可用的题目，请重试或换一张卡片".into());
+    }
+    Ok(items)
+}
+
 /// 纯文本补全（拆书用）：只发 system + user 文本，不携带图片。
 ///
 /// 与 `recognize_selection` 共用同一套配置、超时、504 任务轮询与围栏清理。
@@ -1341,6 +1445,22 @@ mod tests {
         assert_eq!(requests.len(), 2);
         assert!(requests[1].starts_with("GET /v1/tasks/20261103-3158"), "unexpected poll: {}", requests[1]);
         let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn parses_question_list_with_fences_and_noise() {
+        let raw = "好的，下面是题目：\n```json\n[{\"question\":\"熵是什么？\",\"answer\":\"不确定性的度量\"},{\"question\":\"\",\"answer\":\"跳过\"},{\"question\":\"单位？\",\"answer\":\"bit\"}]\n```\n希望有帮助。";
+        let items = parse_question_list(raw, 5);
+        assert_eq!(items.len(), 2, "空问题应被跳过");
+        assert_eq!(items[0].0, "熵是什么？");
+        assert_eq!(items[1].1, "bit");
+    }
+
+    #[test]
+    fn parses_question_list_rejects_garbage_and_respects_limit() {
+        assert!(parse_question_list("模型抽风了", 5).is_empty());
+        let raw = r#"[{"question":"a","answer":"1"},{"question":"b","answer":"2"}]"#;
+        assert_eq!(parse_question_list(raw, 1).len(), 1);
     }
 
     #[test]

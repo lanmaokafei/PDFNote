@@ -52,6 +52,7 @@ import {
 } from '../../services/pdfnote'
 import {
   BookOpen,
+  GalleryVerticalEnd,
   Highlighter,
   Link2,
   Merge,
@@ -106,6 +107,7 @@ import { parseTocText } from './tocText'
 import { ocrLinesToText, renderPageImage } from './tocOcr'
 import { findHits, type SearchHit, type SearchLine, type SearchProgress } from './pageSearch'
 import { indexDocument } from './pageIndex'
+import { PageThumbnails } from './PageThumbnails'
 import { useNoteLayout } from './noteLayout'
 import { pushUndo } from '../undo/undoStack'
 import {
@@ -258,6 +260,7 @@ export function PdfWorkspace({
   const [tocOcrPage, setTocOcrPage] = useState(1)
   const [tocOcrBusy, setTocOcrBusy] = useState(false)
   // 全书搜索：索引懒建一次，查询在内存索引上跑。
+  const [thumbsOpen, setThumbsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchHits, setSearchHits] = useState<SearchHit[]>([])
@@ -2050,6 +2053,18 @@ export function PdfWorkspace({
   return (
     <div className={`pdf-workspace${embedded ? ' is-embedded' : ''}`}>
 
+      {thumbsOpen && (
+        <PageThumbnails
+          pdf={pdf}
+          pageCount={pageCount}
+          currentPage={currentPage}
+          onSelect={(page) => {
+            goToPageRef.current(page)
+          }}
+          onClose={() => setThumbsOpen(false)}
+        />
+      )}
+
       {searchOpen && (
         <div className="pdf-search" data-testid="pdf-search">
           <div className="pdf-search-bar">
@@ -2458,6 +2473,7 @@ export function PdfWorkspace({
             )}
             <button type="button" className={recallMode ? 'is-active' : ''} onClick={toggleRecall} disabled={!pdf} aria-pressed={recallMode} title="文档遮挡回忆"><MessageSquare size={17} /><span>{recallMode ? '退出' : '对话'}</span></button>
             <button type="button" onClick={() => { if (selectedAnnotation) setDeleteTarget(selectedAnnotation) }} disabled={!selectedAnnotation} title="删除选中的标注"><Trash2 size={17} /><span>删除</span></button>
+            <button type="button" className={thumbsOpen ? 'is-active' : ''} data-testid="pdf-thumbs-open" onClick={() => setThumbsOpen((open) => !open)} disabled={!pdf} aria-pressed={thumbsOpen} title="页面缩略图侧栏"><GalleryVerticalEnd size={17} /><span>缩略图</span></button>
             <button type="button" data-testid="pdf-search-open" onClick={openSearch} disabled={!pdf} title="全书搜索（⌘⇧F）"><Search size={17} /><span>搜索</span></button>
             <button type="button" className={dockMenuOpen ? 'is-active' : ''} onClick={() => setDockMenuOpen((open) => !open)} aria-expanded={dockMenuOpen} title="更多：缩放与跳页"><MoreHorizontal size={17} /><span>更多</span></button>
           </div>

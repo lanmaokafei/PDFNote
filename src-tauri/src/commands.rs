@@ -35,6 +35,36 @@ pub async fn recognize_selection(
 }
 
 /// 用模型解析卡片问题，返回纯文本解释（由前端决定写回笔记）。
+/// AI 出题返回的草稿：前端确认后再决定建不建卡。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionDraft {
+    pub question: String,
+    pub answer: String,
+}
+
+#[tauri::command]
+pub async fn ask_card(
+    state: State<'_, AppState>,
+    card_id: String,
+    question: String,
+) -> Result<String, String> {
+    ai::ask_card(&state, card_id, question).await
+}
+
+#[tauri::command]
+pub async fn generate_card_questions(
+    state: State<'_, AppState>,
+    card_id: String,
+    count: Option<u32>,
+) -> Result<Vec<QuestionDraft>, String> {
+    let items = ai::generate_questions(&state, card_id, count.unwrap_or(4)).await?;
+    Ok(items
+        .into_iter()
+        .map(|(question, answer)| QuestionDraft { question, answer })
+        .collect())
+}
+
 #[tauri::command]
 pub async fn explain_card(state: State<'_, AppState>, card_id: String) -> Result<String, String> {
     ai::explain_card(&state, card_id).await

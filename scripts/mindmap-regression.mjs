@@ -812,6 +812,11 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     },
     get_ai_settings: () => ({ baseUrl: '', model: '', apiKey: '' }),
     explain_card: () => explainText,
+    ask_card: (args) => `你问的是「${args?.question ?? ''}」：卡片里说熵度量不确定性。`,
+    generate_card_questions: () => ([
+      { question: '熵的物理意义是什么？', answer: '系统不确定性的度量。' },
+      { question: '熵的单位是什么？', answer: 'bit（或 nat）。' },
+    ]),
     update_card_content: (args) => {
       const input = args?.input ?? args ?? {}
       const index = cardState.findIndex((item) => item.id === input.id)
@@ -2783,6 +2788,95 @@ if (process.env.STEP === 'backlinks') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=thumbnails：缩略图侧栏、当前页高亮、点缩略图跳页。
+if (process.env.STEP === 'thumbnails') {
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+
+  await page.locator('[data-testid="pdf-thumbs-open"]').click()
+  await page.waitForSelector('[data-testid="pdf-thumbs"]', { timeout: 5000 })
+  await page.waitForTimeout(1200)
+  const opened = await page.evaluate(() => {
+    const pill = document.querySelector('.pdf-page-pill span')?.textContent ?? ''
+    const total = Number(pill.match(/\/\s*(\d+)/u)?.[1] ?? 0)
+    return {
+      total,
+      thumbs: document.querySelectorAll('[data-testid="pdf-thumb"]').length,
+      images: document.querySelectorAll('.pdf-thumb img').length,
+      active: document.querySelector('.pdf-thumb.is-active')?.getAttribute('data-thumb-page') ?? '',
+    }
+  })
+  if (opened.thumbs !== opened.total) problems.push(`缩略图数量应与页数一致：${opened.thumbs}/${opened.total}`)
+  if (opened.images < 1) problems.push(`缩略图没有渲染出来：${opened.images}`)
+  if (opened.active !== '1') problems.push(`初始当前页高亮不对：${opened.active}`)
+
+  // mini.pdf 只有一页时无法测跳页，改成点当前页仍保持在第一页。
+  const target = opened.total >= 2 ? 2 : 1
+  await page.locator(`[data-thumb-page="${target}"]`).click()
+  await page.waitForTimeout(900)
+  const jumped = await page.evaluate(() => ({
+    active: document.querySelector('.pdf-thumb.is-active')?.getAttribute('data-thumb-page') ?? '',
+    pill: document.querySelector('.pdf-page-pill span')?.textContent ?? '',
+  }))
+  if (jumped.active !== String(target)) problems.push(`点击缩略图后高亮不对：${jumped.active}`)
+  if (!jumped.pill.includes(`第 ${target}`)) problems.push(`点击缩略图没有跳页：${jumped.pill}`)
+
+  if (process.env.SHOT) await page.screenshot({ path: '/tmp/pdf-thumbs.png' })
+  await page.locator('[data-testid="pdf-thumbs-close"]').click()
+  await page.waitForTimeout(300)
+  if (await page.locator('[data-testid="pdf-thumbs"]').count() !== 0) problems.push('缩略图侧栏没有关闭')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'thumbnails', opened, jumped }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=ai-dialogs：AI 问答面板 + 出题建卡。
+if (process.env.STEP === 'ai-dialogs') {
+  await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(700)
+  const node = page.locator('.mindmap-node').first()
+
+  await node.click({ button: 'right' })
+  await page.waitForSelector('.context-menu', { timeout: 5000 })
+  await page.locator('.context-menu-item', { hasText: 'AI 问答' }).first().click()
+  await page.waitForSelector('[data-testid="ai-ask-input"]', { timeout: 5000 })
+  await page.locator('[data-testid="ai-ask-input"]').fill('熵和能量有什么区别？')
+  await page.locator('[data-testid="ai-ask-submit"]').click()
+  await page.waitForTimeout(600)
+  const asked = await page.evaluate(() => ({
+    user: document.querySelector('[data-testid="ai-ask-user"]')?.textContent ?? '',
+    ai: document.querySelector('[data-testid="ai-ask-ai"]')?.textContent ?? '',
+  }))
+  if (!asked.user.includes('熵和能量')) problems.push('问答没有显示我的问题')
+  if (!asked.ai.includes('不确定性')) problems.push(`问答没有显示答案：${asked.ai}`)
+  if (process.env.SHOT) await page.screenshot({ path: '/tmp/ai-ask.png' })
+  await page.locator('.card-dialog footer button').click()
+  await page.waitForTimeout(300)
+  const before = await page.evaluate(() => window.__cardState.length)
+  await node.click({ button: 'right' })
+  await page.waitForSelector('.context-menu', { timeout: 5000 })
+  await page.locator('.context-menu-item', { hasText: 'AI 出题' }).first().click()
+  await page.waitForSelector('[data-testid="ai-generate-list"]', { timeout: 8000 })
+  const drafts = await page.locator('.card-ai-draft').count()
+  if (drafts !== 2) problems.push(`出题草稿数量不对：${drafts}`)
+  if (process.env.SHOT) await page.screenshot({ path: '/tmp/ai-generate.png' })
+  await page.locator('[data-testid="ai-generate-create"]').click()
+  await page.waitForTimeout(1200)
+  const created = await page.evaluate(() => ({
+    count: window.__cardState.length,
+    first: window.__cardState.find((card) => card.question === '熵的物理意义是什么？') ?? null,
+  }))
+  if (created.count !== before + 2) problems.push(`出题没有建卡：${before} → ${created.count}`)
+  if (!created.first) problems.push('出题卡片内容没有写回')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'ai-dialogs', asked, drafts, before, created }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // STEP=pdf-search：全书搜索、命中高亮、键盘跳下一处。
 if (process.env.STEP === 'pdf-search') {
   await page.locator('.document-card').first().click()
@@ -2967,6 +3061,18 @@ if (process.env.STEP === 'undo-create') {
   await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()
   await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
   await page.waitForTimeout(600)
+  if (process.env.SHOT) {
+    await page.screenshot({ path: '/tmp/ai-ask.png' })
+    console.log(JSON.stringify(await page.evaluate(() => {
+      const pick = (sel) => {
+        const el = document.querySelector(sel)
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        return { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) }
+      }
+      return { dialog: pick('.card-dialog'), thread: pick('[data-testid="ai-ask-thread"]'), ai: pick('[data-testid="ai-ask-ai"]') }
+    })))
+  }
   const before = await page.evaluate(() => window.__cardState.length)
 
   await page.getByRole('button', { name: '＋ 新建卡片' }).first().click()
@@ -3018,6 +3124,18 @@ if (process.env.STEP === 'trash') {
   await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()
   await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
   await page.waitForTimeout(400)
+  if (process.env.SHOT) {
+    await page.screenshot({ path: '/tmp/ai-ask.png' })
+    console.log(JSON.stringify(await page.evaluate(() => {
+      const pick = (sel) => {
+        const el = document.querySelector(sel)
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        return { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) }
+      }
+      return { dialog: pick('.card-dialog'), thread: pick('[data-testid="ai-ask-thread"]'), ai: pick('[data-testid="ai-ask-ai"]') }
+    })))
+  }
   const before = await page.evaluate(() => window.__cardState.length)
 
   await deleteFirstCard()

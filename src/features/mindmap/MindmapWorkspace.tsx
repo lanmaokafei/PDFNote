@@ -17,7 +17,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { save as saveDialog } from '@tauri-apps/plugin-dialog'
-import { explainCardQuestion } from '../../services/ai'
+import { explainCardQuestion, type QuestionDraft } from '../../services/ai'
 import {
   ChevronRight,
   Copy,
@@ -27,8 +27,10 @@ import {
   Focus,
   LayoutGrid,
   Link2,
+  ListPlus,
   ListTree,
   Maximize,
+  MessageCircleQuestion,
   Merge,
   Palette,
   Pencil,
@@ -70,8 +72,9 @@ import {
   type ClearCardsMode,
   type ConfirmationKind,
 } from './CardEditor'
-import { BacklinkDialog, LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
+import { AiAskDialog, AiGenerateDialog, BacklinkDialog, LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { buildLinkIndex } from '../card/backlinks'
+import { mergeAiAnalysis } from '../card/aiNote'
 import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
 import { InkEdge } from './MindmapEdge'
@@ -333,6 +336,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   const [tagTarget, setTagTarget] = useState<string | null>(null)
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   const [backlinkCardId, setBacklinkCardId] = useState<string | null>(null)
+  const [askCardId, setAskCardId] = useState<string | null>(null)
+  const [generateCardId, setGenerateCardId] = useState<string | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
   const { menu, show, close } = useContextMenu()
@@ -482,9 +487,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     setNotice('')
     try {
       const explanation = (await explainCardQuestion(cardId)).trim()
-      const merged = [card.user_note.trim(), `【AI 解析】\n${explanation}`]
-        .filter(Boolean)
-        .join('\n\n')
+      // 重复解析时整段替换，不再叠出多段「【AI 解析】」。
+      const merged = mergeAiAnalysis(card.user_note, explanation)
       await updateCardContent({
         id: cardId,
         question: card.question,
@@ -1864,6 +1868,32 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     if (navigator.clipboard) void navigator.clipboard.writeText(text).catch(() => undefined)
   }
 
+  /** 问题 / 摘录 / 笔记任一非空就能喂给 AI（PDF 划重点的卡没有 question）。 */
+  const hasAiContent = useCallback((cardId: string) => {
+    const card = cardsById[cardId]
+    if (!card) return false
+    return Boolean(card.question.trim() || card.excerpt.trim() || card.user_note.trim())
+  }, [cardsById])
+
+  /** 把 AI 出的题建成当前卡的子节点；落点沿用「视口中心 + 环形错开」。 */
+  const createCardsFromDrafts = useCallback(async (cardId: string, drafts: QuestionDraft[]) => {
+    const base = positions[cardId] ?? readMindmapViewportCenter() ?? { x: 80, y: 80 }
+    for (const [index, draft] of drafts.entries()) {
+      const point = nextMindmapInsertPoint() ?? { x: base.x + 320, y: base.y + index * 170 }
+      await createCardInStore({
+        question: draft.question,
+        excerpt: draft.answer,
+        parent_id: cardId,
+        sort_order: nextSortOrder(cards, cardId),
+        canvas_id: canvasId,
+        x: point.x,
+        y: point.y,
+      })
+    }
+    await refresh()
+    setNotice(`AI 出题：已创建 ${drafts.length} 张卡片（⌘Z 可撤销）。`)
+  }, [canvasId, cards, createCardInStore, positions, refresh])
+
   /** 节点与大纲行共用一套卡片操作，仅折叠行为与视图项不同。 */
   const cardMenuSections = (
     cardId: string,
@@ -1875,7 +1905,9 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
         { id: 'edit', label: '编辑卡片', icon: Pencil, disabled: busy, onSelect: () => setEditor(cardId) },
         { id: 'copy', label: '复制卡片标题', icon: Copy, onSelect: () => copyToClipboard(title) },
         { id: 'toggle', label: options.toggleLabel, icon: ChevronRight, disabled: !options.canToggle || busy, onSelect: options.onToggle },
-        { id: 'explain', label: 'AI 解析这个问题', icon: Sparkles, disabled: busy || !cardsById[cardId]?.question.trim(), onSelect: () => void explainCard(cardId) },
+        { id: 'explain', label: 'AI 解析这张卡', icon: Sparkles, disabled: busy || !hasAiContent(cardId), onSelect: () => void explainCard(cardId) },
+        { id: 'ask', label: 'AI 问答…', icon: MessageCircleQuestion, disabled: busy || !hasAiContent(cardId), onSelect: () => setAskCardId(cardId) },
+        { id: 'generate', label: 'AI 出题…', icon: ListPlus, disabled: busy || !hasAiContent(cardId), onSelect: () => setGenerateCardId(cardId) },
       ] },
       { id: 'relations', title: '卡片关系', items: [
         { id: 'tags', label: '编辑标签…', icon: Tag, onSelect: () => setTagTarget(cardId) },
@@ -2479,6 +2511,18 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
           card={cardsById[tagTarget]}
           onClose={() => setTagTarget(null)}
           onSaved={() => { void syncCards() }}
+        />
+      )}
+
+      {askCardId && cardsById[askCardId] && (
+        <AiAskDialog card={cardsById[askCardId]} onClose={() => setAskCardId(null)} />
+      )}
+
+      {generateCardId && cardsById[generateCardId] && (
+        <AiGenerateDialog
+          card={cardsById[generateCardId]}
+          onClose={() => setGenerateCardId(null)}
+          onCreate={(drafts) => createCardsFromDrafts(generateCardId, drafts)}
         />
       )}
 

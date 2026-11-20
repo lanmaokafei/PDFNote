@@ -1,5 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Card, CardLink } from '../../domain/card'
+import {
+  askCard,
+  generateCardQuestions,
+  type QuestionDraft,
+} from '../../services/ai'
 import {
   createCardLink,
   deleteCardLink,
@@ -433,6 +438,174 @@ export function MergeDialog({ cards, initialSelection = [], onClose, onMerged }:
         })}
         {filtered.length === 0 && <span className="card-dialog-empty">没有匹配的卡片。</span>}
       </div>
+    </DialogShell>
+  )
+}
+
+
+interface AiAskDialogProps {
+  card: Card
+  onClose: () => void
+}
+
+/** 围绕一张卡片问答：答案只显示在面板里，不写回笔记。 */
+export function AiAskDialog({ card, onClose }: AiAskDialogProps) {
+  const [question, setQuestion] = useState('')
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'ai'; text: string }>>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit() {
+    const text = question.trim()
+    if (!text || busy) return
+    setBusy(true)
+    setError('')
+    setMessages((current) => [...current, { role: 'user', text }])
+    setQuestion('')
+    try {
+      const answer = (await askCard(card.id, text)).trim()
+      setMessages((current) => [...current, { role: 'ai', text: answer || '（模型没有返回内容）' }])
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <DialogShell
+      eyebrow="AI ASK"
+      title="围绕这张卡提问"
+      description={cardTitle(card)}
+      onClose={onClose}
+      wide
+      footer={<button type="button" onClick={onClose}>关闭</button>}
+    >
+      <div className="card-ai-thread" data-testid="ai-ask-thread">
+        {messages.length === 0 && (
+          <span className="card-dialog-empty">答案只依据卡片内容，不会写回笔记。试试问「为什么」「举个例子」「和 X 有什么区别」。</span>
+        )}
+        {messages.map((message, index) => (
+          <div key={index} className={`card-ai-message is-${message.role}`} data-testid={`ai-ask-${message.role}`}>
+            <small>{message.role === 'user' ? '我' : 'AI'}</small>
+            <p>{message.text}</p>
+          </div>
+        ))}
+      </div>
+      {error && <p className="card-dialog-error">{error}</p>}
+      <div className="card-ai-input">
+        <input
+          data-testid="ai-ask-input"
+          value={question}
+          placeholder="问点什么，例如：这个结论的推导前提是什么？"
+          onChange={(event) => setQuestion(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              void submit()
+            }
+          }}
+          disabled={busy}
+        />
+        <button type="button" data-testid="ai-ask-submit" onClick={() => void submit()} disabled={busy || !question.trim()}>
+          {busy ? '思考中…' : '提问'}
+        </button>
+      </div>
+    </DialogShell>
+  )
+}
+
+interface AiGenerateDialogProps {
+  card: Card
+  onClose: () => void
+  /** 用户勾选后创建；调用方负责真正建卡。 */
+  onCreate: (drafts: QuestionDraft[]) => Promise<void>
+}
+
+/** AI 出题：先出草稿，用户勾选确认后才建卡。 */
+export function AiGenerateDialog({ card, onClose, onCreate }: AiGenerateDialogProps) {
+  const [drafts, setDrafts] = useState<QuestionDraft[] | null>(null)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    setBusy(true)
+    setError('')
+    setDrafts(null)
+    try {
+      const items = await generateCardQuestions(card.id, 4)
+      setDrafts(items)
+      setSelected(new Set(items.map((_, index) => index)))
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setBusy(false)
+    }
+  }, [card.id])
+
+  useEffect(() => {
+    void load()
+    // 只在打开时出一次题；换卡片由外层重建组件。
+  }, [load])
+
+  async function create() {
+    if (!drafts || busy) return
+    const picked = drafts.filter((_, index) => selected.has(index))
+    if (picked.length === 0) return
+    setBusy(true)
+    setError('')
+    try {
+      await onCreate(picked)
+      onClose()
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <DialogShell
+      eyebrow="AI QUESTIONS"
+      title="让 AI 出几道题"
+      description={cardTitle(card)}
+      onClose={onClose}
+      wide
+      footer={(
+        <>
+          <button type="button" onClick={() => void load()} disabled={busy}>重新出题</button>
+          <button type="button" onClick={() => void create()} disabled={busy || selected.size === 0} data-testid="ai-generate-create">
+            {busy ? '处理中…' : `创建 ${selected.size} 张卡`}
+          </button>
+        </>
+      )}
+    >
+      {busy && <span className="card-dialog-empty">正在出题…</span>}
+      {error && <p className="card-dialog-error">{error}</p>}
+      {drafts && drafts.length === 0 && <span className="card-dialog-empty">没有生成可用的题目。</span>}
+      {drafts && drafts.length > 0 && (
+        <div className="card-ai-drafts" data-testid="ai-generate-list">
+          {drafts.map((draft, index) => (
+            <label key={index} className={`card-ai-draft${selected.has(index) ? ' is-selected' : ''}`}>
+              <input
+                type="checkbox"
+                checked={selected.has(index)}
+                onChange={() => {
+                  const next = new Set(selected)
+                  if (next.has(index)) next.delete(index)
+                  else next.add(index)
+                  setSelected(next)
+                }}
+              />
+              <div>
+                <strong>{draft.question}</strong>
+                <p>{draft.answer}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+      )}
     </DialogShell>
   )
 }

@@ -72,3 +72,21 @@ export async function explainCardQuestion(cardId: string): Promise<string> {
   desktopOnly()
   return invoke('explain_card', { cardId })
 }
+
+
+/** 基于卡片内容提问，返回答案文本（不写回笔记）。 */
+export async function askCard(cardId: string, question: string): Promise<string> {
+  desktopOnly()
+  return invoke('ask_card', { cardId, question })
+}
+
+export interface QuestionDraft {
+  question: string
+  answer: string
+}
+
+/** 让模型围绕卡片出题；返回草稿，由用户决定建不建卡。 */
+export async function generateCardQuestions(cardId: string, count = 4): Promise<QuestionDraft[]> {
+  desktopOnly()
+  return invoke('generate_card_questions', { cardId, count })
+}

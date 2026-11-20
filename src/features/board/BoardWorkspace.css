@@ -701,3 +701,38 @@
   opacity: .5;
   cursor: default;
 }
+
+/* ---------- 卡片盒编辑（0.60.0） ---------- */
+
+.board-card header h4 {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.board-card-edit {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #98a394;
+  background: transparent;
+  opacity: 0;
+  transition: opacity .12s ease;
+  cursor: pointer;
+}
+
+.board-card:hover .board-card-edit,
+.board-card:focus-within .board-card-edit {
+  opacity: 1;
+}
+
+.board-card-edit:hover {
+  border-color: #dbe4d6;
+  color: #4f6353;
+  background: #f5f9f2;
+}

@@ -2635,6 +2635,102 @@ if (process.env.STEP === 'toc-ocr') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=board-edit：卡片盒内编辑内容 + 排序规则记忆。
+if (process.env.STEP === 'board-edit') {
+  await page.locator('.app-segment').filter({ hasText: '卡片盒' }).first().click()
+  await page.waitForSelector('.board-card', { timeout: 15000 })
+  await page.waitForTimeout(500)
+
+  await page.locator('.board-card').first().hover()
+  await page.locator('[data-testid="board-card-edit"]').first().click()
+  await page.waitForSelector('.mindmap-editor', { timeout: 5000 })
+  await page.locator('.mindmap-editor textarea').first().fill('卡片盒里改过的标题')
+  await page.getByRole('button', { name: '保存修改' }).click()
+  await page.waitForTimeout(900)
+  const edited = await page.evaluate(() => ({
+    has: window.__cardState.some((card) => card.question === '卡片盒里改过的标题'),
+    editorClosed: document.querySelectorAll('.mindmap-editor').length,
+  }))
+  if (!edited.has) problems.push('卡片盒编辑没有写回后端')
+  if (edited.editorClosed !== 0) problems.push('保存后编辑器没有关闭')
+
+  await page.locator('[data-testid="board-sort"]').selectOption('title')
+  await page.waitForTimeout(400)
+  const sorted = await page.evaluate(() => ({
+    stored: localStorage.getItem('pdfnote.board.sort'),
+    first: document.querySelector('.board-card h4')?.textContent ?? '',
+  }))
+  if (sorted.stored !== 'title') problems.push(`排序偏好没有记住：${sorted.stored}`)
+  if (!edited.has) problems.push('排序后卡片丢失')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'board-edit', edited, sorted }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=outline-batch：多选 + 批量缩进 / 提升。
+if (process.env.STEP === 'outline-batch') {
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1000)
+  await page.getByRole('button', { name: /大纲/ }).first().click()
+  await page.waitForSelector('.mindmap-outline-row', { timeout: 15000 })
+  await page.waitForTimeout(400)
+
+  const boxes = page.locator('[data-testid="outline-select"]')
+  await boxes.nth(1).click()
+  await boxes.nth(2).click({ modifiers: ['Shift'] })
+  await page.waitForTimeout(300)
+  const batchBar = await page.locator('[data-testid="outline-batch"]').innerText()
+  if (!batchBar.includes('2')) problems.push(`批量工具条计数不对：${batchBar}`)
+
+  await page.locator('[data-testid="outline-batch-indent"]').click()
+  await page.waitForTimeout(900)
+  const indented = await page.evaluate(() => window.__cardState
+    .filter((card) => ['c2', 'c3'].includes(card.id))
+    .map((card) => card.parent_id))
+  if (indented.some((parent) => !parent)) problems.push(`批量缩进失败：${JSON.stringify(indented)}`)
+
+  await page.locator('[data-testid="outline-batch-outdent"]').click()
+  await page.waitForTimeout(900)
+  const outdented = await page.evaluate(() => window.__cardState
+    .filter((card) => ['c2', 'c3'].includes(card.id))
+    .map((card) => card.parent_id))
+  if (outdented.some((parent) => parent)) problems.push(`批量提升失败：${JSON.stringify(outdented)}`)
+
+  await page.locator('[data-testid="outline-batch"] button', { hasText: '取消选择' }).click()
+  await page.waitForTimeout(300)
+  if (await page.locator('[data-testid="outline-batch"]').count() !== 0) problems.push('取消选择后工具条仍在')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'outline-batch', batchBar, indented, outdented }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=outline-load：超过 200 行时滚动自动追加。
+if (process.env.STEP === 'outline-load') {
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(800)
+  await page.getByRole('button', { name: /大纲/ }).first().click()
+  await page.waitForSelector('.mindmap-outline-row', { timeout: 20000 })
+  await page.waitForTimeout(600)
+  const first = await page.locator('.mindmap-outline-row').count()
+  if (first !== 200) problems.push(`首屏应挂 200 行：${first}`)
+
+  await page.evaluate(() => {
+    const list = document.querySelector('.mindmap-outline-list')
+    if (list) list.scrollTop = list.scrollHeight
+  })
+  await page.waitForTimeout(900)
+  const after = await page.locator('.mindmap-outline-row').count()
+  if (after <= 200) problems.push(`滚到底部没有自动加载：${after}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'outline-load', first, after }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // STEP=backlinks：入链角标、反向链接面板、取消链接后角标消失。
 if (process.env.STEP === 'backlinks') {
   await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()

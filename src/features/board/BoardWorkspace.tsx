@@ -10,6 +10,7 @@ import {
   listTags,
   deleteTag,
   renameTag,
+  updateCardContent,
   type TagStat,
   listTrashedCards,
   purgeExpiredTrash,
@@ -19,17 +20,21 @@ import {
   type TrashedCard,
 } from '../../services/pdfnote'
 import {
+  BOARD_SORTS,
   EMPTY_FILTERS,
   cardTitle,
   filterCards,
   formatDue,
   groupCards,
   stateBucket,
+  sortColumns,
   tagsAfterDrop,
+  type BoardSort,
   type BoardFilters,
   type GroupMode,
   type SubMode,
 } from './board'
+import { CardEditor, type CardDraft } from '../mindmap/CardEditor'
 import './BoardWorkspace.css'
 
 interface BoardWorkspaceProps {
@@ -79,6 +84,17 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
   const [tagEditing, setTagEditing] = useState<string | null>(null)
   const [tagDraft, setTagDraft] = useState('')
   const [tagBusy, setTagBusy] = useState(false)
+  // 编辑与排序：卡片盒不再只是只读投影。
+  const [editingCard, setEditingCard] = useState<Card | null>(null)
+  const [savingCard, setSavingCard] = useState(false)
+  const [sort, setSort] = useState<BoardSort>(() => {
+    try {
+      const saved = window.localStorage.getItem('pdfnote.board.sort')
+      return saved === 'updated' || saved === 'due' || saved === 'title' ? saved : 'manual'
+    } catch {
+      return 'manual'
+    }
+  })
   const [documents, setDocuments] = useState<Document[]>([])
   const [tags, setTags] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -269,13 +285,16 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
 
   const filtered = useMemo(() => filterCards(cards, filters, now), [cards, filters, now])
   const columns = useMemo(
-    () => groupCards(filtered, {
-      mode: groupMode,
-      subMode,
-      documents,
-      tags: groupMode === 'tag' ? allTags : [],
-    }),
-    [allTags, documents, filtered, groupMode, subMode],
+    () => sortColumns(
+      groupCards(filtered, {
+        mode: groupMode,
+        subMode,
+        documents,
+        tags: groupMode === 'tag' ? allTags : [],
+      }),
+      sort,
+    ),
+    [allTags, documents, filtered, groupMode, sort, subMode],
   )
 
   const stats = useMemo(() => {
@@ -293,6 +312,30 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
       window.localStorage.setItem(GROUP_KEY, next)
     } catch {
       /* 存不下不影响使用 */
+    }
+  }
+
+  async function saveCardContent(draft: CardDraft): Promise<boolean> {
+    if (!editingCard || savingCard) return false
+    setSavingCard(true)
+    try {
+      const updated = await updateCardContent({
+        id: editingCard.id,
+        question: draft.question,
+        excerpt: draft.excerpt,
+        user_note: draft.user_note,
+        link_aliases: draft.link_aliases,
+      })
+      setCards((current) => current.map((item) => (item.id === updated.id ? updated : item)))
+      setEditingCard(null)
+      setNotice('卡片内容已保存')
+      onCardsChanged()
+      return true
+    } catch (reason) {
+      setError(`保存失败：${errorMessage(reason)}`)
+      return false
+    } finally {
+      setSavingCard(false)
     }
   }
 
@@ -415,6 +458,28 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
             <option value="none">不分</option>
             <option value="tag">标签</option>
             <option value="document">书目</option>
+          </select>
+        </label>
+
+        <label className="board-select">
+          <span>排序</span>
+          <select
+            value={sort}
+            data-testid="board-sort"
+            aria-label="卡片排序"
+            onChange={(event) => {
+              const next = event.target.value as BoardSort
+              setSort(next)
+              try {
+                window.localStorage.setItem('pdfnote.board.sort', next)
+              } catch {
+                /* 存不下不影响使用 */
+              }
+            }}
+          >
+            {BOARD_SORTS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
           </select>
         </label>
 
@@ -563,6 +628,10 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
                     setDropTarget(null)
                   }}
                   onClick={() => openCard(card)}
+                  onDoubleClick={(event) => {
+                    event.preventDefault()
+                    setEditingCard(card)
+                  }}
                   onKeyDown={(event) => {
                     if (event.key !== 'Enter' && event.key !== ' ') return
                     event.preventDefault()
@@ -572,6 +641,19 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
                   <header>
                     <span className={`board-state is-${stateBucket(card.review_state)}`} aria-hidden="true" />
                     <h4>{title}</h4>
+                    <button
+                      type="button"
+                      className="board-card-edit"
+                      data-testid="board-card-edit"
+                      title="编辑卡片内容"
+                      aria-label={`编辑 ${title}`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setEditingCard(card)
+                      }}
+                    >
+                      <Pencil size={12} strokeWidth={1.9} />
+                    </button>
                   </header>
                   {excerpt && excerpt !== title && <p className="board-card-excerpt">{excerpt}</p>}
                   <div className="board-card-meta">
@@ -700,6 +782,15 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
             </footer>
           </section>
         </div>
+      )}
+
+      {editingCard && (
+        <CardEditor
+          card={editingCard}
+          busy={savingCard}
+          onClose={() => setEditingCard(null)}
+          onSave={saveCardContent}
+        />
       )}
 
       {tagManagerOpen && (

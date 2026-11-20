@@ -163,3 +163,98 @@ export function insertChildPlan(cards: readonly Card[], cardId: string, newId: s
   plan.setSiblings(cardId, [...childrenOf(cards, cardId).map((item) => item.id), newId])
   return plan.result()
 }
+
+
+export type BatchOutlineAction = 'up' | 'down' | 'indent' | 'outdent'
+
+function cloneCards(cards: readonly Card[]): Card[] {
+  return cards.map((card) => ({ ...card }))
+}
+
+function applyUpdates(cards: Card[], updates: readonly CardOrderUpdate[]): Card[] {
+  const map = new Map(updates.map((update) => [update.id, update]))
+  return cards.map((card) => {
+    const update = map.get(card.id)
+    return update ? { ...card, parent_id: update.parent_id, sort_order: update.sort_order } : card
+  })
+}
+
+/** 只输出 parent_id / sort_order 真正变化的行。 */
+function diffOrder(before: readonly Card[], after: readonly Card[]): CardOrderUpdate[] {
+  const original = new Map(before.map((card) => [card.id, card]))
+  const updates: CardOrderUpdate[] = []
+  for (const card of after) {
+    const previous = original.get(card.id)
+    if (!previous) continue
+    if ((previous.parent_id ?? null) !== (card.parent_id ?? null) || previous.sort_order !== card.sort_order) {
+      updates.push({ id: card.id, parent_id: card.parent_id, sort_order: card.sort_order })
+    }
+  }
+  return updates
+}
+
+/**
+ * 同父节点的整块上下移动：选中的卡片作为一个整体跨过相邻的一张。
+ * 跨父节点的混选按各自的兄弟列表分别移动。
+ */
+export function batchShiftPlan(
+  cards: readonly Card[],
+  ids: readonly string[],
+  direction: -1 | 1,
+): CardOrderUpdate[] | null {
+  let working = cloneCards(cards)
+  const groups = new Map<string | null, string[]>()
+  for (const id of ids) {
+    const card = working.find((item) => item.id === id)
+    if (!card) continue
+    const key = card.parent_id ?? null
+    groups.set(key, [...(groups.get(key) ?? []), id])
+  }
+  let changed = false
+  for (const [parentId, group] of groups) {
+    const siblings = childrenOf(working, parentId).map((card) => card.id)
+    const selected = new Set(group)
+    const positions = siblings.map((id, index) => (selected.has(id) ? index : -1)).filter((index) => index >= 0)
+    if (positions.length === 0) continue
+    const atEdge = direction < 0
+      ? positions[0] === 0
+      : positions[positions.length - 1] === siblings.length - 1
+    if (atEdge) continue
+    const block = siblings.filter((id) => selected.has(id))
+    const rest = siblings.filter((id) => !selected.has(id))
+    const insertAt = direction < 0 ? positions[0] - 1 : positions[0] + 1
+    rest.splice(Math.max(0, Math.min(rest.length, insertAt)), 0, ...block)
+    const order = new Map(rest.map((id, index) => [id, index]))
+    working = working.map((card) => (
+      order.has(card.id) ? { ...card, sort_order: order.get(card.id)! } : card
+    ))
+    changed = true
+  }
+  return changed ? diffOrder(cards, working) : null
+}
+
+/**
+ * 批量缩进 / 提升：从后往前逐张模拟，避免前面的移动打乱后面的兄弟序号。
+ * 单张失败（第一个兄弟无法缩进、顶层无法提升）会跳过，不影响其它卡片。
+ */
+export function batchOutlinePlan(
+  cards: readonly Card[],
+  ids: readonly string[],
+  action: BatchOutlineAction,
+): CardOrderUpdate[] | null {
+  if (action === 'up' || action === 'down') {
+    return batchShiftPlan(cards, ids, action === 'up' ? -1 : 1)
+  }
+  let working = cloneCards(cards)
+  let changed = false
+  // 缩进从前往后：整块并排挂到同一个父节点下；
+  // 提升从后往前：每张都插到父节点正后方，倒序处理才能保持原有先后。
+  const ordered = action === 'outdent' ? [...ids].reverse() : [...ids]
+  for (const id of ordered) {
+    const plan = action === 'indent' ? indentPlan(working, id) : outdentPlan(working, id)
+    if (!plan) continue
+    working = applyUpdates(working, plan)
+    changed = true
+  }
+  return changed ? diffOrder(cards, working) : null
+}

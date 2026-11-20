@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { Card } from '../../domain/card'
 import {
+  batchOutlinePlan,
+  batchShiftPlan,
   buildChildMap,
   childrenOf,
   collectDescendants,
@@ -143,5 +145,81 @@ describe('outlineEditField', () => {
 
   it('三者全空（刚新建）写回问题，避免存进看不见的摘录', () => {
     expect(outlineEditField({ ...card('a', null, 0), question: '', excerpt: '', user_note: '' })).toBe('question')
+  })
+})
+
+
+describe('批量结构调整（0.60）', () => {
+  /** 把只含变化行的 plan 合并回卡片，再按 parent 分组断言最终结构。 */
+  const applied = (cards: Card[], updates: CardOrderUpdate[]) => {
+    const map = new Map(updates.map((update) => [update.id, update]))
+    return cards.map((item) => {
+      const update = map.get(item.id)
+      return update ? { ...item, parent_id: update.parent_id, sort_order: update.sort_order } : item
+    })
+  }
+  const tree = (cards: Card[]): Record<string, string[]> => {
+    const groups = new Map<string, Array<{ id: string; order: number }>>()
+    for (const item of cards) {
+      const key = item.parent_id ?? 'root'
+      groups.set(key, [...(groups.get(key) ?? []), { id: item.id, order: item.sort_order }])
+    }
+    return Object.fromEntries(
+      [...groups.entries()].map(([key, list]) => [key, list.sort((a, b) => a.order - b.order).map((item) => item.id)]),
+    )
+  }
+
+  it('同父整块上移 / 下移', () => {
+    const cards = [card('a', null, 0), card('b', null, 1), card('c', null, 2), card('d', null, 3)]
+    const down = batchShiftPlan(cards, ['b', 'c'], 1) ?? []
+    expect(tree(applied(cards, down))).toEqual({ root: ['a', 'd', 'b', 'c'] })
+    const up = batchShiftPlan(cards, ['c', 'd'], -1) ?? []
+    expect(tree(applied(cards, up))).toEqual({ root: ['a', 'c', 'd', 'b'] })
+  })
+
+  it('已在边界时返回 null，不产生空改动', () => {
+    const cards = [card('a', null, 0), card('b', null, 1)]
+    expect(batchShiftPlan(cards, ['a'], -1)).toBeNull()
+    expect(batchShiftPlan(cards, ['b'], 1)).toBeNull()
+  })
+
+  it('跨父混选按各自兄弟列表移动，互不影响', () => {
+    const cards = [
+      card('a', null, 0), card('b', null, 1),
+      card('a1', 'a', 0), card('a2', 'a', 1),
+    ]
+    const plan = batchShiftPlan(cards, ['a1', 'a'], 1) ?? []
+    const result = tree(applied(cards, plan))
+    expect(result.a).toEqual(['a2', 'a1'])
+    expect(result.root).toEqual(['b', 'a'])
+  })
+
+  it('批量缩进：每张挂到它前一个兄弟下面', () => {
+    const cards = [card('a', null, 0), card('b', null, 1), card('c', null, 2)]
+    const plan = batchOutlinePlan(cards, ['b', 'c'], 'indent') ?? []
+    const result = tree(applied(cards, plan))
+    expect(result.root).toEqual(['a'])
+    // 整块并排挂在 a 下面：b、c 都成为 a 的子级，顺序不变。
+    expect(result.a).toEqual(['b', 'c'])
+  })
+
+  it('批量提升：子级回到祖父节点下，排在其父后面', () => {
+    const cards = [
+      card('a', null, 0), card('b', null, 1),
+      card('a1', 'a', 0), card('a2', 'a', 1),
+    ]
+    const plan = batchOutlinePlan(cards, ['a1', 'a2'], 'outdent') ?? []
+    const result = tree(applied(cards, plan))
+    expect(result.a ?? []).toEqual([])
+    expect(result.root).toEqual(['a', 'a1', 'a2', 'b'])
+  })
+
+  it('无法移动的卡片会被跳过，其余仍然生效', () => {
+    const cards = [card('a', null, 0), card('b', null, 1)]
+    const plan = batchOutlinePlan(cards, ['a', 'b'], 'indent') ?? []
+    // a 是第一个兄弟不能缩进；b 缩进到 a 下面，a 的 sort_order 会被重编号。
+    const result = tree(applied(cards, plan))
+    expect(result.a).toEqual(['b'])
+    expect(result.root).toEqual(['a'])
   })
 })

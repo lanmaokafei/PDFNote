@@ -247,3 +247,37 @@ export function formatDue(due: string, now: number): string {
   if (diff > 1) return `${diff} 天后`
   return `逾期 ${-diff} 天`
 }
+
+
+/** 卡片盒排序：默认手动（大纲 sort_order），其余按时间/标题。 */
+export type BoardSort = 'manual' | 'updated' | 'due' | 'title'
+
+export const BOARD_SORTS: Array<{ value: BoardSort; label: string }> = [
+  { value: 'manual', label: '手动顺序' },
+  { value: 'updated', label: '最近更新' },
+  { value: 'due', label: '到期时间' },
+  { value: 'title', label: '标题' },
+]
+
+export function sortBoardCards(cards: readonly Card[], sort: BoardSort): Card[] {
+  const list = [...cards]
+  if (sort === 'manual') {
+    return list.sort((left, right) => left.sort_order - right.sort_order || left.created_at.localeCompare(right.created_at))
+  }
+  if (sort === 'updated') {
+    return list.sort((left, right) => right.updated_at.localeCompare(left.updated_at))
+  }
+  if (sort === 'due') {
+    return list.sort((left, right) => Date.parse(left.due) - Date.parse(right.due))
+  }
+  return list.sort((left, right) => cardTitle(left).localeCompare(cardTitle(right), 'zh-CN'))
+}
+
+/** 分组后统一排序：列与二级分组都要过一遍，否则只看列内顺序会漏掉二级组。 */
+export function sortColumns(columns: readonly BoardColumn[], sort: BoardSort): BoardColumn[] {
+  return columns.map((column) => ({
+    ...column,
+    cards: sortBoardCards(column.cards, sort),
+    subgroups: column.subgroups.map((group) => ({ ...group, cards: sortBoardCards(group.cards, sort) })),
+  }))
+}

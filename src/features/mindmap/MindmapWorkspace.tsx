@@ -44,8 +44,8 @@ import { ContextMenu } from '../../ui/ContextMenu'
 import { useContextMenu, type ContextMenuSection } from '../../ui/contextMenuCore'
 import {
   applyCardOrder,
-  clearMindmapCards,
   deleteCard as deleteCardApi,
+  clearMindmapCards,
   restoreCard as restoreTrashedCard,
   createMindmapCanvas,
   exportAnkiTxt,
@@ -77,6 +77,7 @@ import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
 import { InkEdge } from './MindmapEdge'
 import { buildOutlineForest, flattenOutline, outlineTitle, outlineToMarkdown, outlineToOpml } from './outline'
 import {
+  batchOutlinePlan,
   buildChildMap,
   collectDescendants,
   dropPlan,
@@ -1591,6 +1592,52 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     }
   }, [cancelOutlineEdit, createOutlineCard, moveOutlineCard, outlineDraft, saveOutlineEdit])
 
+  const outlineAnchorRef = useRef<string | null>(null)
+
+  /** Shift 连选一段；⌘ / Ctrl 追加或取消；普通点击就选中这一行。 */
+  const toggleOutlineSelection = useCallback((id: string, event: React.MouseEvent) => {
+    const next = new Set(selectedIds)
+    if (event.shiftKey && outlineAnchorRef.current) {
+      const ids = outlineRows.map((row) => row.card.id)
+      const from = ids.indexOf(outlineAnchorRef.current)
+      const to = ids.indexOf(id)
+      if (from >= 0 && to >= 0) {
+        for (let index = Math.min(from, to); index <= Math.max(from, to); index += 1) next.add(ids[index])
+      }
+    } else if (next.has(id)) {
+      next.delete(id)
+    } else {
+      next.add(id)
+    }
+    outlineAnchorRef.current = id
+    setSelectedIds(next)
+  }, [outlineRows, selectedIds])
+
+  /** 批量结构操作：一次 apply_card_order（单事务），失败整体回滚。 */
+  const runBatchOutline = useCallback((action: 'up' | 'down' | 'indent' | 'outdent' | 'delete') => {
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
+    if (action === 'delete') {
+      void runTask(async () => {
+        for (const id of ids) await deleteCardApi(id)
+        setSelectedIds(new Set())
+        await syncCards()
+        setNotice(`已把 ${ids.length} 张卡片移入回收站。`)
+      })
+      return
+    }
+    const plan = batchOutlinePlan(cards, ids, action)
+    if (!plan) {
+      setNotice(action === 'up' || action === 'down' ? '已经到边界，无法再移动。' : '这些卡片没有可移动的层级。')
+      return
+    }
+    const labels = { up: '大纲批量上移', down: '大纲批量下移', indent: '大纲批量缩进', outdent: '大纲批量提升' }
+    void runTask(async () => {
+      await applyOrderUndoable(labels[action], plan)
+      setNotice(`已${labels[action].replace('大纲批量', '')} ${ids.length} 张（⌘Z 可撤销）。`)
+    })
+  }, [applyOrderUndoable, cards, runTask, selectedIds, syncCards])
+
   const handleOutlineDragStart = useCallback((event: React.DragEvent<HTMLDivElement>, card: Card) => {
     if (busy || outlineEditing) return
     outlineDragRef.current = card.id
@@ -2251,7 +2298,27 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
                   </button>
                 </div>
               </div>
-              <div className="mindmap-outline-list">
+              {selectedIds.size > 0 && (
+                <div className="mindmap-outline-batch" data-testid="outline-batch">
+                  <span>已选 {selectedIds.size} 行</span>
+                  <button type="button" data-testid="outline-batch-up" onClick={() => runBatchOutline('up')} disabled={busy}>↑ 上移</button>
+                  <button type="button" data-testid="outline-batch-down" onClick={() => runBatchOutline('down')} disabled={busy}>↓ 下移</button>
+                  <button type="button" data-testid="outline-batch-indent" onClick={() => runBatchOutline('indent')} disabled={busy}>→ 缩进</button>
+                  <button type="button" data-testid="outline-batch-outdent" onClick={() => runBatchOutline('outdent')} disabled={busy}>← 提升</button>
+                  <button type="button" className="is-danger" data-testid="outline-batch-delete" onClick={() => runBatchOutline('delete')} disabled={busy}>移入回收站</button>
+                  <button type="button" onClick={() => setSelectedIds(new Set())}>取消选择</button>
+                </div>
+              )}
+              <div
+                className="mindmap-outline-list"
+                onScroll={(event) => {
+                  const element = event.currentTarget
+                  if (outlineRows.length <= outlineLimit) return
+                  if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) {
+                    setOutlineLimit((value) => Math.min(outlineRows.length, value + OUTLINE_PAGE))
+                  }
+                }}
+              >
                 {outlineRows.slice(0, outlineLimit).map(({ card, depth }) => {
                   const hasChildren = parentCardIds.has(card.id)
                   const collapsed = outlineCollapsedIds.has(card.id)
@@ -2269,6 +2336,18 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
                       onDragEnd={endOutlineDrag}
                       onContextMenu={(event) => handleOutlineContextMenu(event, card)}
                     >
+                      <input
+                        type="checkbox"
+                        className="mindmap-outline-select"
+                        data-testid="outline-select"
+                        aria-label={`选择 ${outlineTitle(card)}`}
+                        checked={selectedIds.has(card.id)}
+                        onChange={() => undefined}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          toggleOutlineSelection(card.id, event)
+                        }}
+                      />
                       <button
                         type="button"
                         className="mindmap-outline-toggle"

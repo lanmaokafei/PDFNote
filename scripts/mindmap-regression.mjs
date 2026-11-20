@@ -745,6 +745,16 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       }
     },
     'plugin:dialog|open': () => '/tmp/anki-sample.txt',
+    'plugin:dialog|save': () => window.__saveDialogPath ?? '/tmp/pdfnote-export.png',
+    save_export_files: (args) => {
+      window.__exported = window.__exported ?? []
+      window.__lastExportBase64 = args?.files?.[0]?.base64 ?? ''
+      window.__exported.push({
+        destination: args?.destination ?? '',
+        files: (args?.files ?? []).map((file) => ({ name: file.name, size: (file.base64 ?? '').length })),
+      })
+      return args?.destination ?? ''
+    },
     // STYLE_LINK=1：给 c1→c2 建一条关联链接，用来验证虚线颜色与「链接」标签开关。
     list_card_links: () => (styleLink
       ? [{ id: 'link-1', source_card_id: 'c1', target_card_id: 'c2', label: '', created_at: '2026-11-03T00:00:00.000Z' }]
@@ -2147,7 +2157,27 @@ if (process.env.STEP === 'closereading') {
   if (year.bars[2] !== 5400) problems.push(`三月时长不对：${year.bars[2]}`)
   if (year.books.length !== 1) problems.push(`年度书单条数不对：${year.books.length}`)
   if (!year.line.includes('复习 9 次')) problems.push(`年度复习次数不对：${year.line}`)
-  await page.locator('[data-testid="year-review"] footer button').click()
+  // 导出分享图：竖版 PNG，写盘走 save_export_files
+  await page.evaluate(() => { window.__saveDialogPath = '/tmp/pdfnote-year.png' })
+  await page.locator('[data-testid="year-export"]').click()
+  await page.waitForTimeout(1500)
+  const yearExport = await page.evaluate(() => ({
+    last: window.__exported?.at(-1) ?? null,
+    note: document.querySelector('[data-testid="year-export-note"]')?.textContent ?? '',
+  }))
+  if (!yearExport.last || yearExport.last.files.length !== 1) problems.push(`年度图没有导出：${JSON.stringify(yearExport.last)}`)
+  if (!yearExport.last?.destination.endsWith('.png')) problems.push(`年度图应存 PNG：${yearExport.last?.destination}`)
+  if (!yearExport.last?.files[0]?.name.includes('年度回顾')) problems.push(`年度图文件名不对：${yearExport.last?.files[0]?.name}`)
+  if (!yearExport.note.includes('已保存到')) problems.push(`年度图没有成功提示：${yearExport.note}`)
+  if (process.env.SHOT) {
+    const base64 = await page.evaluate(() => window.__lastExportBase64 ?? '')
+    if (base64) {
+      const { writeFileSync } = await import('node:fs')
+      writeFileSync('/tmp/pdfnote-year-poster.png', Buffer.from(base64, 'base64'))
+    }
+  }
+
+  await page.locator('[data-testid="year-review"] footer button', { hasText: '关闭' }).click()
   await page.waitForTimeout(300)
   if (await page.locator('[data-testid="year-review"]').count() !== 0) problems.push('年度回顾没有关闭')
 
@@ -3051,6 +3081,45 @@ if (process.env.STEP === 'notebook') {
     await page.waitForTimeout(400)
     await page.screenshot({ path: '/tmp/pdfnote-notebook.png' })
   }
+
+  // 导出：当前页单张 PNG、整本打 zip（可见图层才进图）
+  await page.evaluate(() => {
+    const scroller = document.querySelector('.notebook-scroll')
+    if (scroller) scroller.scrollTop = 0
+    window.__saveDialogPath = '/tmp/pdfnote-notebook-page.png'
+  })
+  await page.waitForTimeout(400)
+  await page.locator('[data-testid="notebook-export-open"]').click()
+  await page.waitForSelector('[data-testid="notebook-export"]', { timeout: 5000 })
+  await page.locator('[data-testid="notebook-export-page"]').click()
+  await page.waitForTimeout(1500)
+  const pageExport = await page.evaluate(() => window.__exported?.at(-1) ?? null)
+  if (!pageExport || pageExport.files.length !== 1) problems.push(`当前页导出不对：${JSON.stringify(pageExport)}`)
+  if (!pageExport?.destination.endsWith('.png')) problems.push(`当前页应存 PNG：${pageExport?.destination}`)
+  if (!pageExport?.files[0]?.name.includes('第 1 页')) problems.push(`当前页文件名不对：${pageExport?.files[0]?.name}`)
+  if ((pageExport?.files[0]?.size ?? 0) < 2000) problems.push(`导出的 PNG 太小：${pageExport?.files[0]?.size}`)
+  if (process.env.SHOT) {
+    const base64 = await page.evaluate(() => window.__lastExportBase64 ?? '')
+    if (base64) {
+      const { writeFileSync } = await import('node:fs')
+      writeFileSync('/tmp/pdfnote-notebook-page.png', Buffer.from(base64, 'base64'))
+    }
+  }
+
+  await page.evaluate(() => { window.__saveDialogPath = '/tmp/pdfnote-notebook.zip' })
+  await page.locator('[data-testid="notebook-export-open"]').click()
+  await page.waitForSelector('[data-testid="notebook-export"]', { timeout: 5000 })
+  const pagesToExport = await page.locator('.notebook-page').count()
+  await page.locator('[data-testid="notebook-export-all"]').click()
+  await page.waitForTimeout(2500)
+  const allExport = await page.evaluate(() => window.__exported?.at(-1) ?? null)
+  if (!allExport || allExport.files.length !== pagesToExport) {
+    problems.push(`整本导出页数不对：${allExport?.files.length} / ${pagesToExport}`)
+  }
+  if (!allExport?.destination.endsWith('.zip')) problems.push(`整本应存 zip：${allExport?.destination}`)
+  // 补零宽度跟页数位数走：6 页时是「第 1 页」，两位数页数才补成「第 01 页」。
+  if (!allExport?.files[0]?.name.startsWith('第 ')) problems.push(`整本文件名不对：${allExport?.files[0]?.name}`)
+  if (!allExport?.files[0]?.name.endsWith('.png')) problems.push(`整本文件扩展名不对：${allExport?.files[0]?.name}`)
 
   // 返回书架并删除
   await page.locator('.notebook-back').click()

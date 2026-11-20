@@ -31,6 +31,9 @@ import {
 } from '../reading/yearReview'
 import { closeReadingCanvasName } from '../mindmap/canvas'
 import { StudyWorkspace } from '../study/StudyWorkspace'
+import { save as saveDialog } from '@tauri-apps/plugin-dialog'
+import { saveExportFiles } from '../../services/pdfnote'
+import { renderYearPoster } from './yearPoster'
 import './CloseReadingWorkspace.css'
 
 interface CloseReadingWorkspaceProps {
@@ -85,6 +88,8 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
   const [yearDays, setYearDays] = useState<ReadingDay[]>([])
   const [yearStudy, setYearStudy] = useState<StudyOverview | null>(null)
   const [yearBusy, setYearBusy] = useState(false)
+  const [posterBusy, setPosterBusy] = useState(false)
+  const [posterNotice, setPosterNotice] = useState('')
   const [lastDocId, setLastDocId] = useState<string | null>(() => {
     try {
       return globalThis.localStorage?.getItem('pdfnote.reading.lastDocument') ?? null
@@ -143,6 +148,39 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
         setYearStudy(study)
       })
       .finally(() => setYearBusy(false))
+  }
+
+  /** 把当前年度回顾画成一张竖版 PNG，分享或存档用。 */
+  async function handleExportYear() {
+    if (posterBusy) return
+    const destination = await saveDialog({
+      defaultPath: `${year} 年度回顾.png`,
+      filters: [{ name: 'PNG 图片', extensions: ['png'] }],
+    }).catch(() => null)
+    if (!destination) return
+    setPosterBusy(true)
+    setPosterNotice('')
+    try {
+      const base64 = renderYearPoster({
+        year,
+        totalSeconds: yearSeconds,
+        activeDays: yearActiveDays,
+        longestStreak: yearLongest,
+        currentStreak: yearStreak,
+        cardsWritten: yearStudy?.cardsWritten ?? 0,
+        reviews: yearStudy?.reviews ?? 0,
+        reviewedCards: yearStudy?.reviewedCards ?? 0,
+        averageSeconds: averagePerDay(yearSeconds, yearActiveDays),
+        months: yearTotals,
+        books: (readingStats?.books ?? []).map((book) => ({ title: book.title, seconds: book.yearSeconds })),
+      })
+      await saveExportFiles(destination, [{ name: `${year} 年度回顾.png`, base64 }])
+      setPosterNotice(`已保存到 ${destination}`)
+    } catch (reason) {
+      setPosterNotice(`导出失败：${reason instanceof Error ? reason.message : String(reason)}`)
+    } finally {
+      setPosterBusy(false)
+    }
   }
 
   /** 进入一本书：确保「精读 · 书名」画布存在，把它钉给 PDF 与脑图。 */
@@ -427,6 +465,10 @@ export function CloseReadingWorkspace({ onCardsChanged, jumpTarget, onJumpHandle
                   </ul>
                 )}
                 <footer>
+                  <span className="close-reading-year-export-note" data-testid="year-export-note">{posterNotice}</span>
+                  <button type="button" data-testid="year-export" onClick={() => void handleExportYear()} disabled={posterBusy}>
+                    {posterBusy ? '生成中…' : '导出图片'}
+                  </button>
                   <button type="button" onClick={() => setYearOpen(false)}>关闭</button>
                 </footer>
               </>

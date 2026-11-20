@@ -4,6 +4,7 @@ import {
   Eraser,
   Eye,
   EyeOff,
+  Download,
   Layers,
   Lock,
   LockOpen,
@@ -35,6 +36,9 @@ import {
   updateNotebook,
 } from '../../services/pdfnote'
 import { findInkHits, type InkHitCandidate } from '../pdf/inkErase'
+import { save as saveDialog } from '@tauri-apps/plugin-dialog'
+import { saveExportFiles } from '../../services/pdfnote'
+import { renderNotebookPage, renderNotebookPages } from './notebookExport'
 import { pushUndo } from '../undo/undoStack'
 import { SizeControl } from '../ink/SizeControl'
 import { readSizePreference, saveSizePreference } from '../ink/size'
@@ -288,6 +292,10 @@ interface NotebookEditorProps {
 function NotebookEditor({ notebook, onBack, onNotebookUpdated }: NotebookEditorProps) {
   const [layers, setLayers] = useState<Layer[]>([])
   const [inks, setInks] = useState<NotebookInk[]>([])
+  // 导出：当前页单张 PNG，或整本打包 zip。
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportNotice, setExportNotice] = useState('')
+  const [exportBusy, setExportBusy] = useState(false)
   const [activeLayerId, setActiveLayerId] = useState('')
   const [tool, setTool] = useState<'pen' | 'eraser'>('pen')
   const [color, setColor] = useState(INK_COLORS[0])
@@ -469,6 +477,51 @@ function NotebookEditor({ notebook, onBack, onNotebookUpdated }: NotebookEditorP
     }
   }, [inks])
 
+  /** 滚动位置最靠上的那一页就是「当前页」。 */
+  function currentVisiblePage(): number {
+    const scroller = document.querySelector('.notebook-scroll')
+    const pages = [...document.querySelectorAll<HTMLElement>('.notebook-page')]
+    if (!scroller || pages.length === 0) return 1
+    const top = scroller.getBoundingClientRect().top + 24
+    let best = 1
+    let bestDistance = Number.POSITIVE_INFINITY
+    for (const element of pages) {
+      const distance = Math.abs(element.getBoundingClientRect().top - top)
+      if (distance < bestDistance) {
+        bestDistance = distance
+        best = Number(element.dataset.page ?? 1)
+      }
+    }
+    return best
+  }
+
+  async function handleExport(mode: 'page' | 'all') {
+    if (exportBusy) return
+    const page = mode === 'page' ? currentVisiblePage() : 0
+    const suffix = mode === 'page' ? `第 ${page} 页` : '整本'
+    const destination = await saveDialog({
+      defaultPath: `${notebook.title} · ${suffix}.${mode === 'page' ? 'png' : 'zip'}`,
+      filters: mode === 'page'
+        ? [{ name: 'PNG 图片', extensions: ['png'] }]
+        : [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
+    }).catch(() => null)
+    if (!destination) return
+    setExportBusy(true)
+    setError('')
+    try {
+      const files = mode === 'page'
+        ? [{ name: `第 ${page} 页.png`, base64: renderNotebookPage(page, inks, notebook.paper, { visibleLayerIds }) }]
+        : renderNotebookPages(pages, inks, notebook.paper, { visibleLayerIds })
+      await saveExportFiles(destination, files)
+      setExportOpen(false)
+      setExportNotice(`已导出 ${files.length} 张图片：${destination}`)
+    } catch (reason) {
+      setError(`导出失败：${errorMessage(reason)}`)
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
   const canDraw = Boolean(activeLayer && activeLayer.visible && !activeLayer.locked)
 
   return (
@@ -491,6 +544,16 @@ function NotebookEditor({ notebook, onBack, onNotebookUpdated }: NotebookEditorP
         </label>
         <button
           type="button"
+          className="notebook-layer-toggle"
+          data-testid="notebook-export-open"
+          onClick={() => setExportOpen(true)}
+          disabled={exportBusy}
+        >
+          <Download size={15} strokeWidth={1.8} />
+          导出
+        </button>
+        <button
+          type="button"
           className={`notebook-layer-toggle${layersOpen ? ' is-active' : ''}`}
           onClick={() => setLayersOpen((value) => !value)}
           aria-pressed={layersOpen}
@@ -501,6 +564,7 @@ function NotebookEditor({ notebook, onBack, onNotebookUpdated }: NotebookEditorP
       </header>
 
       {error && <p className="notebook-banner is-error" role="alert">{error}</p>}
+      {exportNotice && <p className="notebook-banner is-success" role="status">{exportNotice}</p>}
 
       <div className="notebook-canvas-area">
         <div className="notebook-scroll">
@@ -612,6 +676,37 @@ function NotebookEditor({ notebook, onBack, onNotebookUpdated }: NotebookEditorP
           </aside>
         )}
       </div>
+
+      {exportOpen && (
+        <div className="notebook-export-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !exportBusy) setExportOpen(false)
+        }}>
+          <section className="notebook-export" role="dialog" aria-modal="true" aria-labelledby="notebook-export-title" data-testid="notebook-export">
+            <header>
+              <div>
+                <small>EXPORT</small>
+                <h2 id="notebook-export-title">导出手写本</h2>
+              </div>
+              <button type="button" onClick={() => setExportOpen(false)} disabled={exportBusy} aria-label="关闭导出">×</button>
+            </header>
+            <p className="notebook-export-hint">按当前可见图层重绘为 PNG，导出不受缩放与滚动位置影响；隐藏图层不会出现在图里。</p>
+            <div className="notebook-export-options">
+              <button type="button" data-testid="notebook-export-page" onClick={() => void handleExport('page')} disabled={exportBusy}>
+                <strong>当前页</strong>
+                <span>第 {currentVisiblePage()} 页 · 单张 PNG</span>
+              </button>
+              <button type="button" data-testid="notebook-export-all" onClick={() => void handleExport('all')} disabled={exportBusy}>
+                <strong>整本</strong>
+                <span>{pages} 页 · PNG 打包成 zip</span>
+              </button>
+            </div>
+            <footer>
+              <span>{exportBusy ? '正在渲染…' : ''}</span>
+              <button type="button" onClick={() => setExportOpen(false)} disabled={exportBusy}>关闭</button>
+            </footer>
+          </section>
+        </div>
+      )}
 
       <div className="notebook-dock">
         <div className="notebook-tool-group">

@@ -254,6 +254,18 @@ export async function purgeDocument(id: string): Promise<void> {
   return invoke('purge_document', { id })
 }
 
+/** 前端渲染好的图片：单张直接写盘，多张打成 zip。 */
+export interface ExportImageFile {
+  name: string
+  /** 不含 data: 前缀的 base64。 */
+  base64: string
+}
+
+export async function saveExportFiles(destination: string, files: ExportImageFile[]): Promise<string> {
+  desktopOnly()
+  return invoke('save_export_files', { destination, files })
+}
+
 export async function purgeExpiredDocumentTrash(days = 30): Promise<number> {
   if (!isTauriRuntime()) return 0
   return invoke('purge_expired_document_trash', { days })

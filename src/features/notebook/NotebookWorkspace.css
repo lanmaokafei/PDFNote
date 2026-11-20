@@ -629,3 +629,120 @@
   .notebook-layers { flex-basis: 178px; }
   .notebook-scroll { padding: 18px 14px 86px; }
 }
+
+/* ---------- 导出手写本（0.58.0） ---------- */
+
+.notebook-banner.is-success {
+  border-color: #cfe3cd;
+  color: #3f6a45;
+  background: #f2f9f0;
+}
+
+.notebook-export-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 190;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(24, 32, 26, .34);
+}
+
+.notebook-export {
+  display: flex;
+  flex-direction: column;
+  width: min(440px, 100%);
+  padding: 20px 22px 16px;
+  border: 1px solid #e2e6e0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(24, 32, 26, .22);
+}
+
+.notebook-export header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notebook-export header small {
+  color: #a3ada0;
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+
+.notebook-export h2 {
+  margin: 2px 0 0;
+  color: #2f3e33;
+  font-size: 16px;
+}
+
+.notebook-export header > button {
+  border: 0;
+  color: #8b9689;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.notebook-export-hint {
+  margin: 10px 0 14px;
+  color: #8b9689;
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+.notebook-export-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.notebook-export-options button {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 12px;
+  border: 1px solid #dfe7da;
+  border-radius: 10px;
+  background: #fafcf8;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notebook-export-options button:hover:not(:disabled) {
+  border-color: #c5d8c3;
+  background: #f3f9f0;
+}
+
+.notebook-export-options strong {
+  color: #33463a;
+  font-size: 13px;
+}
+
+.notebook-export-options span {
+  color: #97a293;
+  font-size: 11px;
+}
+
+.notebook-export footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #97a293;
+  font-size: 11px;
+}
+
+.notebook-export footer button {
+  padding: 7px 16px;
+  border: 1px solid #d7e0d2;
+  border-radius: 8px;
+  color: #3f5a44;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}

@@ -532,6 +532,92 @@ pub fn list_tags(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     cards::list_tags(&state)
 }
 
+/// 导出文件：单张图片直接写，多个文件自动打成 zip。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportFile {
+    pub name: String,
+    /// PNG / JPEG 的 base64（不含 data: 前缀）。
+    pub base64: String,
+}
+
+fn decode_base64(input: &str, name: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(input.trim())
+        .map_err(|error| format!("{name} 不是有效的 base64：{error}"))
+}
+
+fn safe_file_name(name: &str, index: usize) -> String {
+    let base = std::path::Path::new(name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    let cleaned: String = base
+        .chars()
+        .map(|ch| if ch.is_alphanumeric() || ch == '.' || ch == '-' || ch == '_' || ch == ' ' { ch } else { '_' })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches('.');
+    if trimmed.is_empty() {
+        format!("image-{}.png", index + 1)
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// 把前端渲染好的图片写盘；多个文件时 destination 必须是 .zip。
+#[tauri::command]
+pub fn save_export_files(
+    destination: String,
+    files: Vec<ExportFile>,
+) -> Result<String, String> {
+    use std::io::Write;
+    if files.is_empty() {
+        return Err("没有可导出的内容".into());
+    }
+    let target = std::path::PathBuf::from(&destination);
+    if !target.is_absolute() {
+        return Err("导出路径必须是绝对路径".into());
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("无法创建目录：{error}"))?;
+    }
+    let is_zip = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("zip"))
+        .unwrap_or(false);
+
+    if !is_zip {
+        if files.len() != 1 {
+            return Err("多个文件必须保存为 .zip".into());
+        }
+        let bytes = decode_base64(&files[0].base64, &files[0].name)?;
+        std::fs::write(&target, bytes).map_err(|error| format!("写入失败：{error}"))?;
+        return Ok(target.to_string_lossy().to_string());
+    }
+
+    let output = std::fs::File::create(&target).map_err(|error| format!("无法创建压缩包：{error}"))?;
+    let mut zip = zip::ZipWriter::new(output);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    let mut used: Vec<String> = Vec::new();
+    for (index, file) in files.iter().enumerate() {
+        let mut name = safe_file_name(&file.name, index);
+        if used.contains(&name) {
+            let stem = std::path::Path::new(&name).file_stem().and_then(|value| value.to_str()).unwrap_or("image").to_string();
+            let ext = std::path::Path::new(&name).extension().and_then(|value| value.to_str()).unwrap_or("png").to_string();
+            name = format!("{stem}-{}.{ext}", index + 1);
+        }
+        used.push(name.clone());
+        let bytes = decode_base64(&file.base64, &file.name)?;
+        zip.start_file(name, options).map_err(|error| format!("写入压缩包失败：{error}"))?;
+        zip.write_all(&bytes).map_err(|error| format!("写入压缩包失败：{error}"))?;
+    }
+    zip.finish().map_err(|error| format!("压缩包收尾失败：{error}"))?;
+    Ok(target.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 pub fn list_tag_stats(state: State<'_, AppState>) -> Result<Vec<cards::TagStat>, String> {
     cards::list_tag_stats(&state)
@@ -881,7 +967,70 @@ pub fn set_card_layer(
 
 #[cfg(test)]
 mod tests {
-    use super::export_markdown;
+    use super::{export_markdown, save_export_files, ExportFile};
+
+    fn png_base64() -> String {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode([0x89, b'P', b'N', b'G', 1, 2, 3])
+    }
+
+    #[test]
+    fn save_export_writes_single_png_and_rejects_multi_without_zip() {
+        let directory = std::env::temp_dir().join(format!("pdfnote-export-{}", uuid::Uuid::new_v4()));
+        let target = directory.join("page-1.png");
+        save_export_files(
+            target.to_string_lossy().to_string(),
+            vec![ExportFile { name: "第 1 页.png".into(), base64: png_base64() }],
+        )
+        .unwrap();
+        let bytes = std::fs::read(&target).unwrap();
+        assert_eq!(bytes.len(), 7);
+
+        let error = save_export_files(
+            directory.join("two.png").to_string_lossy().to_string(),
+            vec![
+                ExportFile { name: "a.png".into(), base64: png_base64() },
+                ExportFile { name: "b.png".into(), base64: png_base64() },
+            ],
+        )
+        .unwrap_err();
+        assert!(error.contains("zip"), "多文件应提示 zip：{error}");
+
+        assert!(save_export_files(
+            "relative/out.png".into(),
+            vec![ExportFile { name: "a.png".into(), base64: png_base64() }]
+        )
+        .is_err());
+        assert!(save_export_files(
+            target.to_string_lossy().to_string(),
+            vec![ExportFile { name: "坏.png".into(), base64: "不是base64".into() }]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn save_export_zips_multiple_images_with_safe_names() {
+        let directory = std::env::temp_dir().join(format!("pdfnote-export-{}", uuid::Uuid::new_v4()));
+        let target = directory.join("notebook.zip");
+        save_export_files(
+            target.to_string_lossy().to_string(),
+            vec![
+                ExportFile { name: "第 1 页.png".into(), base64: png_base64() },
+                ExportFile { name: "../第 2 页.png".into(), base64: png_base64() },
+                ExportFile { name: "第 2 页.png".into(), base64: png_base64() },
+            ],
+        )
+        .unwrap();
+        let file = std::fs::File::open(&target).unwrap();
+        let mut zip = zip::ZipArchive::new(file).unwrap();
+        assert_eq!(zip.len(), 3);
+        let names: Vec<String> = (0..zip.len())
+            .map(|index| zip.by_index(index).unwrap().name().to_string())
+            .collect();
+        assert!(names.iter().all(|name| !name.contains("..")), "不能出现路径穿越：{names:?}");
+        assert!(names.iter().any(|name| name.contains("第 1 页")), "{names:?}");
+        assert_eq!(names.len(), 3, "重名要自动加序号：{names:?}");
+    }
 
     #[test]
     fn export_markdown_writes_md_and_rejects_other_extensions() {

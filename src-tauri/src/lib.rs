@@ -76,6 +76,7 @@ pub fn run() {
             commands::set_card_tags,
             commands::list_tags,
             commands::list_tag_stats,
+            commands::save_export_files,
             commands::rename_tag,
             commands::delete_tag,
             commands::list_card_links,

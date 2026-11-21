@@ -5,12 +5,14 @@ import {
   Copy,
   FileText,
   LayoutGrid,
+  Moon,
   Network,
   NotebookPen,
   Search,
   Settings,
   ShieldCheck,
   Sparkles,
+  Sun,
 } from 'lucide-react'
 import './App.css'
 import { ContextMenu } from './ui/ContextMenu'
@@ -22,6 +24,7 @@ import { redoLast, undoLast } from './features/undo/undoStack'
 import { LibraryWorkspace } from './features/library/LibraryWorkspace'
 import { StudyWorkspace } from './features/study/StudyWorkspace'
 import { SettingsDialog } from './features/settings/SettingsDialog'
+import { useTheme } from './theme/useTheme'
 
 const MindmapWorkspace = lazy(() =>
   import('./features/mindmap/MindmapWorkspace').then((module) => ({ default: module.MindmapWorkspace })),
@@ -67,6 +70,7 @@ function App() {
   const [fatalError, setFatalError] = useState('')
   const [showMindmap, setShowMindmap] = useState(true)
   const [searchToken, setSearchToken] = useState(0)
+  const theme = useTheme()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updatePromptOpen, setUpdatePromptOpen] = useState(false)
   const [updatePromptInfo, setUpdatePromptInfo] = useState<UpdateInfo | null>(null)
@@ -438,6 +442,17 @@ function App() {
           <span className="app-segment-divider" aria-hidden="true" />
           <button type="button" className="app-segment-action" onClick={openSearch} title="搜索文档" aria-label="搜索文档">
             <Search size={17} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            className="app-segment-action"
+            data-testid="theme-toggle"
+            onClick={theme.toggle}
+            title={theme.resolved === 'dark' ? '切换到浅色界面' : '切换到深色界面'}
+            aria-label={theme.resolved === 'dark' ? '切换到浅色界面' : '切换到深色界面'}
+            aria-pressed={theme.resolved === 'dark'}
+          >
+            {theme.resolved === 'dark' ? <Sun size={17} strokeWidth={1.8} /> : <Moon size={17} strokeWidth={1.8} />}
           </button>
           <button type="button" className="app-segment-action" onClick={() => goTo('backup')} title="备份与恢复" aria-label="备份与恢复">
             <ShieldCheck size={17} strokeWidth={1.8} />

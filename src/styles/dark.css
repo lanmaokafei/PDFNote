@@ -1,0 +1,942 @@
+/*
+ * 深色主题（0.63.0）
+ *
+ * 只覆盖「界面外壳」：PDF 页纸、手写本纸面、卡片底色仍按各自主题走——
+ * 阅读面保持纸感，是不把整页反色当成深色模式的原因。
+ * 所有规则都挂在 htmlhtml[data-theme="dark"] 下，切主题不需要重渲染。
+ */
+
+html[data-theme="dark"] {
+  --dk-bg: #0e1310;
+  --dk-surface: #151b17;
+  --dk-surface-2: #1a211c;
+  --dk-surface-3: #202822;
+  --dk-line: #2b352d;
+  --dk-line-soft: #232c25;
+  --dk-text: #dde5db;
+  --dk-text-soft: #b9c4b7;
+  --dk-muted: #93a194;
+  color-scheme: dark;
+  background: var(--dk-bg);
+}
+
+html[data-theme="dark"] body {
+  color: var(--dk-text);
+  background: var(--dk-bg);
+}
+
+html[data-theme="dark"] .app-shell {
+  --app-ink: var(--dk-text);
+  --app-muted: var(--dk-muted);
+  --app-line: var(--dk-line);
+  --app-paper: var(--dk-bg);
+}
+
+/* ---------- 顶栏 ---------- */
+
+html[data-theme="dark"] .app-segments {
+  border-color: rgba(255, 255, 255, .07);
+  background: rgba(23, 29, 25, .94);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .45), 0 1px 2px rgba(0, 0, 0, .35);
+}
+
+html[data-theme="dark"] .app-segment {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .app-segment:hover {
+  color: var(--dk-text);
+  background: rgba(255, 255, 255, .06);
+}
+
+html[data-theme="dark"] .app-segment.is-active {
+  color: #eef5ea;
+  background: rgba(255, 255, 255, .1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06);
+}
+
+html[data-theme="dark"] .app-segment small,
+html[data-theme="dark"] .app-segment.is-active small {
+  color: #8d9a8f;
+}
+
+html[data-theme="dark"] .app-segment-divider {
+  background: #2c352e;
+}
+
+html[data-theme="dark"] .app-segment-action {
+  color: #a8b4a9;
+}
+
+html[data-theme="dark"] .app-segment-action:hover {
+  color: #eaf2e7;
+  background: rgba(255, 255, 255, .07);
+}
+
+/* ---------- 通用表单与文本 ---------- */
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select {
+  color: var(--dk-text);
+  background: #121814;
+  border-color: var(--dk-line);
+}
+
+html[data-theme="dark"] input::placeholder,
+html[data-theme="dark"] textarea::placeholder {
+  color: #6e7c71;
+}
+
+html[data-theme="dark"] select option {
+  color: var(--dk-text);
+  background: #161d18;
+}
+
+html[data-theme="dark"] kbd {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: #1c231e;
+}
+
+/* ---------- 共享弹窗 ---------- */
+
+html[data-theme="dark"] .card-dialog,
+html[data-theme="dark"] .board-modal,
+html[data-theme="dark"] .library-modal,
+html[data-theme="dark"] .settings-dialog,
+html[data-theme="dark"] .notebook-export,
+html[data-theme="dark"] .context-menu {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .55);
+}
+
+html[data-theme="dark"] .card-dialog header h2,
+html[data-theme="dark"] .board-modal h2,
+html[data-theme="dark"] .library-modal h2,
+html[data-theme="dark"] .settings-dialog h2,
+html[data-theme="dark"] .notebook-export h2 {
+  color: #eef5ea;
+}
+
+html[data-theme="dark"] .card-dialog header p,
+html[data-theme="dark"] .board-modal-intro,
+html[data-theme="dark"] .library-modal p,
+html[data-theme="dark"] .settings-dialog p,
+html[data-theme="dark"] .notebook-export-hint {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .card-dialog footer,
+html[data-theme="dark"] .board-modal footer,
+html[data-theme="dark"] .context-menu-item {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line-soft);
+}
+
+html[data-theme="dark"] .context-menu-item:hover {
+  color: #f0f7ec;
+  background: rgba(255, 255, 255, .07);
+}
+
+html[data-theme="dark"] .card-link-row,
+html[data-theme="dark"] .card-ai-draft {
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .card-link-row strong,
+html[data-theme="dark"] .card-ai-draft strong {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .card-ai-draft.is-selected {
+  border-color: #3d5a41;
+  background: #1d2a20;
+}
+
+html[data-theme="dark"] .card-ai-message.is-user {
+  color: #d8ecd9;
+  background: #1e3323;
+}
+
+html[data-theme="dark"] .card-ai-message.is-ai {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: #19201a;
+}
+
+html[data-theme="dark"] .card-ai-input input,
+html[data-theme="dark"] .card-backlink-actions button,
+html[data-theme="dark"] .card-dialog footer button,
+html[data-theme="dark"] .board-modal footer button,
+html[data-theme="dark"] .library-modal-actions button,
+html[data-theme="dark"] .notebook-export footer button {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+/* ---------- 资料库 ---------- */
+
+html[data-theme="dark"] .library {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .library-heading h1,
+html[data-theme="dark"] .library-empty h2 {
+  color: #edf4e9;
+}
+
+html[data-theme="dark"] .library-heading p,
+html[data-theme="dark"] .library-eyebrow,
+html[data-theme="dark"] .library-empty p,
+html[data-theme="dark"] .document-card footer {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .library-stats,
+html[data-theme="dark"] .library-search,
+html[data-theme="dark"] .document-card,
+html[data-theme="dark"] .library-toolbar .library-search,
+html[data-theme="dark"] .library-empty {
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .document-card:hover {
+  border-color: #3a4a3c;
+}
+
+html[data-theme="dark"] .document-card strong,
+html[data-theme="dark"] .document-cover-title,
+html[data-theme="dark"] .library-stats strong {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .library-quiet,
+html[data-theme="dark"] .document-actions button {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .library-quiet:hover,
+html[data-theme="dark"] .document-actions button:hover {
+  color: #eef5ea;
+  border-color: #3b4b3d;
+  background: #232c25;
+}
+
+html[data-theme="dark"] .library-option {
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .library-option.is-selected {
+  border-color: #4a6b4f;
+  background: #1d2a20;
+}
+
+html[data-theme="dark"] .library-option strong {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .library-option span,
+html[data-theme="dark"] .library-trash-text span {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .library-trash-list li {
+  border-color: var(--dk-line-soft);
+}
+
+html[data-theme="dark"] .library-trash-text strong {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .library-banner.is-error {
+  color: #f0b9a9;
+  border-color: #57342c;
+  background: #2a1d19;
+}
+
+/* ---------- 复习 ---------- */
+
+html[data-theme="dark"] .review-workspace {
+  --review-ink: #e8f0e4;
+  --review-muted: #93a194;
+  --review-panel: #151b17;
+  --review-line: var(--dk-line);
+  --review-green: #8fbf95;
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .review-header-actions button,
+html[data-theme="dark"] .review-session-heading + * button {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .review-heading h1,
+html[data-theme="dark"] .review-question h2,
+html[data-theme="dark"] .review-session-heading strong {
+  color: #edf4e9;
+}
+
+html[data-theme="dark"] .review-heading p,
+html[data-theme="dark"] .review-eyebrow,
+html[data-theme="dark"] .review-section-kicker,
+html[data-theme="dark"] .review-card-meta,
+html[data-theme="dark"] .review-recall-foot,
+html[data-theme="dark"] .review-face-label,
+html[data-theme="dark"] .review-recall-label {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .review-refresh,
+html[data-theme="dark"] .review-rating,
+html[data-theme="dark"] .review-reveal,
+html[data-theme="dark"] .review-hint-button {
+  border-color: var(--dk-line);
+}
+
+html[data-theme="dark"] .review-card {
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+}
+
+html[data-theme="dark"] .review-card-meta,
+html[data-theme="dark"] .review-card-actions,
+html[data-theme="dark"] .review-answer {
+  border-color: var(--dk-line-soft);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .review-recall-input {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: #121814;
+}
+
+html[data-theme="dark"] .review-recall-input:focus {
+  border-color: #4f6d53;
+  background: #141a15;
+}
+
+html[data-theme="dark"] .review-match,
+html[data-theme="dark"] .review-last-result,
+html[data-theme="dark"] .review-hint {
+  border-color: #33402f;
+  background: #1a2419;
+}
+
+html[data-theme="dark"] .review-match-score,
+html[data-theme="dark"] .review-hint p,
+html[data-theme="dark"] .review-progress,
+html[data-theme="dark"] .review-match-meter {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .review-progress,
+html[data-theme="dark"] .review-match-meter {
+  background: #26302a;
+}
+
+html[data-theme="dark"] .review-answer p,
+html[data-theme="dark"] .review-rating-area p {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .review-rating-grid button {
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .review-insights {
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+}
+
+/* ---------- 卡片盒 ---------- */
+
+html[data-theme="dark"] .board {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .board-heading h1,
+html[data-theme="dark"] .board-card h4 {
+  color: #edf4e9;
+}
+
+html[data-theme="dark"] .board-heading p,
+html[data-theme="dark"] .board-eyebrow,
+html[data-theme="dark"] .board-stats span,
+html[data-theme="dark"] .board-card-meta,
+html[data-theme="dark"] .board-column header span {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .board-search,
+html[data-theme="dark"] .board-select select,
+html[data-theme="dark"] .board-refresh,
+html[data-theme="dark"] .board-column,
+html[data-theme="dark"] .board-card {
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .board-segments {
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .board-segments button {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .board-segments button.is-active {
+  color: #eef5ea;
+  background: #26302a;
+}
+
+html[data-theme="dark"] .board-column header {
+  border-color: var(--dk-line-soft);
+}
+
+html[data-theme="dark"] .board-tag-list li {
+  border-color: var(--dk-line-soft);
+}
+
+html[data-theme="dark"] .board-tag-name,
+html[data-theme="dark"] .board-tag-list em {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .board-subgroup-title {
+  color: var(--dk-muted);
+  border-color: var(--dk-line-soft);
+}
+
+/* ---------- 脑图 ---------- */
+
+html[data-theme="dark"] .mindmap-workspace {
+  background: #101612;
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .mindmap-workspace .react-flow__background {
+  opacity: .35;
+}
+
+html[data-theme="dark"] .mindmap-node {
+  color: var(--dk-text);
+  background: #1a211c;
+  border-color: #303a32;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+}
+
+html[data-theme="dark"] .mindmap-node.is-selected {
+  border-color: #63866a;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .5);
+}
+
+html[data-theme="dark"] .mindmap-node h3,
+html[data-theme="dark"] .mindmap-node .mindmap-field-text,
+html[data-theme="dark"] .mindmap-node-content {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .mindmap-node h3 {
+  color: #e7efe3;
+}
+
+html[data-theme="dark"] .mindmap-node-index,
+html[data-theme="dark"] .mindmap-node-page,
+html[data-theme="dark"] .mindmap-node-backlink,
+html[data-theme="dark"] .mindmap-collapse,
+html[data-theme="dark"] .mindmap-node-actions button {
+  color: var(--dk-text-soft);
+  border-color: #39463b;
+  background: #232b25;
+}
+
+html[data-theme="dark"] .mindmap-outline {
+  background: var(--dk-surface);
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .mindmap-outline-head {
+  border-color: var(--dk-line);
+}
+
+html[data-theme="dark"] .mindmap-outline-row:hover {
+  background: rgba(255, 255, 255, .04);
+}
+
+html[data-theme="dark"] .mindmap-outline-title {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .mindmap-outline-batch {
+  border-color: #35443a;
+  background: #1a241c;
+}
+
+html[data-theme="dark"] .mindmap-outline-batch button {
+  color: var(--dk-text-soft);
+  border-color: #39463b;
+  background: #1f2822;
+}
+
+/* ---------- PDF 界面外壳（页面本身保持白纸） ---------- */
+
+html[data-theme="dark"] .pdf-workspace {
+  background: #0d120f;
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .pdf-toolbar,
+html[data-theme="dark"] .pdf-dock,
+html[data-theme="dark"] .pdf-search,
+html[data-theme="dark"] .pdf-thumbs,
+html[data-theme="dark"] .pdf-dock-menu {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: rgba(23, 29, 25, .96);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .45);
+}
+
+html[data-theme="dark"] .pdf-dock button,
+html[data-theme="dark"] .pdf-toolbar button {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .pdf-dock button:hover,
+html[data-theme="dark"] .pdf-toolbar button:hover {
+  color: #edf5ea;
+  background: rgba(255, 255, 255, .07);
+}
+
+html[data-theme="dark"] .pdf-search-bar input,
+html[data-theme="dark"] .pdf-dock-menu-row input {
+  color: var(--dk-text);
+  background: transparent;
+}
+
+html[data-theme="dark"] .pdf-search-results button {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .pdf-search-results button:hover {
+  background: rgba(255, 255, 255, .06);
+}
+
+html[data-theme="dark"] .pdf-search-results button.is-active {
+  background: #2a2a1b;
+  color: #f2ead0;
+}
+
+html[data-theme="dark"] .pdf-thumbs header,
+html[data-theme="dark"] .pdf-thumb-frame {
+  border-color: var(--dk-line);
+  background: #121813;
+}
+
+html[data-theme="dark"] .pdf-thumb.is-active {
+  border-color: #4a6b4f;
+  background: #1d2a20;
+}
+
+html[data-theme="dark"] .pdf-page-pill {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: rgba(23, 29, 25, .9);
+}
+
+/* ---------- 手写本（纸面保持白色） ---------- */
+
+html[data-theme="dark"] .notebook-editor,
+html[data-theme="dark"] .notebook-shelf,
+html[data-theme="dark"] .close-reading,
+html[data-theme="dark"] .study-workspace {
+  color: var(--dk-text);
+  background: var(--dk-bg);
+}
+
+html[data-theme="dark"] .notebook-editor-head,
+html[data-theme="dark"] .notebook-dock,
+html[data-theme="dark"] .notebook-layers,
+html[data-theme="dark"] .notebook-card,
+html[data-theme="dark"] .notebook-create {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+}
+
+html[data-theme="dark"] .notebook-editor-title strong,
+html[data-theme="dark"] .notebook-heading h1 {
+  color: #edf4e9;
+}
+
+html[data-theme="dark"] .notebook-layer,
+html[data-theme="dark"] .notebook-layers header {
+  border-color: var(--dk-line-soft);
+}
+
+/* ---------- 设置 ---------- */
+
+html[data-theme="dark"] .settings-section,
+html[data-theme="dark"] .settings-field input,
+html[data-theme="dark"] .settings-key-row input,
+html[data-theme="dark"] .settings-task-row input {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .settings-section h3,
+html[data-theme="dark"] .settings-dialog label {
+  color: var(--dk-text);
+}
+
+
+/* 补：变量被组件同权重规则覆盖的地方，统一用 html 前缀提高优先级。 */
+
+html[data-theme="dark"] .mindmap-workspace,
+html[data-theme="dark"] .mindmap-workspace.is-embedded {
+  color: var(--dk-text);
+  background: #101612;
+}
+
+html[data-theme="dark"] .mindmap-toolbar,
+html[data-theme="dark"] .mindmap-toolbar-actions,
+html[data-theme="dark"] .mindmap-docbar,
+html[data-theme="dark"] .mindmap-canvas-switcher,
+html[data-theme="dark"] .mindmap-style-panel {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: rgba(23, 29, 25, .96);
+}
+
+html[data-theme="dark"] .mindmap-toolbar button,
+html[data-theme="dark"] .mindmap-toolbar-actions button,
+html[data-theme="dark"] .mindmap-docbar button {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .board-stats,
+html[data-theme="dark"] .board-stats > div {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+}
+
+html[data-theme="dark"] .board-stats strong {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .review-stat-grid,
+html[data-theme="dark"] .review-stat-grid > div {
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .review-stat-grid span,
+html[data-theme="dark"] .review-stat-grid small {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .review-stat-grid strong {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .review-trend-heading h3,
+html[data-theme="dark"] .review-trend-heading p,
+html[data-theme="dark"] .review-stats-note {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .review-empty-mark {
+  color: #bcd6b6;
+  border-color: #3c4d3d;
+  background: #1c261d;
+}
+
+html[data-theme="dark"] .review-refresh,
+html[data-theme="dark"] .review-empty button {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .review-filter-banner {
+  color: #d8c9a8;
+  border-color: #4a4029;
+  background: #241f15;
+}
+
+html[data-theme="dark"] .review-filter-banner button {
+  color: #e0d2b2;
+  border-color: #4a4029;
+  background: #2a2418;
+}
+
+html[data-theme="dark"] .document-cover-title {
+  color: #3f4f42;
+}
+
+html[data-theme="dark"] .mindmap-canvas {
+  border-color: var(--dk-line);
+  background: #121814;
+}
+
+html[data-theme="dark"] .mindmap-canvas-bar,
+html[data-theme="dark"] .mindmap-toolbar,
+html[data-theme="dark"] .mindmap-header,
+html[data-theme="dark"] .mindmap-footer {
+  color: var(--dk-text-soft);
+  background: transparent;
+}
+
+html[data-theme="dark"] .mindmap-node-header {
+  border-bottom-color: #2e3a31;
+  background: #222a24;
+}
+
+html[data-theme="dark"] .react-flow__controls button {
+  border-bottom-color: #2b352d !important;
+  color: var(--dk-text-soft) !important;
+  background: #1a211c !important;
+}
+
+html[data-theme="dark"] .react-flow__controls,
+html[data-theme="dark"] .react-flow__minimap {
+  border-color: var(--dk-line) !important;
+  background: #151b17 !important;
+}
+
+html[data-theme="dark"] .mindmap-canvas-hint,
+html[data-theme="dark"] .mindmap-search {
+  color: var(--dk-muted);
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+}
+
+html[data-theme="dark"] .mindmap-search input {
+  background: transparent;
+}
+
+/* 卡片主题（tint/ink/outline）的规则权重比通用覆盖高，这里按工作区再压一层。 */
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-node,
+html[data-theme="dark"] .mindmap-workspace .mindmap-node.is-lite {
+  color: var(--dk-text-soft);
+  border-color: #303a32;
+  background: #1a211c;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .38);
+}
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-node.is-selected {
+  border-color: #63866a;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .55);
+}
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-node-header {
+  border-bottom-color: #2e3a31;
+  background: #222a24;
+}
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-node-header h3 {
+  color: #e7efe3;
+}
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-node-actions {
+  border-top-color: #2b352d;
+  background: #1a211c;
+}
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-node-actions button {
+  color: #c3cfc0;
+  border-color: #39463b;
+  background: #232b25;
+}
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-node-index,
+html[data-theme="dark"] .mindmap-workspace .mindmap-node-page,
+html[data-theme="dark"] .mindmap-workspace .mindmap-node-backlink {
+  color: #cfe0cb;
+  border-color: #3d4c3f;
+  background: #232b25;
+}
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-collapse {
+  color: #b7c4b5;
+  border-color: #39463b;
+  background: #202822;
+}
+
+html[data-theme="dark"] .react-flow {
+  --xy-minimap-background-color: #151b17;
+  --xy-minimap-mask-background-color: rgba(18, 24, 20, .62);
+  --xy-controls-button-background-color: #1a211c;
+  --xy-controls-button-color: #c3cfc0;
+  --xy-controls-button-border-color: #2b352d;
+}
+
+
+html[data-theme="dark"] .react-flow__minimap-mask {
+  fill: rgba(18, 24, 20, .62);
+}
+
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-canvas {
+  border-color: var(--dk-line);
+  background: #121814;
+}
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-canvas-bar button,
+html[data-theme="dark"] .mindmap-workspace .mindmap-toolbar button,
+html[data-theme="dark"] .mindmap-workspace .mindmap-docbar button {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-canvas-bar select,
+html[data-theme="dark"] .mindmap-workspace .mindmap-toolbar select {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: #121814;
+}
+
+html[data-theme="dark"] .mindmap-workspace .mindmap-canvas-hint {
+  color: var(--dk-muted);
+  border-color: var(--dk-line);
+  background: rgba(20, 26, 22, .88);
+}
+
+/* 嵌入分栏里的浮动工具条：canvas / actions / recall 三层都是半透明白底。 */
+html[data-theme="dark"] .mindmap-float-canvas,
+html[data-theme="dark"] .mindmap-float-actions,
+html[data-theme="dark"] .mindmap-float-recall {
+  border-color: rgba(255, 255, 255, .07);
+  background: rgba(23, 29, 25, .94);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .45);
+}
+
+html[data-theme="dark"] .mindmap-float-canvas button,
+html[data-theme="dark"] .mindmap-float-actions button,
+html[data-theme="dark"] .mindmap-float-recall button {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: transparent;
+}
+
+html[data-theme="dark"] .mindmap-float-canvas button:hover:not(:disabled),
+html[data-theme="dark"] .mindmap-float-actions button:hover:not(:disabled),
+html[data-theme="dark"] .mindmap-float-recall button:hover {
+  color: #eef5ea;
+  background: rgba(255, 255, 255, .08);
+}
+
+html[data-theme="dark"] .mindmap-float-actions button.is-active {
+  color: #eaf5e6;
+  background: rgba(124, 168, 128, .26);
+}
+
+html[data-theme="dark"] .mindmap-float-canvas select {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: #121814;
+}
+
+/* PDF 阅读区：页面本身保持白纸，页面周围的滚动底色要跟着深色走。 */
+html[data-theme="dark"] .pdf-scroll,
+html[data-theme="dark"] .pdf-workspace.is-embedded .pdf-scroll {
+  background: #0b100d;
+  scrollbar-color: #39463b transparent;
+}
+
+html[data-theme="dark"] .pdf-page {
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .55);
+}
+
+html[data-theme="dark"] .pdf-pages {
+  scrollbar-color: #39463b transparent;
+}
+
+/* 空状态与列表卡片：资料库/笔记本/学习报告共用一套浅底。 */
+html[data-theme="dark"] .notebook-empty,
+html[data-theme="dark"] .notebook-card,
+html[data-theme="dark"] .book-card,
+html[data-theme="dark"] .study-card {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+}
+
+html[data-theme="dark"] .notebook-empty h2,
+html[data-theme="dark"] .notebook-card strong,
+html[data-theme="dark"] .book-card strong {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .notebook-heading p,
+html[data-theme="dark"] .notebook-eyebrow,
+html[data-theme="dark"] .notebook-card small {
+  color: var(--dk-muted);
+}
+
+/* 设置面板里的说明卡、折叠块与复习计划区块。 */
+html[data-theme="dark"] .settings-intro,
+html[data-theme="dark"] .settings-task,
+html[data-theme="dark"] .settings-hint,
+html[data-theme="dark"] .settings-test,
+html[data-theme="dark"] .settings-task-result,
+html[data-theme="dark"] .settings-fsrs,
+html[data-theme="dark"] .settings-update,
+html[data-theme="dark"] .settings-key-row {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .settings-intro strong,
+html[data-theme="dark"] .settings-task summary,
+html[data-theme="dark"] .settings-fsrs h3,
+html[data-theme="dark"] .settings-update strong {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .settings-hint,
+html[data-theme="dark"] .settings-task-intro,
+html[data-theme="dark"] .settings-fsrs-intro,
+html[data-theme="dark"] .settings-intro {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .settings-test-button,
+html[data-theme="dark"] .settings-dialog footer button {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-3);
+}
+
+html[data-theme="dark"] .settings-task-result textarea {
+  color: var(--dk-text);
+  background: #121814;
+}
+
+html[data-theme="dark"] code {
+  color: #cfe0cb;
+  background: #1d2620;
+}

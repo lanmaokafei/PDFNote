@@ -2788,6 +2788,107 @@ if (process.env.STEP === 'backlinks') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=theme：浅色 / 深色切换、持久化与首帧生效。
+if (process.env.STEP === 'theme') {
+  await page.waitForSelector('.app-shell', { timeout: 15000 })
+  const initial = await page.evaluate(() => ({
+    theme: document.documentElement.dataset.theme,
+    stored: localStorage.getItem('pdfnote.theme'),
+  }))
+  if (initial.theme !== 'light') problems.push(`默认应为浅色：${initial.theme}`)
+
+  await page.locator('[data-testid="theme-toggle"]').click()
+  await page.waitForTimeout(300)
+  const dark = await page.evaluate(() => ({
+    theme: document.documentElement.dataset.theme,
+    stored: localStorage.getItem('pdfnote.theme'),
+    shell: getComputedStyle(document.querySelector('.app-shell')).backgroundColor,
+    text: getComputedStyle(document.querySelector('.app-shell')).color,
+  }))
+  if (dark.theme !== 'dark') problems.push(`切换后不是深色：${dark.theme}`)
+  if (dark.stored !== 'dark') problems.push(`深色偏好没有写入：${dark.stored}`)
+  if (dark.shell !== 'rgb(14, 19, 16)') problems.push(`外壳背景没变深：${dark.shell}`)
+  if (!dark.text.includes('221')) problems.push(`正文颜色没变浅：${dark.text}`)
+
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.app-shell', { timeout: 15000 })
+  const persisted = await page.evaluate(() => document.documentElement.dataset.theme)
+  if (persisted !== 'dark') problems.push(`刷新后没有保持深色：${persisted}`)
+
+  await page.locator('[data-testid="theme-toggle"]').click()
+  await page.waitForTimeout(300)
+  const back = await page.evaluate(() => ({
+    theme: document.documentElement.dataset.theme,
+    stored: localStorage.getItem('pdfnote.theme'),
+  }))
+  if (back.theme !== 'light') problems.push(`切回浅色失败：${back.theme}`)
+  if (back.stored !== 'light') problems.push(`浅色偏好没有写入：${back.stored}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'theme', initial, dark, persisted, back }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=dark-shots：深色模式逐视图截图（人工目检用）。
+if (process.env.STEP === 'dark-shots') {
+  await page.waitForSelector('.app-shell', { timeout: 15000 })
+  if ((await page.evaluate(() => document.documentElement.dataset.theme)) !== 'dark') {
+    await page.locator('[data-testid="theme-toggle"]').click()
+    await page.waitForTimeout(400)
+  }
+  await page.waitForSelector('.document-card', { timeout: 10000 })
+  await page.screenshot({ path: '/tmp/dark-library.png' })
+
+  await page.locator('.app-segment').filter({ hasText: '卡片盒' }).first().click()
+  await page.waitForSelector('.board-card', { timeout: 10000 })
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: '/tmp/dark-board.png' })
+
+  await page.locator('.app-segment').filter({ hasText: '复习' }).first().click()
+  await page.waitForTimeout(700)
+  await page.screenshot({ path: '/tmp/dark-review.png' })
+
+  await page.locator('.app-segment').filter({ hasText: '笔记本' }).first().click()
+  await page.waitForSelector('.notebook-shelf', { timeout: 10000 })
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: '/tmp/dark-notebook.png' })
+
+  await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(900)
+  await page.screenshot({ path: '/tmp/dark-mindmap.png' })
+  console.log(JSON.stringify(await page.evaluate(() => {
+    const pick = (sel) => {
+      const el = document.querySelector(sel)
+      if (!el) return null
+      const css = getComputedStyle(el)
+      return { bg: css.backgroundColor, color: css.color, cls: el.className?.toString().slice(0, 60) }
+    }
+    return {
+      theme: document.documentElement.dataset.theme,
+      workspace: pick('.mindmap-workspace'),
+      canvas: pick('.mindmap-workspace .react-flow'),
+      node: pick('.mindmap-node'),
+      header: pick('.mindmap-node-header'),
+    }
+  })))
+
+  await page.locator('.app-segment').filter({ hasText: '资料库' }).first().click()
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+  await page.screenshot({ path: '/tmp/dark-pdf.png' })
+
+  await page.locator('.app-segment-action[aria-label="设置"]').click()
+  await page.waitForSelector('.settings-dialog', { timeout: 5000 })
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: '/tmp/dark-settings.png' })
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'dark-shots' }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // STEP=thumbnails：缩略图侧栏、当前页高亮、点缩略图跳页。
 if (process.env.STEP === 'thumbnails') {
   await page.locator('.document-card').first().click()

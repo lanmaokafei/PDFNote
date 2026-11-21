@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Cpu, Eye, EyeOff, ShieldCheck, Sparkles } from 'lucide-react'
+import { useTheme } from '../../theme/useTheme'
+import type { ThemeMode } from '../../theme/theme'
 import {
   EMPTY_AI_SETTINGS,
   getAiSettings,
@@ -32,6 +34,7 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ onClose, onSaved, onCheckUpdate }: SettingsDialogProps) {
+  const theme = useTheme()
   const [draft, setDraft] = useState<AiSettings>(EMPTY_AI_SETTINGS)
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -56,7 +59,8 @@ export function SettingsDialog({ onClose, onSaved, onCheckUpdate }: SettingsDial
     getAiSettings()
       .then((settings) => {
         if (!active) return
-        setDraft(settings)
+        // 后端字段缺失时用默认值补齐：否则输入框会从「未受控」变「受控」，React 会报错。
+        setDraft({ ...EMPTY_AI_SETTINGS, ...settings })
         setLoaded(true)
       })
       .catch((reason: unknown) => {
@@ -126,7 +130,7 @@ export function SettingsDialog({ onClose, onSaved, onCheckUpdate }: SettingsDial
     setNotice('')
     try {
       const saved = await saveAiSettings(draft)
-      setDraft(saved)
+      setDraft({ ...EMPTY_AI_SETTINGS, ...saved })
       setNotice(isAiConfigured(saved) ? '已保存。公式识别将使用该模型。' : '已清除模型配置，应用恢复完全离线。')
       notify(saved)
     } catch (reason) {
@@ -142,7 +146,7 @@ export function SettingsDialog({ onClose, onSaved, onCheckUpdate }: SettingsDial
     setNotice('')
     try {
       const saved = await saveAiSettings(EMPTY_AI_SETTINGS)
-      setDraft(saved)
+      setDraft({ ...EMPTY_AI_SETTINGS, ...saved })
       setNotice('已清除模型配置，应用恢复完全离线。')
       notify(saved)
     } catch (reason) {
@@ -292,6 +296,27 @@ export function SettingsDialog({ onClose, onSaved, onCheckUpdate }: SettingsDial
         {testError && <p className="settings-error" role="alert">连接测试失败：{testError}</p>}
         {error && <p className="settings-error" role="alert">{error}</p>}
         {notice && <p className="settings-notice" role="status">{notice}</p>}
+
+        <section className="settings-fsrs" aria-label="外观" data-testid="settings-theme-section">
+          <h3>外观</h3>
+          <p className="settings-fsrs-intro">
+            深色模式只改界面外壳；PDF 纸面、手写本纸面与卡片配色保持原样，避免把「夜间阅读」变成整页反色。
+          </p>
+          <div className="settings-fsrs-grid">
+            <label>
+              <span>主题</span>
+              <select
+                data-testid="settings-theme"
+                value={theme.mode}
+                onChange={(event) => theme.setMode(event.target.value as ThemeMode)}
+              >
+                <option value="system">跟随系统</option>
+                <option value="light">浅色</option>
+                <option value="dark">深色</option>
+              </select>
+            </label>
+          </div>
+        </section>
 
         <section className="settings-fsrs" aria-label="复习计划" data-testid="settings-fsrs">
           <h3>复习计划（FSRS）</h3>

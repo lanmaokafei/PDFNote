@@ -44,6 +44,11 @@ pub struct QuestionDraft {
 }
 
 #[tauri::command]
+pub async fn hint_card(state: State<'_, AppState>, card_id: String) -> Result<String, String> {
+    ai::hint_card(&state, card_id).await
+}
+
+#[tauri::command]
 pub async fn ask_card(
     state: State<'_, AppState>,
     card_id: String,

@@ -288,3 +288,65 @@
   color: #97a295;
   font-size: 11px;
 }
+
+/* ---------- AI 提示（0.62.0） ---------- */
+
+.review-reveal-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.review-hint-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  border: 1px solid #d8e6d3;
+  border-radius: 10px;
+  color: #4f7357;
+  background: #f6fbf3;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.review-hint-button:hover:not(:disabled) {
+  border-color: #bcd6b8;
+  background: #eef7e9;
+}
+
+.review-hint-button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.review-hint {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px dashed #cfe0c9;
+  border-radius: 10px;
+  background: #f8fcf5;
+}
+
+.review-hint-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #5c7a63;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+.review-hint p {
+  margin: 5px 0 4px;
+  color: #3f4f42;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.review-hint small {
+  color: #9aa496;
+  font-size: 10.5px;
+}

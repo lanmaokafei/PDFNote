@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Eye, Pencil, RefreshCw } from 'lucide-react'
+import { Copy, Eye, Pencil, RefreshCw, Sparkles } from 'lucide-react'
 import type { Card, Rating, ReviewStats } from '../../domain/card'
 import { ContextMenu } from '../../ui/ContextMenu'
 import { MathText } from '../../ui/MathText'
 import { useContextMenu } from '../../ui/contextMenuCore'
 import { getReviewStats, listDueCards, updateCardContent } from '../../services/pdfnote'
+import { hintCard } from '../../services/ai'
 import { useCardStore } from '../../store/cardStore'
 import { MATCH_LABELS, evaluateAnswer } from './answerMatch'
 import { REVIEW_SCHEDULE_EVENT, reviewCard, type ReviewScheduleChange } from './scheduler'
@@ -97,6 +98,10 @@ export function ReviewWorkspace({ onCardsChanged, cardIds = null, onClearFilter 
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [revealed, setRevealed] = useState(false)
+  // AI 提示只活在当前会话：不写库、不进 FSRS，换卡即清空。
+  const [hint, setHint] = useState('')
+  const [hintBusy, setHintBusy] = useState(false)
+  const [hintError, setHintError] = useState('')
   /** 主动回忆输入：只在当前会话内存里，不写数据库、不参与 FSRS 评分。 */
   const [answerDraft, setAnswerDraft] = useState('')
   const [editing, setEditing] = useState(false)
@@ -159,6 +164,11 @@ export function ReviewWorkspace({ onCardsChanged, cardIds = null, onClearFilter 
     }
   }, [loadWorkspace])
 
+  useEffect(() => {
+    setHint('')
+    setHintError('')
+  }, [current?.id])
+
   // 每张卡开始复习时清空填空并换一个轮换序号：同一张卡显示期间空不会变。
   useEffect(() => {
     setClozeInputs([])
@@ -205,6 +215,20 @@ export function ReviewWorkspace({ onCardsChanged, cardIds = null, onClearFilter 
       setNotice('')
     }
   }, [loadCards, onCardsChanged])
+
+  const handleHint = async () => {
+    if (!current || hintBusy) return
+    setHintBusy(true)
+    setHintError('')
+    try {
+      const text = (await hintCard(current.id)).trim()
+      setHint(text || '模型没有返回提示，可以换个方式再试。')
+    } catch (reason) {
+      setHintError(errorMessage(reason))
+    } finally {
+      setHintBusy(false)
+    }
+  }
 
   const handleRating = async (rating: Rating) => {
     if (!current || !revealed || editing || savingContent || ratingLockRef.current) return
@@ -629,17 +653,38 @@ export function ReviewWorkspace({ onCardsChanged, cardIds = null, onClearFilter 
                     </div>
                   )}
 
+                  {(hint || hintError || hintBusy) && !revealed && (
+                    <div className="review-hint" data-testid="review-hint" role="status">
+                      <span className="review-hint-label"><Sparkles size={13} /> AI 提示</span>
+                      <p>{hintBusy ? '正在想提示…' : hintError || hint}</p>
+                      <small>提示不写进卡片，也不会影响评分。</small>
+                    </div>
+                  )}
+
                   <div className="review-card-actions">
                     {!revealed ? (
-                      <button
-                        className="review-reveal"
-                        type="button"
-                        data-testid="review-reveal"
-                        onClick={() => setRevealed(true)}
-                        disabled={busy}
-                      >
-                        显示答案并对比
-                      </button>
+                      <div className="review-reveal-row">
+                        <button
+                          className="review-reveal"
+                          type="button"
+                          data-testid="review-reveal"
+                          onClick={() => setRevealed(true)}
+                          disabled={busy}
+                        >
+                          显示答案并对比
+                        </button>
+                        <button
+                          className="review-hint-button"
+                          type="button"
+                          data-testid="review-hint-button"
+                          onClick={() => void handleHint()}
+                          disabled={busy || hintBusy}
+                          title="让 AI 给一条不剧透的线索"
+                        >
+                          <Sparkles size={14} />
+                          {hint ? '换个提示' : 'AI 提示'}
+                        </button>
+                      </div>
                     ) : (
                       <div className="review-rating-area">
                         <p>对比结果见上方，评分仍由你决定；提交后立即保存并进入下一张。<span className="review-key-hint">键盘 1–4 评分 · 空格揭示</span></p>

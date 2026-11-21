@@ -90,3 +90,10 @@ export async function generateCardQuestions(cardId: string, count = 4): Promise<
   desktopOnly()
   return invoke('generate_card_questions', { cardId, count })
 }
+
+
+/** 复习提示：给一条不剧透的线索，不返回最终答案。 */
+export async function hintCard(cardId: string): Promise<string> {
+  desktopOnly()
+  return invoke('hint_card', { cardId })
+}

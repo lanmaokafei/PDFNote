@@ -98,6 +98,7 @@ await page.addInitScript(({ cards }) => {
       const card = state.find((item) => item.id === args?.input?.card_id)
       return card ? { ...card, due: '2026-12-01T00:00:00.000Z' } : null
     },
+    hint_card: () => '想想它在细胞里的角色，以及「能量货币」这个说法。',
     // 撤销评分：按日志里的 card_id 把卡片原样还回去（mock 不改 state，天然是评分前状态）。
     revert_review: (args) => {
       window.__reverted = (window.__reverted ?? 0) + 1
@@ -130,6 +131,16 @@ try {
   await page.waitForSelector('.app-shell')
   await page.getByRole('tab', { name: /复习/ }).first().click()
   await page.waitForSelector('.review-card', { timeout: 10000 })
+
+  // AI 提示：不剧透、不写卡，揭示后自动隐藏。
+  await page.locator('[data-testid="review-hint-button"]').click()
+  await page.waitForSelector('[data-testid="review-hint"]', { timeout: 5000 })
+  if (process.env.SHOT) await page.screenshot({ path: '/tmp/review-hint.png' })
+  const hintText = await page.locator('[data-testid="review-hint"]').innerText()
+  check(hintText.includes('能量货币'), `提示内容不对：${hintText}`)
+  check(hintText.includes('影响评分'), '提示面板缺少「不影响评分」说明')
+  check(await page.locator('.review-answer').count() === 0, '给提示时不应该显示答案')
+  check(!(await page.locator('.review-card').innerText()).includes('氧化磷酸化'), '提示泄露了原文答案')
 
   const input = page.locator('[data-testid="review-recall-input"]')
   const feedback = page.locator('[data-testid="review-match"]')

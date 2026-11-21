@@ -483,6 +483,24 @@ pub fn build_explain_prompt(
 /// 让模型解析一张卡片，返回可直接写进笔记的纯文本。
 ///
 /// 没有 question 的卡片（PDF 划重点）用摘录当主题，保证每张有内容的卡片都能解析。
+/// 组装「复习提示」提示词：模型看得到答案，但只能给不剧透的线索。
+pub fn build_hint_prompt(question: &str, excerpt: &str, note: &str) -> Result<(String, String), String> {
+    let question = question.trim();
+    let excerpt = excerpt.trim();
+    let note = note.trim();
+    if question.is_empty() && excerpt.is_empty() && note.is_empty() {
+        return Err("这张卡片还没有内容，无法生成提示".into());
+    }
+    let system = "你是复习教练。学生正在回忆一张卡片，你要给一个\"不剧透\"的提示。\n                  只输出一到两句中文，不给最终答案、不复述原文结论、不列完整要点；\n                  用提问、范围限定、结构线索或联想方向来引导，例如\"想想它在信息论里的位置\"、\"先回忆单位的量纲\"。\n                  不要寒暄、不要 Markdown、不要解释你在做什么。";
+    let user = format!(
+        "卡片问题：{}\n\n参考答案（只能用来判断什么不能说）：{}\n\n我的笔记（同上）：{}",
+        if question.is_empty() { "（无标题，请围绕摘录出提示）" } else { question },
+        if excerpt.is_empty() { "（无）" } else { excerpt },
+        if note.is_empty() { "（无）" } else { note },
+    );
+    Ok((system.to_string(), user))
+}
+
 pub async fn explain_card(state: &AppState, card_id: String) -> Result<String, String> {
     let (question, excerpt, note): (String, String, String) = {
         let connection = state.db()?;
@@ -600,6 +618,22 @@ pub async fn generate_questions(
         return Err("模型没有返回可用的题目，请重试或换一张卡片".into());
     }
     Ok(items)
+}
+
+/// 生成一条复习提示。
+pub async fn hint_card(state: &AppState, card_id: String) -> Result<String, String> {
+    let (question, excerpt, note): (String, String, String) = {
+        let connection = state.db()?;
+        connection
+            .query_row(
+                "SELECT question, excerpt, user_note FROM cards WHERE id = ?1",
+                rusqlite::params![card_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|error| format!("读取卡片失败: {error}"))?
+    };
+    let (system, user) = build_hint_prompt(&question, &excerpt, &note)?;
+    complete_text(state, &system, &user, 220).await
 }
 
 /// 纯文本补全（拆书用）：只发 system + user 文本，不携带图片。
@@ -1445,6 +1479,16 @@ mod tests {
         assert_eq!(requests.len(), 2);
         assert!(requests[1].starts_with("GET /v1/tasks/20261103-3158"), "unexpected poll: {}", requests[1]);
         let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn hint_prompt_keeps_answer_out_of_the_instruction() {
+        let (system, user) = build_hint_prompt("熵是什么？", "不确定性度量", "笔记").unwrap();
+        assert!(system.contains("不剧透"));
+        assert!(system.contains("不给最终答案"));
+        assert!(user.contains("熵是什么？"));
+        assert!(user.contains("不确定性度量"), "答案只作为模型参考，不能出现在提示里");
+        assert!(build_hint_prompt("", "", "").is_err());
     }
 
     #[test]

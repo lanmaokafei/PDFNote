@@ -25,6 +25,7 @@ import { LibraryWorkspace } from './features/library/LibraryWorkspace'
 import { StudyWorkspace } from './features/study/StudyWorkspace'
 import { SettingsDialog } from './features/settings/SettingsDialog'
 import { useTheme } from './theme/useTheme'
+import { GlobalSearch } from './features/search/GlobalSearch'
 
 const MindmapWorkspace = lazy(() =>
   import('./features/mindmap/MindmapWorkspace').then((module) => ({ default: module.MindmapWorkspace })),
@@ -69,9 +70,11 @@ function App() {
   const [status, setStatus] = useState<BootstrapStatus | null>(null)
   const [fatalError, setFatalError] = useState('')
   const [showMindmap, setShowMindmap] = useState(true)
-  const [searchToken, setSearchToken] = useState(0)
+  // 资料库搜索框聚焦改由跨库搜索取代，这个 token 保留给未来的视图内聚焦。
+  const searchToken = 0
   const theme = useTheme()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false)
   const [updatePromptOpen, setUpdatePromptOpen] = useState(false)
   const [updatePromptInfo, setUpdatePromptInfo] = useState<UpdateInfo | null>(null)
   const [jumpTarget, setJumpTarget] = useState<{ documentId: string; page: number; token: number } | null>(null)
@@ -233,7 +236,8 @@ function App() {
         }
         if (event.key.toLowerCase() === 'k') {
           event.preventDefault()
-          window.dispatchEvent(new Event('pdfnote:focus-search'))
+          // ⌘K 是跨库搜索；视图内的搜索框直接点或用 ⌘F。
+          setGlobalSearchOpen(true)
           return
         }
       }
@@ -295,12 +299,6 @@ function App() {
   function goTo(next: View) {
     setActiveDocument(null)
     setView(next)
-  }
-
-  function openSearch() {
-    setActiveDocument(null)
-    setView('library')
-    setSearchToken((token) => token + 1)
   }
 
   async function handlePageCount(count: number) {
@@ -440,7 +438,7 @@ function App() {
             )
           })}
           <span className="app-segment-divider" aria-hidden="true" />
-          <button type="button" className="app-segment-action" onClick={openSearch} title="搜索文档" aria-label="搜索文档">
+          <button type="button" className="app-segment-action" onClick={() => setGlobalSearchOpen(true)} title="跨库搜索（⌘K）" aria-label="跨库搜索" data-testid="global-search-open">
             <Search size={17} strokeWidth={1.8} />
           </button>
           <button
@@ -534,6 +532,12 @@ function App() {
           </>
         )}
       </main>
+      <GlobalSearch
+        open={globalSearchOpen}
+        onClose={() => setGlobalSearchOpen(false)}
+        onGoTo={(target) => goTo(target)}
+      />
+
       {settingsOpen && (
         <SettingsDialog
           onClose={() => setSettingsOpen(false)}
@@ -576,7 +580,7 @@ function App() {
             <dl>
               <dt>⌘1 / ⌘2 / ⌘3</dt><dd>资料库 / 脑图 / 卡片盒</dd>
               <dt>⌘4 / ⌘5 / ⌘6</dt><dd>笔记本 / 复习 / 粗读精读</dd>
-              <dt>⌘K</dt><dd>聚焦当前视图的搜索框</dd>
+              <dt>⌘K</dt><dd>跨库搜索：文档标题、卡片内容、笔记本</dd>
               <dt>⇧⌘F</dt><dd>在 PDF 里全书搜索（⌘F 仍是系统查找）</dd>
               <dt>? </dt><dd>显示或关闭这张键位表</dd>
               <dt>⌘Z</dt><dd>撤销：大纲改动 / 笔迹 / 删除卡片（删除会从回收站取回）</dd>

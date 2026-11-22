@@ -74,6 +74,7 @@ import {
 } from './CardEditor'
 import { AiAskDialog, AiGenerateDialog, BacklinkDialog, LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { buildLinkIndex } from '../card/backlinks'
+import { takePendingCardSelection } from './pendingSelection'
 import { mergeAiAnalysis } from '../card/aiNote'
 import { MindmapNodeContext } from './MindmapContext'
 import { MindmapNode, type MindmapFlowNode } from './MindmapNode'
@@ -1503,6 +1504,45 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     window.addEventListener('pdfnote:open-backlinks', handler)
     return () => window.removeEventListener('pdfnote:open-backlinks', handler)
   }, [])
+
+  // 跨库搜索选中一张没有页码的卡片：切到脑图后选中并居中。
+  // 视图刚挂载时 positions 可能还没算好，用 ref 记住待选 id，等布局完成再补一次。
+  const pendingSearchSelectRef = useRef<string | null>(null)
+  // 挂载时把搜索交接位里的 id 取走（懒加载时事件会早于监听）。
+  useEffect(() => {
+    const pending = takePendingCardSelection()
+    if (pending) pendingSearchSelectRef.current = pending
+  }, [])
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const cardId = (event as CustomEvent<{ cardId?: string }>).detail?.cardId
+      if (cardId) pendingSearchSelectRef.current = cardId
+    }
+    window.addEventListener('pdfnote:select-card', handler)
+    return () => window.removeEventListener('pdfnote:select-card', handler)
+  }, [])
+
+  useEffect(() => {
+    const cardId = pendingSearchSelectRef.current
+    if (!cardId) return
+    const point = positions[cardId]
+    if (!point) return
+    pendingSearchSelectRef.current = null
+    const width = compact ? COMPACT_NODE_WIDTH : NODE_WIDTH
+    // 卡片加载完成后工作区会清一次选中，这里补两次，保证从搜索结果进来时仍选中。
+    const apply = (center: boolean) => {
+      setSelectedIds(new Set([cardId]))
+      if (center) {
+        void setCenter(point.x + width / 2, point.y + NODE_ESTIMATED_HEIGHT / 2, {
+          zoom: Math.max(1, getZoom()),
+          duration: 300,
+        })
+      }
+    }
+    apply(true)
+    window.setTimeout(() => apply(false), 180)
+    window.setTimeout(() => apply(false), 560)
+  }, [compact, getZoom, positions, setCenter])
 
   // 撤销/重做评分：把节点从「本会话已评分」里放回或重新标记。
   useEffect(() => {

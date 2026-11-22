@@ -1419,7 +1419,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn renaming_and_deleting_tags_merges_cleanly() {
         let (_directory, state) = test_state();
         let card = create_card(&state, input("标签测试", None)).unwrap();

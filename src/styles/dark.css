@@ -940,3 +940,50 @@ html[data-theme="dark"] code {
   color: #cfe0cb;
   background: #1d2620;
 }
+
+/* 跨库搜索面板（0.64） */
+html[data-theme="dark"] .global-search {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, .6);
+}
+
+html[data-theme="dark"] .global-search-bar {
+  color: var(--dk-muted);
+  border-color: var(--dk-line-soft);
+}
+
+html[data-theme="dark"] .global-search-bar input {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .global-search-bar kbd,
+html[data-theme="dark"] .global-search-text strong {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .global-search-item {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .global-search-item.is-active {
+  background: rgba(255, 255, 255, .07);
+}
+
+html[data-theme="dark"] .global-search-text small,
+html[data-theme="dark"] .global-search-hint,
+html[data-theme="dark"] .global-search-foot,
+html[data-theme="dark"] .global-search-group h3 {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .global-search-foot {
+  border-color: var(--dk-line-soft);
+}
+
+html[data-theme="dark"] .global-search-error {
+  color: #f0b9a9;
+  border-color: #57342c;
+  background: #2a1d19;
+}

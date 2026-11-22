@@ -107,6 +107,29 @@ export function NotebookWorkspace() {
     void refresh()
   }, [refresh])
 
+  // 跨库搜索打开一本笔记本：列表还没加载完时先记下 id，加载完再补开。
+  const pendingOpenRef = useRef<string | null>(null)
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const id = (event as CustomEvent<{ id?: string }>).detail?.id
+      if (!id) return
+      const target = notebooks.find((item) => item.id === id)
+      if (target) setActive(target)
+      else pendingOpenRef.current = id
+    }
+    window.addEventListener('pdfnote:open-notebook', handler)
+    return () => window.removeEventListener('pdfnote:open-notebook', handler)
+  }, [notebooks])
+
+  useEffect(() => {
+    const id = pendingOpenRef.current
+    if (!id) return
+    const target = notebooks.find((item) => item.id === id)
+    if (!target) return
+    pendingOpenRef.current = null
+    setActive(target)
+  }, [notebooks])
+
   async function submitCreate() {
     const value = title.trim()
     if (!value) {

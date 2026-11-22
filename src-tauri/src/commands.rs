@@ -567,6 +567,183 @@ pub fn list_tags(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     cards::list_tags(&state)
 }
 
+/// 转义 LIKE 通配符：用户输入 `100%` 时要按字面量搜，而不是匹配任意串。
+fn escape_like(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\\' | '%' | '_' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+/// 命中处的摘要：以字符为单位截取，避免中文被切坏。
+fn match_snippet(text: &str, needle: &str, limit: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let chars: Vec<char> = trimmed.chars().collect();
+    let lower: Vec<char> = trimmed.to_lowercase().chars().collect();
+    let needle_chars: Vec<char> = needle.to_lowercase().chars().collect();
+    let hit = if needle_chars.is_empty() {
+        None
+    } else {
+        lower
+            .windows(needle_chars.len())
+            .position(|window| window == needle_chars.as_slice())
+    };
+    let Some(index) = hit else {
+        let head: String = chars.iter().take(limit).collect();
+        return if chars.len() > limit { format!("{head}…") } else { head };
+    };
+    let pad = limit.saturating_sub(needle_chars.len()) / 2;
+    let start = index.saturating_sub(pad);
+    let end = (index + needle_chars.len() + pad).min(chars.len());
+    let body: String = chars[start..end].iter().collect();
+    format!(
+        "{}{}{}",
+        if start > 0 { "…" } else { "" },
+        body,
+        if end < chars.len() { "…" } else { "" }
+    )
+}
+
+/// 跨库搜索命中：只带导航需要的最小信息。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalHit {
+    /// document / card / notebook
+    pub kind: String,
+    pub id: String,
+    pub title: String,
+    pub snippet: String,
+    pub document_id: Option<String>,
+    pub page: Option<u32>,
+}
+
+/// 一次查三张表：文档标题、卡片内容、笔记本标题。
+///
+/// 没上 FTS：本地数据量在几千条量级，LIKE + LIMIT 足够快；
+/// 关键是**排除回收站**——卡片回收站与文档回收站都要排掉，否则搜出来点不开。
+#[tauri::command]
+pub fn global_search(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<u32>,
+) -> Result<Vec<GlobalHit>, String> {
+    let needle = query.trim();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+    let cap = limit.unwrap_or(12).clamp(1, 40) as i64;
+    let pattern = format!("%{}%", escape_like(needle));
+    let connection = state.db()?;
+    let mut hits: Vec<GlobalHit> = Vec::new();
+
+    let mut documents = connection
+        .prepare(
+            "SELECT id, title FROM documents
+             WHERE title LIKE ?1 ESCAPE '\\'
+               AND id NOT IN (SELECT document_id FROM document_trash)
+             ORDER BY updated_at DESC LIMIT ?2",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = documents
+        .query_map(rusqlite::params![pattern, cap], |row| {
+            let id: String = row.get(0)?;
+            let title: String = row.get(1)?;
+            Ok(GlobalHit {
+                kind: "document".into(),
+                id,
+                snippet: String::new(),
+                title: title.clone(),
+                document_id: Some(row.get(0)?),
+                page: Some(1),
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows.flatten() {
+        hits.push(row);
+    }
+
+    let mut cards = connection
+        .prepare(
+            "SELECT c.id, c.question, c.excerpt, c.user_note, c.document_id, c.page
+             FROM cards c
+             WHERE NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = c.id)
+               AND (c.question LIKE ?1 ESCAPE '\\'
+                 OR c.excerpt LIKE ?1 ESCAPE '\\'
+                 OR c.user_note LIKE ?1 ESCAPE '\\')
+               AND (c.document_id IS NULL
+                 OR c.document_id NOT IN (SELECT document_id FROM document_trash))
+             ORDER BY c.updated_at DESC LIMIT ?2",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = cards
+        .query_map(rusqlite::params![pattern, cap], |row| {
+            let id: String = row.get(0)?;
+            let question: String = row.get(1)?;
+            let excerpt: String = row.get(2)?;
+            let note: String = row.get(3)?;
+            let document_id: Option<String> = row.get(4)?;
+            let page: Option<u32> = row.get(5)?;
+            let title = if question.trim().is_empty() {
+                excerpt.trim().chars().take(30).collect::<String>()
+            } else {
+                question.trim().to_string()
+            };
+            let source = if excerpt.contains(needle) {
+                excerpt.as_str()
+            } else if note.contains(needle) {
+                note.as_str()
+            } else {
+                question.as_str()
+            };
+            Ok(GlobalHit {
+                kind: "card".into(),
+                id,
+                title: if title.is_empty() { "未命名卡片".into() } else { title },
+                snippet: match_snippet(source, needle, 64),
+                document_id,
+                page,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows.flatten() {
+        hits.push(row);
+    }
+
+    let mut notebooks = connection
+        .prepare(
+            "SELECT id, title FROM notebooks WHERE title LIKE ?1 ESCAPE '\\'
+             ORDER BY updated_at DESC LIMIT ?2",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = notebooks
+        .query_map(rusqlite::params![pattern, cap], |row| {
+            Ok(GlobalHit {
+                kind: "notebook".into(),
+                id: row.get(0)?,
+                title: row.get(1)?,
+                snippet: String::new(),
+                document_id: None,
+                page: None,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows.flatten() {
+        hits.push(row);
+    }
+
+    Ok(hits)
+}
+
 /// 导出文件：单张图片直接写，多个文件自动打成 zip。
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1002,11 +1179,31 @@ pub fn set_card_layer(
 
 #[cfg(test)]
 mod tests {
-    use super::{export_markdown, save_export_files, ExportFile};
+    use super::{escape_like, export_markdown, match_snippet, save_export_files, ExportFile};
 
     fn png_base64() -> String {
         use base64::Engine;
         base64::engine::general_purpose::STANDARD.encode([0x89, b'P', b'N', b'G', 1, 2, 3])
+    }
+
+    #[test]
+    fn escape_like_handles_wildcards() {
+        assert_eq!(escape_like("100%"), "100\\%");
+        assert_eq!(escape_like("a_b"), "a\\_b");
+        assert_eq!(escape_like("c:\\tmp"), "c:\\\\tmp");
+        assert_eq!(escape_like("熵"), "熵");
+    }
+
+    #[test]
+    fn match_snippet_centers_on_hit_and_marks_truncation() {
+        let text = "前面很长的一段铺垫".repeat(10) + "关键概念在这里" + &"后面也很长".repeat(10);
+        let snippet = match_snippet(&text, "关键概念", 20);
+        assert!(snippet.contains("关键概念"), "{snippet}");
+        assert!(snippet.starts_with('…') && snippet.ends_with('…'), "{snippet}");
+        assert!(snippet.chars().count() <= 24, "{snippet}");
+
+        assert_eq!(match_snippet("没有命中的短文本", "别的", 40), "没有命中的短文本");
+        assert_eq!(match_snippet("", "x", 10), "");
     }
 
     #[test]

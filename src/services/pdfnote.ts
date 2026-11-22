@@ -630,3 +630,19 @@ export async function deleteNotebookInk(id: string): Promise<void> {
   desktopOnly()
   return invoke('delete_notebook_ink', { id })
 }
+
+
+/** 跨库搜索命中：文档标题 / 卡片内容 / 笔记本标题。 */
+export interface GlobalHit {
+  kind: 'document' | 'card' | 'notebook'
+  id: string
+  title: string
+  snippet: string
+  documentId: string | null
+  page: number | null
+}
+
+export async function globalSearch(query: string, limit = 12): Promise<GlobalHit[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('global_search', { query, limit })
+}

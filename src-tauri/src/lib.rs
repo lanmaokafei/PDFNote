@@ -79,6 +79,7 @@ pub fn run() {
             commands::set_card_tags,
             commands::list_tags,
             commands::list_tag_stats,
+            commands::global_search,
             commands::save_export_files,
             commands::rename_tag,
             commands::delete_tag,

@@ -779,6 +779,31 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       return null
     },
     list_tags: () => (board ? ['心内', '药理', '空标签'] : []),
+    global_search: (args) => {
+      const query = String(args?.query ?? '').trim()
+      if (!query) return []
+      const hits = []
+      for (const card of cardState) {
+        const haystack = `${card.question} ${card.excerpt} ${card.user_note} ${(card.tags ?? []).join(' ')}`
+        if (!haystack.includes(query)) continue
+        hits.push({
+          kind: 'card',
+          id: card.id,
+          title: card.question || '未命名卡片',
+          snippet: card.excerpt.slice(0, 60),
+          documentId: card.source_ref?.document_id ?? null,
+          page: card.source_ref?.page ?? null,
+        })
+      }
+      if (document.title.includes(query)) {
+        hits.push({ kind: 'document', id: document.id, title: document.title, snippet: '', documentId: document.id, page: 1 })
+      }
+      for (const notebook of window.__notebookState ?? []) {
+        if (!notebook.title.includes(query)) continue
+        hits.push({ kind: 'notebook', id: notebook.id, title: notebook.title, snippet: '', documentId: null, page: null })
+      }
+      return hits
+    },
     list_tag_stats: () => {
       const counts = new Map()
       for (const card of cardState) for (const tag of card.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1)
@@ -2829,6 +2854,63 @@ if (process.env.STEP === 'theme') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=global-search：跨库搜索的文档跳转、无页码卡片与空结果。
+if (process.env.STEP === 'global-search') {
+  await page.waitForSelector('.app-shell', { timeout: 15000 })
+  await page.waitForTimeout(600)
+
+  await page.keyboard.press('Meta+k')
+  await page.waitForSelector('[data-testid="global-search"]', { timeout: 5000 })
+  await page.locator('[data-testid="global-search-input"]').fill('概念卡片')
+  await page.waitForSelector('[data-testid="global-search-item"]', { timeout: 5000 })
+  const cards = await page.evaluate(() => ({
+    total: document.querySelectorAll('[data-testid="global-search-item"]').length,
+    kinds: [...new Set([...document.querySelectorAll('[data-testid="global-search-item"]')].map((item) => item.getAttribute('data-kind')))],
+  }))
+  if (cards.total < 1) problems.push('跨库搜索没有搜到卡片')
+  if (!cards.kinds.includes('card')) problems.push(`搜索结果缺少卡片分组：${cards.kinds}`)
+
+  if (process.env.SHOT) await page.screenshot({ path: '/tmp/global-search.png' })
+  // 文档结果：回车直接进文档工作区
+  await page.locator('[data-testid="global-search-input"]').fill('测试教材')
+  await page.waitForTimeout(500)
+  await page.waitForSelector('[data-testid="global-search-item"][data-kind="document"]', { timeout: 5000 })
+  await page.keyboard.press('Enter')
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  const opened = await page.evaluate(() => ({
+    palette: document.querySelectorAll('[data-testid="global-search"]').length,
+    segment: document.querySelector('.app-segment.is-document')?.textContent ?? '',
+  }))
+  if (opened.palette !== 0) problems.push('打开文档后面板没有关闭')
+  if (!opened.segment.includes('测试教材')) problems.push(`没有打开目标文档：${opened.segment}`)
+
+  // 空结果
+  await page.keyboard.press('Meta+k')
+  await page.waitForSelector('[data-testid="global-search"]', { timeout: 5000 })
+  await page.locator('[data-testid="global-search-input"]').fill('完全不存在的关键词')
+  await page.waitForTimeout(500)
+  const empty = await page.locator('[data-testid="global-search-results"]').innerText()
+  if (!empty.includes('没有找到')) problems.push(`空结果提示不对：${empty.slice(0, 40)}`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(250)
+
+  // 无页码卡片：切到脑图并选中
+  await page.keyboard.press('Meta+k')
+  await page.waitForSelector('[data-testid="global-search"]', { timeout: 5000 })
+  await page.locator('[data-testid="global-search-input"]').fill('概念卡片 2')
+  await page.waitForTimeout(500)
+  const cardItem = page.locator('[data-testid="global-search-item"][data-kind="card"]').first()
+  await cardItem.click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 60000 })
+  await page.waitForTimeout(800)
+  const selected = await page.locator('.mindmap-node.is-selected').count()
+  if (selected !== 1) problems.push(`无页码卡片没有在脑图中选中：${selected}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'global-search', cards, opened, empty: empty.slice(0, 30), selected }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // STEP=dark-shots：深色模式逐视图截图（人工目检用）。
 if (process.env.STEP === 'dark-shots') {
   await page.waitForSelector('.app-shell', { timeout: 15000 })
@@ -3337,15 +3419,17 @@ if (process.env.STEP === 'search') {
   await page.waitForTimeout(200)
   if ((await input.inputValue()) !== '') problems.push('Escape 没有清空搜索')
 
-  // ⌘1 回资料库，⌘K 聚焦搜索，? 打开键位表。
+  // ⌘1 回资料库，⌘K 打开跨库搜索，? 打开键位表。
   await page.locator('body').click({ position: { x: 5, y: 5 } })
   await page.keyboard.press('Meta+1')
   await page.waitForTimeout(500)
   if (await page.locator('[data-testid="mindmap-search"]').count() !== 0) problems.push('⌘1 没有切回资料库')
   await page.keyboard.press('Meta+k')
-  await page.waitForTimeout(300)
-  const focused = await page.evaluate(() => document.activeElement?.closest('.library-search') !== null)
-  if (!focused) problems.push('⌘K 没有聚焦资料库搜索')
+  await page.waitForSelector('[data-testid="global-search"]', { timeout: 5000 })
+  if (await page.locator('[data-testid="global-search-input"]').count() !== 1) problems.push('⌘K 没有打开跨库搜索')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(250)
+  if (await page.locator('[data-testid="global-search"]').count() !== 0) problems.push('Esc 没有关闭跨库搜索')
 
   await page.locator('body').click({ position: { x: 5, y: 5 } })
   await page.keyboard.press('Shift+/')

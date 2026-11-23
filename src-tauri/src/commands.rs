@@ -1,5 +1,6 @@
 use crate::{
-    ai, anki, backup, book, canvas_layers, canvases, cards, documents, models, notebooks, reading,
+    ai,
+    pdf, anki, backup, book, canvas_layers, canvases, cards, documents, models, notebooks, reading,
     review, state::AppState, update,
 };
 use tauri::{ipc::Response, State};
@@ -744,6 +745,49 @@ pub fn global_search(
     Ok(hits)
 }
 
+/// 手写本导出 PDF 的入参：每页一张 JPEG（前端 Canvas 渲染）。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotebookPdfPage {
+    pub width: u32,
+    pub height: u32,
+    pub base64: String,
+}
+
+/// 把若干页 JPEG 写成一个 PDF（A4，逐页全幅）。
+#[tauri::command]
+pub fn save_notebook_pdf(
+    destination: String,
+    pages: Vec<NotebookPdfPage>,
+) -> Result<String, String> {
+    if pages.is_empty() {
+        return Err("没有可导出的页面".into());
+    }
+    let target = std::path::PathBuf::from(&destination);
+    if !target.is_absolute() {
+        return Err("导出路径必须是绝对路径".into());
+    }
+    let is_pdf = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false);
+    if !is_pdf {
+        return Err("手写本 PDF 需要 .pdf 扩展名".into());
+    }
+    let mut images = Vec::with_capacity(pages.len());
+    for (index, page) in pages.iter().enumerate() {
+        let jpeg = decode_base64(&page.base64, &format!("第 {} 页", index + 1))?;
+        images.push(pdf::PdfImagePage { width: page.width, height: page.height, jpeg });
+    }
+    let bytes = pdf::build_pdf(&images)?;
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("无法创建目录：{error}"))?;
+    }
+    std::fs::write(&target, bytes).map_err(|error| format!("写入失败：{error}"))?;
+    Ok(target.to_string_lossy().to_string())
+}
+
 /// 导出文件：单张图片直接写，多个文件自动打成 zip。
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1179,7 +1223,7 @@ pub fn set_card_layer(
 
 #[cfg(test)]
 mod tests {
-    use super::{escape_like, export_markdown, match_snippet, save_export_files, ExportFile};
+    use super::{escape_like, export_markdown, match_snippet, save_export_files, save_notebook_pdf, ExportFile, NotebookPdfPage};
 
     fn png_base64() -> String {
         use base64::Engine;
@@ -1238,6 +1282,40 @@ mod tests {
             vec![ExportFile { name: "坏.png".into(), base64: "不是base64".into() }]
         )
         .is_err());
+    }
+
+    #[test]
+    fn saves_notebook_pdf_with_page_count_and_extension_checks() {
+        let base64 = "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAJ/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAAPwAqn//Z";
+        let directory = std::env::temp_dir().join(format!("pdfnote-pdf-{}", uuid::Uuid::new_v4()));
+        let target = directory.join("notebook.pdf");
+        save_notebook_pdf(
+            target.to_string_lossy().to_string(),
+            vec![
+                NotebookPdfPage { width: 1, height: 1, base64: base64.into() },
+                NotebookPdfPage { width: 1, height: 1, base64: base64.into() },
+            ],
+        )
+        .unwrap();
+        let bytes = std::fs::read(&target).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.starts_with("%PDF-1.4"));
+        assert!(text.contains("/Count 2"));
+
+        let wrong = save_notebook_pdf(
+            directory.join("notebook.png").to_string_lossy().to_string(),
+            vec![NotebookPdfPage { width: 1, height: 1, base64: base64.into() }],
+        )
+        .unwrap_err();
+        assert!(wrong.contains(".pdf"));
+
+        assert!(save_notebook_pdf(
+            target.to_string_lossy().to_string(),
+            vec![NotebookPdfPage { width: 1, height: 1, base64: "坏数据".into() }]
+        )
+        .is_err());
+        assert!(save_notebook_pdf(target.to_string_lossy().to_string(), vec![]).is_err());
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]

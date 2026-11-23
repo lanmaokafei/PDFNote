@@ -9,6 +9,7 @@ mod commands;
 mod db;
 mod documents;
 mod models;
+mod pdf;
 mod notebooks;
 mod notes;
 mod ocr;
@@ -80,6 +81,7 @@ pub fn run() {
             commands::list_tags,
             commands::list_tag_stats,
             commands::global_search,
+            commands::save_notebook_pdf,
             commands::save_export_files,
             commands::rename_tag,
             commands::delete_tag,

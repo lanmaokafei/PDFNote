@@ -746,3 +746,8 @@
   font-size: 12px;
   cursor: pointer;
 }
+
+/* 三个导出选项：前两个一行，PDF 占整行 */
+.notebook-export-options button:last-child {
+  grid-column: 1 / -1;
+}

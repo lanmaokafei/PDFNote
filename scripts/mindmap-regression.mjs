@@ -751,6 +751,17 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     },
     'plugin:dialog|open': () => '/tmp/anki-sample.txt',
     'plugin:dialog|save': () => window.__saveDialogPath ?? '/tmp/pdfnote-export.png',
+    save_notebook_pdf: (args) => {
+      window.__pdfExport = {
+        destination: args?.destination ?? '',
+        pages: (args?.pages ?? []).map((page) => ({
+          width: page?.width ?? 0,
+          height: page?.height ?? 0,
+          size: (page?.base64 ?? '').length,
+        })),
+      }
+      return args?.destination ?? ''
+    },
     save_export_files: (args) => {
       window.__exported = window.__exported ?? []
       window.__lastExportBase64 = args?.files?.[0]?.base64 ?? ''
@@ -3590,6 +3601,21 @@ if (process.env.STEP === 'notebook') {
   // 补零宽度跟页数位数走：6 页时是「第 1 页」，两位数页数才补成「第 01 页」。
   if (!allExport?.files[0]?.name.startsWith('第 ')) problems.push(`整本文件名不对：${allExport?.files[0]?.name}`)
   if (!allExport?.files[0]?.name.endsWith('.png')) problems.push(`整本文件扩展名不对：${allExport?.files[0]?.name}`)
+
+  // 整本 PDF：页数对齐、目标是 .pdf、每页都有真实 JPEG
+  await page.evaluate(() => { window.__saveDialogPath = '/tmp/pdfnote-notebook.pdf' })
+  await page.locator('[data-testid="notebook-export-open"]').click()
+  await page.waitForSelector('[data-testid="notebook-export"]', { timeout: 5000 })
+  await page.locator('[data-testid="notebook-export-pdf"]').click()
+  await page.waitForTimeout(3000)
+  const pdfExport = await page.evaluate(() => window.__pdfExport ?? null)
+  if (!pdfExport) problems.push('PDF 导出没有调用后端')
+  if (pdfExport?.pages.length !== pagesToExport) problems.push(`PDF 页数不对：${pdfExport?.pages.length} / ${pagesToExport}`)
+  if (!pdfExport?.destination.endsWith('.pdf')) problems.push(`PDF 目标扩展名不对：${pdfExport?.destination}`)
+  if (pdfExport?.pages.some((page) => page.size < 2000)) problems.push('PDF 页面图片太小，可能没有渲染')
+  if (pdfExport?.pages.some((page) => page.width !== 2000 || page.height !== 2828)) {
+    problems.push(`PDF 页面尺寸不对：${JSON.stringify(pdfExport?.pages[0])}`)
+  }
 
   // 返回书架并删除
   await page.locator('.notebook-back').click()

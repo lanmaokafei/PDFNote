@@ -37,8 +37,8 @@ import {
 } from '../../services/pdfnote'
 import { findInkHits, type InkHitCandidate } from '../pdf/inkErase'
 import { save as saveDialog } from '@tauri-apps/plugin-dialog'
-import { saveExportFiles } from '../../services/pdfnote'
-import { renderNotebookPage, renderNotebookPages } from './notebookExport'
+import { saveExportFiles, saveNotebookPdf } from '../../services/pdfnote'
+import { renderNotebookPage, renderNotebookPages, renderNotebookPdfPages } from './notebookExport'
 import { pushUndo } from '../undo/undoStack'
 import { SizeControl } from '../ink/SizeControl'
 import { readSizePreference, saveSizePreference } from '../ink/size'
@@ -518,20 +518,30 @@ function NotebookEditor({ notebook, onBack, onNotebookUpdated }: NotebookEditorP
     return best
   }
 
-  async function handleExport(mode: 'page' | 'all') {
+  async function handleExport(mode: 'page' | 'all' | 'pdf') {
     if (exportBusy) return
     const page = mode === 'page' ? currentVisiblePage() : 0
-    const suffix = mode === 'page' ? `第 ${page} 页` : '整本'
+    const suffix = mode === 'pdf' ? '整本' : mode === 'page' ? `第 ${page} 页` : '整本'
+    const extension = mode === 'page' ? 'png' : mode === 'pdf' ? 'pdf' : 'zip'
     const destination = await saveDialog({
-      defaultPath: `${notebook.title} · ${suffix}.${mode === 'page' ? 'png' : 'zip'}`,
+      defaultPath: `${notebook.title} · ${suffix}.${extension}`,
       filters: mode === 'page'
         ? [{ name: 'PNG 图片', extensions: ['png'] }]
-        : [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
+        : mode === 'pdf'
+          ? [{ name: 'PDF 文档', extensions: ['pdf'] }]
+          : [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
     }).catch(() => null)
     if (!destination) return
     setExportBusy(true)
     setError('')
     try {
+      if (mode === 'pdf') {
+        const images = renderNotebookPdfPages(pages, inks, notebook.paper, { visibleLayerIds })
+        await saveNotebookPdf(destination, images)
+        setExportOpen(false)
+        setExportNotice(`已导出 ${images.length} 页 PDF：${destination}`)
+        return
+      }
       const files = mode === 'page'
         ? [{ name: `第 ${page} 页.png`, base64: renderNotebookPage(page, inks, notebook.paper, { visibleLayerIds }) }]
         : renderNotebookPages(pages, inks, notebook.paper, { visibleLayerIds })
@@ -721,6 +731,10 @@ function NotebookEditor({ notebook, onBack, onNotebookUpdated }: NotebookEditorP
               <button type="button" data-testid="notebook-export-all" onClick={() => void handleExport('all')} disabled={exportBusy}>
                 <strong>整本</strong>
                 <span>{pages} 页 · PNG 打包成 zip</span>
+              </button>
+              <button type="button" data-testid="notebook-export-pdf" onClick={() => void handleExport('pdf')} disabled={exportBusy}>
+                <strong>整本 PDF</strong>
+                <span>{pages} 页 · A4 逐页、每页一张图</span>
               </button>
             </div>
             <footer>

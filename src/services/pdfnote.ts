@@ -261,6 +261,18 @@ export interface ExportImageFile {
   base64: string
 }
 
+export interface NotebookPdfPage {
+  width: number
+  height: number
+  /** 不含 data: 前缀的 JPEG base64。 */
+  base64: string
+}
+
+export async function saveNotebookPdf(destination: string, pages: NotebookPdfPage[]): Promise<string> {
+  desktopOnly()
+  return invoke('save_notebook_pdf', { destination, pages })
+}
+
 export async function saveExportFiles(destination: string, files: ExportImageFile[]): Promise<string> {
   desktopOnly()
   return invoke('save_export_files', { destination, files })

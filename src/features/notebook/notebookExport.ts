@@ -82,7 +82,29 @@ function drawStrokes(ctx: CanvasRenderingContext2D, inks: readonly ExportableInk
 }
 
 /**
- * 把一页画到 canvas 并返回 base64 PNG。
+ * 把一页画到 canvas。PNG / JPEG / PDF 导出都从这里取图，
+ * 保证三种格式的笔迹、纸样、图层可见性完全一致。
+ */
+function renderPageCanvas(
+  page: number,
+  inks: readonly NotebookInk[],
+  paper: PaperStyle,
+  options: { scale?: number; visibleLayerIds?: ReadonlySet<string> } = {},
+): HTMLCanvasElement {
+  const scale = options.scale ?? 2
+  const canvas = document.createElement('canvas')
+  canvas.width = PAGE_W * scale
+  canvas.height = PAGE_H * scale
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('无法创建导出画布')
+  ctx.scale(scale, scale)
+  drawPaper(ctx, paper)
+  drawStrokes(ctx, collectPageInks(inks, page, options.visibleLayerIds))
+  return canvas
+}
+
+/**
+ * 把一页导出成 base64 PNG。
  *
  * 不走 DOM 截图：手写页的笔迹本来就是矢量点，直接重绘更清晰，
  * 也不受滚动位置、缩放比例与元素可见性影响。
@@ -93,16 +115,40 @@ export function renderNotebookPage(
   paper: PaperStyle,
   options: { scale?: number; visibleLayerIds?: ReadonlySet<string> } = {},
 ): string {
-  const scale = options.scale ?? 2
-  const canvas = document.createElement('canvas')
-  canvas.width = PAGE_W * scale
-  canvas.height = PAGE_H * scale
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('无法创建导出画布')
-  ctx.scale(scale, scale)
-  drawPaper(ctx, paper)
-  drawStrokes(ctx, collectPageInks(inks, page, options.visibleLayerIds))
-  return canvas.toDataURL('image/png').split(',')[1] ?? ''
+  return renderPageCanvas(page, inks, paper, options).toDataURL('image/png').split(',')[1] ?? ''
+}
+
+export interface NotebookPdfPageImage {
+  width: number
+  height: number
+  base64: string
+}
+
+/** 单页 JPEG：PDF 用 DCTDecode 直接嵌入，不需要后端重新编码。 */
+export function renderNotebookPageJpeg(
+  page: number,
+  inks: readonly NotebookInk[],
+  paper: PaperStyle,
+  options: { scale?: number; visibleLayerIds?: ReadonlySet<string> } = {},
+): NotebookPdfPageImage {
+  const canvas = renderPageCanvas(page, inks, paper, options)
+  return {
+    width: canvas.width,
+    height: canvas.height,
+    base64: canvas.toDataURL('image/jpeg', 0.9).split(',')[1] ?? '',
+  }
+}
+
+/** 整本 PDF：每页一张 JPEG，顺序与页序一致。 */
+export function renderNotebookPdfPages(
+  pages: number,
+  inks: readonly NotebookInk[],
+  paper: PaperStyle,
+  options: { scale?: number; visibleLayerIds?: ReadonlySet<string> } = {},
+): NotebookPdfPageImage[] {
+  return Array.from({ length: pages }, (_, index) => (
+    renderNotebookPageJpeg(index + 1, inks, paper, options)
+  ))
 }
 
 /** 整本导出：每页一张 PNG，文件名补零方便排序。 */

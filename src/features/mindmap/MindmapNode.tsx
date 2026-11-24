@@ -69,6 +69,8 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
   const rated = context.ratedIds.has(card.id)
   const ratingPending = context.ratingPendingIds.has(card.id)
   const recallError = context.recallErrors[card.id]
+  const hint = context.hints[card.id] ?? ''
+  const hintPending = context.hintPendingIds.has(card.id)
 
   return (
     <article className={`mindmap-node mindmap-tone-${tone}${selected ? ' is-selected' : ''}${context.recallActive ? ' is-recall' : ''}`}>
@@ -135,9 +137,24 @@ export const MindmapNode = memo(function MindmapNode({ data, selected }: NodePro
       )}
 
       {!revealed ? (
-        <button className="mindmap-reveal-answer nodrag" type="button" onClick={() => context.onReveal(card.id)}>
-          显示答案
-        </button>
+        <>
+          {hint && <p className="mindmap-recall-hint" data-testid="mindmap-recall-hint">{hint}</p>}
+          <div className="mindmap-recall-actions">
+            <button className="mindmap-reveal-answer nodrag" type="button" onClick={() => context.onReveal(card.id)}>
+              显示答案
+            </button>
+            <button
+              className="mindmap-hint-answer nodrag"
+              type="button"
+              data-testid="mindmap-hint-button"
+              disabled={hintPending || context.busy}
+              title="让 AI 给一条不剧透的线索"
+              onClick={() => context.onHint(card.id)}
+            >
+              {hintPending ? '思考中…' : hint ? '换个提示' : '提示'}
+            </button>
+          </div>
+        </>
       ) : (
         <div className="mindmap-node-content">
           <ExpandableField

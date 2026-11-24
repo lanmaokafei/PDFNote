@@ -68,6 +68,7 @@ import {
   Trash2,
   Type,
 } from 'lucide-react'
+import { hintCard } from '../../services/ai'
 import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { useCardStore } from '../../store/cardStore'
 import { REVIEW_SCHEDULE_EVENT, reviewCard, type ReviewScheduleChange } from '../review/scheduler'
@@ -242,6 +243,9 @@ export function PdfWorkspace({
   const [recallMode, setRecallMode] = useState(false)
   const [sessionId, setSessionId] = useState('')
   const [revealedCardIds, setRevealedCardIds] = useState<Set<string>>(new Set())
+  // 文档回忆的 AI 提示：只对当前选中的标注卡片、揭示前有效。
+  const [recallHint, setRecallHint] = useState('')
+  const [recallHintBusy, setRecallHintBusy] = useState(false)
   const [ratedCardIds, setRatedCardIds] = useState<Set<string>>(new Set())
   const [ratingBusy, setRatingBusy] = useState(false)
   // 粗读 / 精读：阶段与召回随书存数据库；粗读只保留「高亮」一种产出。
@@ -1872,6 +1876,26 @@ export function PdfWorkspace({
     }
   }
 
+  useEffect(() => {
+    setRecallHint('')
+    setRecallHintBusy(false)
+  }, [selectedAnnotation?.card_id])
+
+  const requestRecallHint = useCallback(async () => {
+    const cardId = selectedAnnotation?.card_id
+    if (!cardId || recallHintBusy) return
+    setRecallHintBusy(true)
+    setOperationError('')
+    try {
+      const text = (await hintCard(cardId)).trim()
+      setRecallHint(text || '模型没有返回提示，稍后再试。')
+    } catch (reason) {
+      setOperationError(`提示失败：${reason instanceof Error ? reason.message : String(reason)}`)
+    } finally {
+      setRecallHintBusy(false)
+    }
+  }, [recallHintBusy, selectedAnnotation?.card_id])
+
   const handleRating = async (rating: Rating) => {
     if (!selectedAnnotation || !selectedCard || ratingBusy || ratedCardIds.has(selectedCard.id) || !sessionId) return
     setRatingBusy(true)
@@ -2428,6 +2452,22 @@ export function PdfWorkspace({
                 onReveal={handleClozeReveal}
                 onDisable={toggleCloze}
               />
+            </div>
+          )}
+
+          {recallMode && selectedAnnotation && !revealedCardIds.has(selectedAnnotation.card_id) && (
+            <div className="pdf-recall-hint" data-testid="pdf-recall-hint">
+              <strong>AI 提示</strong>
+              <p>{recallHint || '卡住了？可以先要一条线索，再揭示答案。'}</p>
+              <small className="pdf-recall-hint-note">提示不写进卡片，也不会影响评分。</small>
+              <button
+                type="button"
+                data-testid="pdf-hint-button"
+                onClick={() => void requestRecallHint()}
+                disabled={recallHintBusy}
+              >
+                {recallHintBusy ? '思考中…' : recallHint ? '换个提示' : '给我提示'}
+              </button>
             </div>
           )}
 

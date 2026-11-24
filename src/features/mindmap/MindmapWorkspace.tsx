@@ -17,7 +17,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { save as saveDialog } from '@tauri-apps/plugin-dialog'
-import { explainCardQuestion, type QuestionDraft } from '../../services/ai'
+import { explainCardQuestion, hintCard, type QuestionDraft } from '../../services/ai'
 import {
   ChevronRight,
   Copy,
@@ -338,6 +338,9 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   const [backlinkCardId, setBacklinkCardId] = useState<string | null>(null)
   const [askCardId, setAskCardId] = useState<string | null>(null)
+  // 回忆态 AI 提示：只存在本会话，退出回忆即清空。
+  const [recallHints, setRecallHints] = useState<Record<string, string>>({})
+  const [hintPendingIds, setHintPendingIds] = useState<Set<string>>(new Set())
   const [generateCardId, setGenerateCardId] = useState<string | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
@@ -1934,6 +1937,37 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     setNotice(`AI 出题：已创建 ${drafts.length} 张卡片（⌘Z 可撤销）。`)
   }, [canvasId, cards, createCardInStore, positions, refresh])
 
+  /** 回忆态要提示：结果只放内存，写回卡片就破坏「先回忆」的意义了。 */
+  const requestHint = useCallback(async (cardId: string) => {
+    if (hintPendingIds.has(cardId)) return
+    const card = cardsById[cardId]
+    if (!card || !(card.question.trim() || card.excerpt.trim() || card.user_note.trim())) {
+      setError('这张卡片还没有内容，无法生成提示。')
+      return
+    }
+    setHintPendingIds((current) => new Set(current).add(cardId))
+    try {
+      const text = (await hintCard(cardId)).trim()
+      setRecallHints((current) => ({ ...current, [cardId]: text || '模型没有返回提示，稍后再试。' }))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setHintPendingIds((current) => {
+        const next = new Set(current)
+        next.delete(cardId)
+        return next
+      })
+    }
+  }, [cardsById, hintPendingIds])
+
+  // 退出回忆：清掉提示，避免下次误以为是新会话的结果。
+  useEffect(() => {
+    if (!recallActive) {
+      setRecallHints({})
+      setHintPendingIds(new Set())
+    }
+  }, [recallActive])
+
   /** 节点与大纲行共用一套卡片操作，仅折叠行为与视图项不同。 */
   const cardMenuSections = (
     cardId: string,
@@ -2068,11 +2102,14 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     ratedIds,
     ratingPendingIds,
     recallErrors,
+    hints: recallHints,
+    hintPendingIds,
     onEdit: (id: string) => setEditor(id),
     onTag: (id: string) => setTagTarget(id),
     onLink: (id: string) => setLinkTarget(id),
     onToggle: (id: string) => void toggleCard(id),
     onReveal: revealAnswer,
+    onHint: (id: string) => void requestHint(id),
     onRate: (id: string, rating: Rating) => void rateCard(id, rating),
     onRemove: (id: string) => setConfirmation({ kind: 'remove', id }),
     onDelete: (id: string) => setConfirmation({ kind: 'delete', id }),
@@ -2080,8 +2117,9 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     onExplain: (id: string) => void explainCard(id),
     onCycleTone: cycleTone,
   }), [
-    busy, childCounts, collapsedIds, cycleTone, explainCard, linkIndex, lite, openSource, rateCard,
-    ratedIds, ratingPendingIds, recallActive, recallErrors, revealedIds, revealAnswer, toggleCard,
+    busy, childCounts, collapsedIds, cycleTone, explainCard, hintPendingIds, linkIndex, lite, openSource,
+    rateCard, ratedIds, ratingPendingIds, recallActive, recallErrors, recallHints, requestHint, revealedIds,
+    revealAnswer, toggleCard,
   ])
 
   return (

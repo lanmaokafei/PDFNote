@@ -848,6 +848,7 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     },
     get_ai_settings: () => ({ baseUrl: '', model: '', apiKey: '' }),
     explain_card: () => explainText,
+    hint_card: () => '想想熵衡量的是什么的不确定性，以及它的单位。',
     ask_card: (args) => `你问的是「${args?.question ?? ''}」：卡片里说熵度量不确定性。`,
     generate_card_questions: () => ([
       { question: '熵的物理意义是什么？', answer: '系统不确定性的度量。' },
@@ -1959,6 +1960,22 @@ if (process.env.STEP === 'recall') {
 
   await page.locator('button[title="文档遮挡回忆"]').first().click()
   await page.waitForTimeout(700)
+
+  // AI 提示：选中遮挡块后在揭示前给出线索
+  await page.locator('[data-mask-index="0"]').first().click()
+  await page.waitForTimeout(400)
+  const hintPanel = page.locator('[data-testid="pdf-recall-hint"]')
+  if (await hintPanel.count() === 0) {
+    problems.push('文档回忆没有 AI 提示入口')
+  } else {
+    await page.locator('[data-testid="pdf-hint-button"]').click()
+    await page.waitForTimeout(700)
+    const hintText = await hintPanel.innerText()
+    if (!hintText.includes('不确定性')) problems.push(`文档回忆提示内容不对：${hintText}`)
+    if (!hintText.includes('提示不写进卡片')) problems.push('文档回忆提示缺少说明')
+    if (process.env.SHOT) await page.screenshot({ path: '/tmp/pdf-recall-hint.png' })
+  }
+
   const during = await readRecall()
   if (during.inks !== 0) problems.push(`回忆态仍显示手写：${during.inks}`)
   if (during.notes !== 0) problems.push(`回忆态仍显示留白：${during.notes}`)
@@ -2919,6 +2936,33 @@ if (process.env.STEP === 'global-search') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'global-search', cards, opened, empty: empty.slice(0, 30), selected }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=mindmap-hint：脑图主动回忆里的 AI 提示。
+if (process.env.STEP === 'mindmap-hint') {
+  await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 120000 })
+  await page.waitForTimeout(900)
+
+  await page.getByRole('button', { name: '主动回忆' }).first().click()
+  await page.waitForTimeout(600)
+  const hidden = await page.locator('.mindmap-node-content').count()
+  if (hidden !== 0) problems.push(`回忆态不应显示答案：${hidden}`)
+
+  await page.locator('[data-testid="mindmap-hint-button"]').first().click()
+  await page.waitForSelector('[data-testid="mindmap-recall-hint"]', { timeout: 5000 })
+  const hintText = await page.locator('[data-testid="mindmap-recall-hint"]').first().innerText()
+  if (!hintText.includes('不确定性')) problems.push(`脑图提示内容不对：${hintText}`)
+  if (process.env.SHOT) await page.screenshot({ path: '/tmp/mindmap-hint.png' })
+  if (await page.locator('.mindmap-node-content').count() !== 0) problems.push('给提示后答案被提前显示')
+
+  await page.locator('.mindmap-reveal-answer').first().click()
+  await page.waitForTimeout(400)
+  if (await page.locator('.mindmap-node-content').count() === 0) problems.push('揭示后没有显示答案')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'mindmap-hint', hidden, hintText }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

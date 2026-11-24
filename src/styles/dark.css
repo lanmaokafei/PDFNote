@@ -987,3 +987,32 @@ html[data-theme="dark"] .global-search-error {
   border-color: #57342c;
   background: #2a1d19;
 }
+
+/* 回忆提示（0.66） */
+html[data-theme="dark"] .mindmap-workspace .mindmap-recall-hint,
+html[data-theme="dark"] .mindmap-workspace .mindmap-hint-answer {
+  color: var(--dk-text-soft);
+  border-color: #3a4a3c;
+  background: #1c251d;
+}
+
+html[data-theme="dark"] .pdf-recall-hint {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: rgba(23, 29, 25, .97);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .45);
+}
+
+html[data-theme="dark"] .pdf-recall-hint strong {
+  color: #a8c8a0;
+}
+
+html[data-theme="dark"] .pdf-recall-hint-note {
+  color: #87978a;
+}
+
+html[data-theme="dark"] .pdf-recall-hint button {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}

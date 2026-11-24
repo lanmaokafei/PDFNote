@@ -1424,3 +1424,50 @@ button.mindmap-field-label:hover { color: #456c43; }
   opacity: .5;
   cursor: default;
 }
+
+/* ---------- 回忆态 AI 提示（0.66） ---------- */
+
+.mindmap-recall-actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 11px 9px;
+}
+
+.mindmap-recall-actions .mindmap-reveal-answer {
+  flex: 1 1 auto;
+  width: auto;
+  margin: 0;
+}
+
+.mindmap-hint-answer {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border: 1px solid #d6e2d0;
+  border-radius: 5px;
+  color: #567150;
+  background: #f7fbf3;
+  font-size: 9px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mindmap-hint-answer:hover:not(:disabled) {
+  background: #eef6e7;
+}
+
+.mindmap-hint-answer:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.mindmap-recall-hint {
+  margin: 0 11px 7px;
+  padding: 7px 9px;
+  border: 1px dashed #cbdcbf;
+  border-radius: 5px;
+  color: #4f6449;
+  background: #f7fbf2;
+  font-size: 8.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}

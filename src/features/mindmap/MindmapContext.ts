@@ -24,11 +24,15 @@ export interface MindmapNodeContextValue {
   ratedIds: ReadonlySet<string>
   ratingPendingIds: ReadonlySet<string>
   recallErrors: Readonly<Record<string, string>>
+  /** 回忆态下的 AI 提示（按卡片存，只在本会话）。 */
+  hints: Readonly<Record<string, string>>
+  hintPendingIds: ReadonlySet<string>
   onEdit: (id: string) => void
   onTag: (id: string) => void
   onLink: (id: string) => void
   onToggle: (id: string) => void
   onReveal: (id: string) => void
+  onHint: (id: string) => void
   onRate: (id: string, rating: Rating) => void
   onRemove: (id: string) => void
   onDelete: (id: string) => void

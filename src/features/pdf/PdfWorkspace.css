@@ -2561,3 +2561,57 @@
   color: #4f7a56;
   font-weight: 600;
 }
+
+/* ---------- 文档回忆 AI 提示（0.66） ---------- */
+
+.pdf-recall-hint {
+  position: absolute;
+  /* 让开顶部的回忆提示条（toast），否则两层面板会叠在一起。 */
+  top: 104px;
+  left: 16px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 300px;
+  padding: 11px 13px;
+  border: 1px solid rgba(26, 32, 26, .08);
+  border-radius: 12px;
+  color: #58685a;
+  background: rgba(255, 255, 255, .97);
+  box-shadow: 0 14px 30px rgba(22, 28, 22, .14);
+}
+
+.pdf-recall-hint strong {
+  color: #6c8a63;
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+
+.pdf-recall-hint p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.pdf-recall-hint-note {
+  color: #94a08f;
+  font-size: 9.5px;
+}
+
+.pdf-recall-hint button {
+  align-self: flex-start;
+  padding: 5px 10px;
+  border: 1px solid #d8e4d2;
+  border-radius: 6px;
+  color: #4f6b4d;
+  background: #f6fbf2;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.pdf-recall-hint button:disabled {
+  opacity: .55;
+  cursor: default;
+}

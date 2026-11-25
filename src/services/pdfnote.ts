@@ -378,6 +378,11 @@ export async function removeAnnotation(id: string, deleteCard: boolean): Promise
   return invoke('remove_annotation', { id, deleteCard })
 }
 
+export async function moveCardsToCanvas(cardIds: string[], canvasId: string): Promise<number> {
+  desktopOnly()
+  return invoke('move_cards_to_canvas', { cardIds, canvasId })
+}
+
 export async function listMindmapLayout(canvasId = 'main'): Promise<MindmapLayout[]> {
   if (!isTauriRuntime()) return []
   return invoke('list_mindmap_layout', { canvasId })

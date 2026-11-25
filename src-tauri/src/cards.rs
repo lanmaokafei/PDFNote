@@ -10,6 +10,7 @@ use crate::{
     state::AppState,
 };
 use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 fn validate_annotation(annotation: &AnnotationInput) -> Result<(), String> {
@@ -357,6 +358,111 @@ pub fn save_mindmap_layout(
             .map_err(|error| error.to_string())?;
     }
     transaction.commit().map_err(|error| error.to_string())
+}
+
+/// 把卡片（连同子树）移动到另一张画布。
+///
+/// 画布归属就是 `mindmap_layout` 的一行：先从其它画布删掉，再往目标画布插入。
+/// 被移动的「入口卡片」会变成根节点（父亲留在原画布，硬挂过去就成了孤儿），
+/// 子树内部的父子关系与顺序保持不变；坐标给一个错开的阶梯，避免全部堆在 (0,0)。
+pub fn move_cards_to_canvas(
+    state: &AppState,
+    card_ids: Vec<String>,
+    canvas_id: String,
+) -> Result<u32, String> {
+    if card_ids.is_empty() {
+        return Err("没有要移动的卡片".into());
+    }
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    if !canvases::canvas_exists(&transaction, &canvas_id)? {
+        return Err(format!("画布 {canvas_id} 不存在"));
+    }
+
+    // 一次取全表的父子关系，避免对每张卡都做一次递归查询。
+    let mut parents: HashMap<String, Option<String>> = HashMap::new();
+    {
+        let mut statement = transaction
+            .prepare("SELECT id, parent_id FROM cards")
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)))
+            .map_err(|error| error.to_string())?;
+        for row in rows.flatten() {
+            parents.insert(row.0, row.1);
+        }
+    }
+    let mut children: HashMap<String, Vec<String>> = HashMap::new();
+    for (id, parent) in &parents {
+        if let Some(parent) = parent {
+            children.entry(parent.clone()).or_default().push(id.clone());
+        }
+    }
+
+    let mut moving: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut stack: Vec<String> = card_ids.clone();
+    while let Some(id) = stack.pop() {
+        if !parents.contains_key(&id) || !seen.insert(id.clone()) {
+            continue;
+        }
+        moving.push(id.clone());
+        if let Some(kids) = children.get(&id) {
+            stack.extend(kids.iter().cloned());
+        }
+    }
+    if moving.is_empty() {
+        return Err("这些卡片不存在".into());
+    }
+
+    let heads: HashSet<String> = card_ids.into_iter().filter(|id| seen.contains(id)).collect();
+    for id in &heads {
+        transaction
+            .execute("UPDATE cards SET parent_id = NULL WHERE id = ?1", params![id])
+            .map_err(|error| error.to_string())?;
+    }
+
+    let timestamp = now();
+    for id in &moving {
+        transaction
+            .execute(
+                "DELETE FROM mindmap_layout WHERE card_id = ?1 AND canvas_id <> ?2",
+                params![id, canvas_id],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
+    let base: i64 = transaction
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM cards WHERE parent_id IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    for (index, id) in moving.iter().enumerate() {
+        let x = 80.0 + (index % 5) as f64 * 260.0;
+        let y = 80.0 + (index / 5) as f64 * 180.0;
+        transaction
+            .execute(
+                "INSERT INTO mindmap_layout (card_id, canvas_id, x, y, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(canvas_id, card_id) DO UPDATE SET
+                 x = excluded.x, y = excluded.y, updated_at = excluded.updated_at",
+                params![id, canvas_id, x, y, timestamp],
+            )
+            .map_err(|error| error.to_string())?;
+        if heads.contains(id) {
+            transaction
+                .execute(
+                    "UPDATE cards SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![base + index as i64, timestamp, id],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    canvases::sync_mindmap_surface(&transaction)?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(moving.len() as u32)
 }
 
 pub fn move_card(
@@ -1416,6 +1522,46 @@ mod tests {
         assert_eq!(card.source_ref.as_ref().map(|source| source.page), Some(1));
         assert!(card.excerpt.is_empty());
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn moves_card_subtree_between_canvases() {
+        let (_directory, state) = test_state();
+        let target = canvases::create_canvas(&state, crate::models::CreateMindmapCanvasInput {
+            id: Some("canvas-b".into()),
+            name: "第二块画布".into(),
+            document_id: None,
+        })
+        .unwrap();
+        let parent = create_card(&state, input("父节点", None)).unwrap();
+        let child = create_card(&state, input("子节点", Some(parent.id.clone()))).unwrap();
+
+        let moved = move_cards_to_canvas(
+            &state,
+            vec![parent.id.clone()],
+            target.id.clone(),
+        )
+        .unwrap();
+        assert_eq!(moved, 2, "子树应一起移动");
+
+        let main_layout = list_mindmap_layout(&state, None).unwrap();
+        assert!(main_layout.is_empty(), "原画布不应残留布局：{main_layout:?}");
+        let target_layout = list_mindmap_layout(&state, Some(target.id.clone())).unwrap();
+        assert_eq!(target_layout.len(), 2);
+        assert!(target_layout.iter().all(|layout| layout.x != 0.0 || layout.y != 0.0));
+
+        {
+            let database = state.db().unwrap();
+            let moved_parent = get_card(&database, &parent.id).unwrap();
+            assert!(moved_parent.parent_id.is_none(), "入口卡片要变成根节点");
+            assert!(moved_parent.surface_mindmap);
+            let moved_child = get_card(&database, &child.id).unwrap();
+            assert_eq!(moved_child.parent_id.as_deref(), Some(parent.id.as_str()), "子树关系要保留");
+        }
+
+        let error = move_cards_to_canvas(&state, vec![parent.id.clone()], "missing".into()).unwrap_err();
+        assert!(error.contains("不存在"), "{error}");
+        assert!(move_cards_to_canvas(&state, vec![], target.id).is_err());
     }
 
     #[test]

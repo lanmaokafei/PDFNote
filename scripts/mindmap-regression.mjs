@@ -634,6 +634,10 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       }
       return count
     },
+    move_cards_to_canvas: (args) => {
+      window.__canvasMove = { cardIds: args?.cardIds ?? [], canvasId: args?.canvasId ?? '' }
+      return (args?.cardIds ?? []).length
+    },
     save_mindmap_layout: (args) => {
       const items = args?.items ?? args?.layouts ?? []
       if (Array.isArray(items)) layoutState.push(...items)
@@ -2788,6 +2792,56 @@ if (process.env.STEP === 'outline-batch') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'outline-batch', batchBar, indented, outdented }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=outline-canvas：大纲拖到画布 chip 的跨画布移动。
+if (process.env.STEP === 'outline-canvas') {
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+  await page.getByRole('button', { name: /大纲/ }).first().click()
+  await page.waitForSelector('.mindmap-outline-row', { timeout: 20000 })
+  await page.waitForTimeout(600)
+  const picker = page.locator('[data-testid="canvas-select"]').first()
+  const currentCanvas = await picker.count() ? await picker.inputValue() : ''
+
+  // 拖起第一行：右上角应浮出其它画布
+  await page.evaluate(() => {
+    const row = document.querySelector('.mindmap-outline-row')
+    if (!row) return
+    window.__dragData = new DataTransfer()
+    row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: window.__dragData }))
+  })
+  await page.waitForSelector('[data-testid="outline-canvas-drop"]', { timeout: 5000 })
+  if (process.env.SHOT) await page.screenshot({ path: '/tmp/outline-canvas-drop.png' })
+  const targets = await page.locator('[data-testid="outline-canvas-target"]').count()
+  if (targets < 1) problems.push('拖起行后没有出现其它画布落点')
+
+  const target = page.locator('[data-testid="outline-canvas-target"]').first()
+  const targetId = await target.getAttribute('data-canvas-id')
+  if (!targetId || targetId === currentCanvas) problems.push(`画布落点不对：${targetId} / 当前 ${currentCanvas}`)
+
+  await page.evaluate((id) => {
+    const chip = document.querySelector(`[data-testid="outline-canvas-target"][data-canvas-id="${id}"]`)
+    if (!chip || !window.__dragData) return
+    chip.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: window.__dragData }))
+    chip.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: window.__dragData }))
+  }, targetId)
+  await page.waitForTimeout(1500)
+
+  const moved = await page.evaluate(() => ({
+    call: window.__canvasMove ?? null,
+    notice: document.querySelector('.mindmap-notice')?.textContent ?? '',
+  }))
+  if (!moved.call) problems.push('跨画布拖动没有调用后端')
+  if (moved.call && moved.call.canvasId !== targetId) problems.push(`移动目标画布不对：${moved.call?.canvasId}`)
+  if (moved.call && moved.call.cardIds.length < 1) problems.push('跨画布移动的卡片为空')
+  if (!moved.notice.includes('移到')) problems.push(`没有提示移动结果：${moved.notice}`)
+  if (await page.locator('[data-testid="outline-canvas-drop"]').count() !== 0) problems.push('移动后落点面板没有收起')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'outline-canvas', currentCanvas, targetId, moved }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

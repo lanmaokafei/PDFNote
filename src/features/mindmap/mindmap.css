@@ -1471,3 +1471,43 @@ button.mindmap-field-label:hover { color: #456c43; }
   line-height: 1.6;
   white-space: pre-wrap;
 }
+
+/* ---------- 大纲跨画布拖动（0.68） ---------- */
+
+.mindmap-outline-canvas-drop {
+  position: absolute;
+  bottom: 18px;
+  right: 16px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid #d7e3d0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .97);
+  box-shadow: 0 10px 24px rgba(24, 32, 24, .12);
+}
+
+.mindmap-outline-canvas-drop span {
+  color: #8a9684;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.mindmap-outline-canvas-drop button {
+  padding: 4px 9px;
+  border: 1px dashed #cbdcc2;
+  border-radius: 6px;
+  color: #4f6a4b;
+  background: #f7fbf3;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.mindmap-outline-canvas-drop button.is-active {
+  border-style: solid;
+  border-color: #7fa878;
+  color: #33502f;
+  background: #e8f3e2;
+}

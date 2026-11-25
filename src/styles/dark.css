@@ -1035,3 +1035,26 @@ html[data-theme="dark"] .study-recall-mask button {
   border-color: var(--dk-line);
   background: var(--dk-surface-2);
 }
+
+/* 大纲跨画布落点（0.68） */
+html[data-theme="dark"] .mindmap-outline-canvas-drop {
+  border-color: var(--dk-line);
+  background: rgba(23, 29, 25, .97);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .45);
+}
+
+html[data-theme="dark"] .mindmap-outline-canvas-drop span {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .mindmap-outline-canvas-drop button {
+  color: var(--dk-text-soft);
+  border-color: #3a4a3c;
+  background: #1d2620;
+}
+
+html[data-theme="dark"] .mindmap-outline-canvas-drop button.is-active {
+  color: #eaf5e6;
+  border-color: #6e9a70;
+  background: #26382a;
+}

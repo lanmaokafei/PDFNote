@@ -57,6 +57,7 @@ import {
   listCardLinks,
   listMindmapCanvases,
   listMindmapLayout,
+  moveCardsToCanvas,
   moveCard,
   saveMindmapLayout,
   setCardCollapsed,
@@ -315,6 +316,8 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
   const [outlineDraft, setOutlineDraft] = useState('')
   const [outlineDrag, setOutlineDrag] = useState<string | null>(null)
   const [outlineDrop, setOutlineDrop] = useState<{ id: string; position: DropPosition } | null>(null)
+  // 跨画布拖动：拖起大纲行时右上角浮出其它画布作为落点。
+  const [outlineCanvasDrop, setOutlineCanvasDrop] = useState<string | null>(null)
   const [outlineFocusTick, setOutlineFocusTick] = useState(0)
   const outlineEditingRef = useRef<string | null>(null)
   const outlineDragRef = useRef<string | null>(null)
@@ -1708,6 +1711,24 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     }
   }, [outlineDrop])
 
+  /** 拖到画布 chip：连同子树整块搬走，一次事务。 */
+  const handleOutlineCanvasDrop = useCallback((targetId: string) => {
+    const dragId = outlineDragRef.current
+    if (!dragId) return
+    const ids = selectedIds.has(dragId) && selectedIds.size > 1 ? [...selectedIds] : [dragId]
+    outlineDragRef.current = null
+    setOutlineDrag(null)
+    setOutlineDrop(null)
+    setOutlineCanvasDrop(null)
+    void runTask(async () => {
+      const moved = await moveCardsToCanvas(ids, targetId)
+      setSelectedIds(new Set())
+      await refresh()
+      const name = canvases.find((canvas) => canvas.id === targetId)?.name ?? targetId
+      setNotice(`已把 ${moved} 张卡片移到「${name}」（含子树）。切到该画布即可继续整理。`)
+    })
+  }, [canvases, refresh, runTask, selectedIds])
+
   const handleOutlineDrop = useCallback((event: React.DragEvent<HTMLDivElement>, card: Card) => {
     event.preventDefault()
     const dragId = outlineDragRef.current
@@ -2394,10 +2415,38 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
             {ink.panel}
             {viewMode === 'outline' && (
             <div className="mindmap-outline" onContextMenu={handleOutlinePaneContextMenu}>
+              {outlineDrag && canvases.length > 1 && (
+                <div className="mindmap-outline-canvas-drop" data-testid="outline-canvas-drop">
+                  <span>拖到画布：</span>
+                  {canvases.filter((canvas) => canvas.id !== canvasId).map((canvas) => (
+                    <button
+                      key={canvas.id}
+                      type="button"
+                      className={outlineCanvasDrop === canvas.id ? 'is-active' : ''}
+                      data-testid="outline-canvas-target"
+                      data-canvas-id={canvas.id}
+                      onDragOver={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        event.dataTransfer.dropEffect = 'move'
+                        setOutlineCanvasDrop(canvas.id)
+                      }}
+                      onDragLeave={() => setOutlineCanvasDrop((current) => (current === canvas.id ? null : current))}
+                      onDrop={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        handleOutlineCanvasDrop(canvas.id)
+                      }}
+                    >
+                      {canvas.name}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="mindmap-outline-head">
                   <div>
                     <strong>大纲视图</strong>
-                    <span>{cards.length} 张卡片 · 点击标题直接改；回车建同级、⌘↩ 建子级、Tab 缩进、拖拽调层级</span>
+                    <span>{cards.length} 张卡片 · 点击标题直接改；回车建同级、⌘↩ 建子级、Tab 缩进、拖拽调层级；拖到右上角可换画布</span>
                   </div>
                 <div className="mindmap-outline-actions">
                   {compact && (

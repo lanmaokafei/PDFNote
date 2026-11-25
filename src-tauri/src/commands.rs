@@ -374,6 +374,15 @@ pub fn remove_annotation(
 }
 
 #[tauri::command]
+pub fn move_cards_to_canvas(
+    state: State<'_, AppState>,
+    card_ids: Vec<String>,
+    canvas_id: String,
+) -> Result<u32, String> {
+    cards::move_cards_to_canvas(&state, card_ids, canvas_id)
+}
+
+#[tauri::command]
 pub fn list_mindmap_layout(
     state: State<'_, AppState>,
     canvas_id: Option<String>,

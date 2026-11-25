@@ -73,6 +73,7 @@ pub fn run() {
             commands::update_annotation_geometry,
             commands::remove_annotation,
             commands::list_mindmap_layout,
+            commands::move_cards_to_canvas,
             commands::save_mindmap_layout,
             commands::move_card,
             commands::apply_card_order,

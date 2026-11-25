@@ -1016,3 +1016,22 @@ html[data-theme="dark"] .pdf-recall-hint button {
   border-color: var(--dk-line);
   background: var(--dk-surface-2);
 }
+
+/* 文档回忆脑图遮罩（0.67） */
+html[data-theme="dark"] .study-recall-mask {
+  background: #121814;
+}
+
+html[data-theme="dark"] .study-recall-mask strong {
+  color: #dbe6d8;
+}
+
+html[data-theme="dark"] .study-recall-mask p {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .study-recall-mask button {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}

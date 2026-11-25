@@ -162,6 +162,8 @@ export interface PdfWorkspaceProps {
    * 不传则跟随本书当前画布（并随画布切换事件更新）。
    */
   canvasId?: string
+  /** 回忆态变化：StudyWorkspace 据此遮住右侧脑图，避免答案泄漏。 */
+  onRecallChange?: (active: boolean) => void
   /**
    * 粗读精读模式：显示粗读/精读阶段条与骨架入口。
    * 资料库直接打开 PDF 时不开（那套流程在「粗读精读」模块里），工具按精读档全开。
@@ -205,6 +207,7 @@ export function PdfWorkspace({
   embedded = false,
   canvasId: canvasIdOverride,
   closeReading = false,
+  onRecallChange,
 }: PdfWorkspaceProps) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [pageCount, setPageCount] = useState(document.page_count)
@@ -1470,6 +1473,28 @@ export function PdfWorkspace({
       setDeleting(false)
     }
   }
+
+  // 通知外层：文档回忆开始时遮住并排的脑图（卡片答案不能摆旁边）。
+  useEffect(() => {
+    onRecallChange?.(recallMode)
+  }, [onRecallChange, recallMode])
+
+  // 遮罩上的「退出回忆」：事件解耦，避免把回调穿进遮罩组件。
+  const toggleRecallRef = useRef<() => void>(() => undefined)
+  useEffect(() => {
+    toggleRecallRef.current = () => {
+      if (!recallMode) return
+      setOperationError('')
+      setSelectedAnnotationId(null)
+      setRecallMode(false)
+      setSessionId('')
+    }
+  }, [recallMode])
+  useEffect(() => {
+    const handler = () => toggleRecallRef.current()
+    window.addEventListener('pdfnote:stop-recall', handler)
+    return () => window.removeEventListener('pdfnote:stop-recall', handler)
+  }, [])
 
   const toggleRecall = () => {
     setOperationError('')

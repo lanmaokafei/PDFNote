@@ -32,6 +32,8 @@ export function StudyWorkspace({
   closeReading = false,
 }: StudyWorkspaceProps) {
   const [ratio, setRatio] = useState(54)
+  // 文档回忆时右侧脑图整栏遮住：卡片标题和摘录都摆在那儿等于把答案摊开。
+  const [recallActive, setRecallActive] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef(false)
 
@@ -70,6 +72,7 @@ export function StudyWorkspace({
           onJumpHandled={onJumpHandled}
           onPageCount={onPageCount}
           onCardsChanged={onCardsChanged}
+          onRecallChange={setRecallActive}
         />
       </div>
 
@@ -87,7 +90,7 @@ export function StudyWorkspace({
           >
             <span aria-hidden="true" />
           </div>
-          <div className="study-pane is-mindmap">
+          <div className={`study-pane is-mindmap${recallActive ? ' is-recall-masked' : ''}`}>
             <MindmapWorkspace
               compact
               documentId={document.id}
@@ -95,6 +98,19 @@ export function StudyWorkspace({
               fixedCanvasId={canvasId ?? null}
               onCardsChanged={onCardsChanged}
             />
+            {recallActive && (
+              <div className="study-recall-mask" role="status" data-testid="study-recall-mask">
+                <strong>文档回忆中</strong>
+                <p>脑图已遮住，避免直接看到卡片答案。要对照脑图请先退出回忆。</p>
+                <button
+                  type="button"
+                  data-testid="study-recall-mask-exit"
+                  onClick={() => window.dispatchEvent(new Event('pdfnote:stop-recall'))}
+                >
+                  退出回忆
+                </button>
+              </div>
+            )}
           </div>
         </>
       )}

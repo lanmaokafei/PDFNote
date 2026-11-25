@@ -1976,6 +1976,17 @@ if (process.env.STEP === 'recall') {
     if (process.env.SHOT) await page.screenshot({ path: '/tmp/pdf-recall-hint.png' })
   }
 
+  // 并排脑图必须被遮住（否则答案就摊在右边）
+  const mask = page.locator('[data-testid="study-recall-mask"]')
+  if (await mask.count() === 0) problems.push('回忆态没有遮住脑图分栏')
+  const mindmapHidden = await page.evaluate(() => {
+    const pane = document.querySelector('.mindmap-workspace')
+    if (!pane) return null
+    return getComputedStyle(pane).visibility
+  })
+  if (mindmapHidden !== 'hidden') problems.push(`脑图没有真正隐藏：${mindmapHidden}`)
+  if (process.env.SHOT) await page.screenshot({ path: '/tmp/recall-mask.png' })
+
   const during = await readRecall()
   if (during.inks !== 0) problems.push(`回忆态仍显示手写：${during.inks}`)
   if (during.notes !== 0) problems.push(`回忆态仍显示留白：${during.notes}`)
@@ -1983,12 +1994,27 @@ if (process.env.STEP === 'recall') {
 
   await page.locator('button[title="文档遮挡回忆"]').first().click()
   await page.waitForTimeout(500)
+  if (await page.locator('[data-testid="study-recall-mask"]').count() !== 0) problems.push('退出回忆后遮罩仍在')
   const after = await readRecall()
   if (after.inks !== before.inks) problems.push(`退出回忆后手写没有恢复：${after.inks}/${before.inks}`)
   if (after.notes !== before.notes) problems.push(`退出回忆后留白没有恢复：${after.notes}/${before.notes}`)
 
+  // 从遮罩上的按钮退出：不用回到工具坞
+  await page.locator('button[title="文档遮挡回忆"]').first().click()
+  await page.waitForTimeout(600)
+  await page.locator('[data-testid="study-recall-mask-exit"]').click()
+  await page.waitForTimeout(600)
+  const maskExit = await page.evaluate(() => ({
+    mask: document.querySelectorAll('[data-testid="study-recall-mask"]').length,
+    visible: getComputedStyle(document.querySelector('.mindmap-workspace')).visibility,
+    inks: document.querySelectorAll('.pdf-ink').length,
+  }))
+  if (maskExit.mask !== 0) problems.push('遮罩按钮没有退出回忆')
+  if (maskExit.visible !== 'visible') problems.push(`遮罩退出后脑图仍隐藏：${maskExit.visible}`)
+  if (maskExit.inks !== before.inks) problems.push(`遮罩退出后手写没有恢复：${maskExit.inks}`)
+
   await browser.close()
-  console.log(JSON.stringify({ problems, step: 'recall', before, during, after }, null, 2))
+  console.log(JSON.stringify({ problems, step: 'recall', before, during, after, mindmapHidden, maskExit }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

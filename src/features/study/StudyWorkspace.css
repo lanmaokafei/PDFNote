@@ -93,3 +93,59 @@
     border-top: 1px solid var(--study-line);
   }
 }
+
+/* 文档回忆：整栏遮住脑图，防止答案直接摊在旁边。
+   visibility 而不是卸载：卸载会丢 React Flow 的 viewport 与 measured。 */
+.study-pane.is-mindmap {
+  position: relative;
+}
+
+.study-pane.is-recall-masked .mindmap-workspace {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.study-recall-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 24;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 28px;
+  background: #f2f4ee;
+  text-align: center;
+}
+
+.study-recall-mask strong {
+  color: #4b5b4c;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 19px;
+  font-weight: 500;
+}
+
+.study-recall-mask p {
+  max-width: 300px;
+  margin: 0;
+  color: #8b9688;
+  font-size: 11.5px;
+  line-height: 1.75;
+}
+
+.study-recall-mask button {
+  margin-top: 2px;
+  padding: 7px 14px;
+  border: 1px solid #d7e1cf;
+  border-radius: 7px;
+  color: #4f6b4d;
+  background: #fbfcf8;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.study-recall-mask button:hover {
+  border-color: #b9cfae;
+  background: #f1f7ea;
+}

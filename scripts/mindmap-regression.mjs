@@ -3046,6 +3046,57 @@ if (process.env.STEP === 'mindmap-hint') {
   process.exit(problems.length ? 1 : 0)
 }
 
+// STEP=dark-audit：深色模式补充审计（回收站 / 备份 / 键位表 / 标签弹窗 / 挖空面板）。
+if (process.env.STEP === 'dark-audit') {
+  await page.waitForSelector('.app-shell', { timeout: 15000 })
+  if ((await page.evaluate(() => document.documentElement.dataset.theme)) !== 'dark') {
+    await page.locator('[data-testid="theme-toggle"]').click()
+    await page.waitForTimeout(400)
+  }
+
+  await page.locator('[data-testid="library-trash"]').click()
+  await page.waitForSelector('[data-testid="library-trash-modal"]', { timeout: 5000 })
+  await page.screenshot({ path: '/tmp/dark-trash.png' })
+  // 回收站弹窗没有关闭按钮，点背景关闭。
+  await page.mouse.click(6, 6)
+  await page.waitForTimeout(400)
+
+  await page.locator('.app-segment-action[aria-label="备份与恢复"]').click()
+  await page.waitForTimeout(900)
+  await page.screenshot({ path: '/tmp/dark-backup.png' })
+
+  await page.keyboard.press('Shift+/')
+  await page.waitForSelector('[data-testid="shortcuts-modal"]', { timeout: 5000 })
+  await page.screenshot({ path: '/tmp/dark-shortcuts.png' })
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+
+  await page.locator('.app-segment').filter({ hasText: '脑图' }).first().click()
+  await page.waitForFunction(() => document.querySelectorAll('.mindmap-node').length > 0, null, { timeout: 60000 })
+  await page.waitForTimeout(700)
+  await page.locator('.mindmap-node').first().click({ button: 'right' })
+  await page.waitForSelector('.context-menu', { timeout: 5000 })
+  await page.locator('.context-menu-item', { hasText: '标签' }).first().click()
+  await page.waitForTimeout(500)
+  await page.screenshot({ path: '/tmp/dark-tag-dialog.png' })
+  await page.mouse.click(6, 6)
+  await page.waitForTimeout(400)
+
+  await page.locator('.app-segment').filter({ hasText: '资料库' }).first().click()
+  await page.locator('.document-card').first().click()
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+  await page.locator('button[title="文档遮挡回忆"]').first().click()
+  await page.waitForTimeout(700)
+  await page.locator('[data-mask-index="0"]').first().click()
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: '/tmp/dark-cloze.png' })
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'dark-audit' }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
 // STEP=dark-shots：深色模式逐视图截图（人工目检用）。
 if (process.env.STEP === 'dark-shots') {
   await page.waitForSelector('.app-shell', { timeout: 15000 })

@@ -1058,3 +1058,149 @@ html[data-theme="dark"] .mindmap-outline-canvas-drop button.is-active {
   border-color: #6e9a70;
   background: #26382a;
 }
+
+/* 键位表（0.69 审计补漏） */
+html[data-theme="dark"] .app-shortcuts {
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .55);
+}
+
+html[data-theme="dark"] .app-shortcuts h2,
+html[data-theme="dark"] .app-shortcuts dt {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .app-shortcuts dd {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .app-shortcuts kbd {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .app-shortcuts button {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+/* 备份与恢复（0.69 审计补漏） */
+html[data-theme="dark"] .backup-workspace {
+  --backup-ink: var(--dk-text);
+  --backup-muted: var(--dk-muted);
+  --backup-line: var(--dk-line);
+  --backup-green: #8fbf95;
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .backup-local-badge,
+html[data-theme="dark"] .backup-safety-note,
+html[data-theme="dark"] .backup-panel,
+html[data-theme="dark"] .backup-action-card,
+html[data-theme="dark"] .backup-action-card.secondary,
+html[data-theme="dark"] .backup-migration,
+html[data-theme="dark"] .backup-mode label {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+}
+
+html[data-theme="dark"] .backup-mode label.selected {
+  border-color: #4f6b52;
+  background: #1d2a20;
+}
+
+html[data-theme="dark"] .backup-mode label.selected.danger {
+  border-color: #6b4038;
+  background: #2a1c18;
+}
+
+html[data-theme="dark"] .backup-action-card button,
+html[data-theme="dark"] .backup-import,
+html[data-theme="dark"] .backup-result-counts span {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .backup-result {
+  border-color: #3c5340;
+  background: #17211a;
+}
+
+html[data-theme="dark"] .backup-error {
+  color: #f0b9a9;
+  border-color: #57342c;
+  background: #2a1d19;
+}
+
+html[data-theme="dark"] .backup-panel-heading h2,
+html[data-theme="dark"] .backup-action-card h3,
+html[data-theme="dark"] .backup-migration h2,
+html[data-theme="dark"] .backup-header h1 {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .backup-header p,
+html[data-theme="dark"] .backup-action-card p,
+html[data-theme="dark"] .backup-eyebrow,
+html[data-theme="dark"] .backup-step,
+html[data-theme="dark"] .backup-migration li {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .backup-confirm-dialog {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+}
+
+/* 文档挖空面板（0.69 审计补漏） */
+html[data-theme="dark"] .pdf-cloze,
+html[data-theme="dark"] .pdf-cloze.is-floating {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: rgba(23, 29, 25, .97);
+}
+
+html[data-theme="dark"] .pdf-cloze-head strong,
+html[data-theme="dark"] .pdf-cloze-sentence {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .pdf-cloze-head small,
+html[data-theme="dark"] .pdf-cloze-count {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .pdf-cloze-input {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: #121814;
+}
+
+html[data-theme="dark"] .pdf-cloze-actions button,
+html[data-theme="dark"] .pdf-cloze-fallback button {
+  color: var(--dk-text-soft);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .pdf-cloze-answers span {
+  color: var(--dk-text-soft);
+  background: var(--dk-surface-2);
+}
+
+/* PDF 工具坞的选中态 */
+html[data-theme="dark"] .pdf-dock button.is-active {
+  color: #e8f5e4;
+  background: #2b3d2d;
+}
+
+html[data-theme="dark"] .pdf-dock button:hover:not(:disabled) {
+  color: #eef5ea;
+  background: rgba(255, 255, 255, .08);
+}

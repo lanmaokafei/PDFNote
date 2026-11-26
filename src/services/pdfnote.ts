@@ -651,7 +651,7 @@ export async function deleteNotebookInk(id: string): Promise<void> {
 
 /** 跨库搜索命中：文档标题 / 卡片内容 / 笔记本标题。 */
 export interface GlobalHit {
-  kind: 'document' | 'card' | 'notebook'
+  kind: 'document' | 'card' | 'notebook' | 'page' | 'tag'
   id: string
   title: string
   snippet: string
@@ -662,4 +662,19 @@ export interface GlobalHit {
 export async function globalSearch(query: string, limit = 12): Promise<GlobalHit[]> {
   if (!isTauriRuntime()) return []
   return invoke('global_search', { query, limit })
+}
+
+
+/** 页内全文索引：首次打开文档时由前端抽取，存进 page_index。 */
+export async function savePageIndex(
+  documentId: string,
+  pages: { page: number; text: string }[],
+): Promise<number> {
+  if (!isTauriRuntime()) return 0
+  return invoke('save_page_index', { documentId, pages })
+}
+
+export async function listPageIndexPages(documentId: string): Promise<number[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_page_index_pages', { documentId })
 }

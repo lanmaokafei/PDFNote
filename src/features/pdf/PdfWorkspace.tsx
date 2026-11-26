@@ -69,6 +69,7 @@ import {
   Type,
 } from 'lucide-react'
 import { hintCard } from '../../services/ai'
+import { ensurePageIndex } from './pageTextIndex'
 import { LinkDialog, MergeDialog, TagDialog } from '../card/CardDialogs'
 import { useCardStore } from '../../store/cardStore'
 import { REVIEW_SCHEDULE_EVENT, reviewCard, type ReviewScheduleChange } from '../review/scheduler'
@@ -333,6 +334,14 @@ export function PdfWorkspace({
   const effectivePass = closeReading ? readingPass : 2
   const firstPass = effectivePass === 1
   const [noteLayout, setNoteLayout] = useNoteLayout()
+
+  // 后台建立页内全文索引：不阻塞打开，切文档即中止。
+  useEffect(() => {
+    if (!pdf) return
+    const controller = new AbortController()
+    void ensurePageIndex(pdf, document.id, controller.signal).catch(() => undefined)
+    return () => controller.abort()
+  }, [document.id, pdf])
 
   // 阅读计时：PDF 打开且不在回忆态时累计（回忆算复习，不算阅读）。
   useReadingTimer(document.id, Boolean(pdf) && !recallMode)

@@ -1,25 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpen, FileText, NotebookPen, Search } from 'lucide-react'
+import { BookOpen, FileSearch, FileText, Hash, NotebookPen, Search } from 'lucide-react'
 import { globalSearch, isTauriRuntime, type GlobalHit } from '../../services/pdfnote'
 import { requestCardSelection } from '../mindmap/pendingSelection'
+import { requestBoardFilter } from '../board/pendingFilter'
 import './GlobalSearch.css'
 
 interface GlobalSearchProps {
   open: boolean
   onClose: () => void
   /** 切到指定视图（脑图 / 笔记本）。 */
-  onGoTo: (view: 'mindmap' | 'notebook') => void
+  onGoTo: (view: 'mindmap' | 'notebook' | 'board') => void
 }
 
 const GROUP_LABELS: Record<GlobalHit['kind'], string> = {
   document: '文档',
   card: '卡片',
+  page: '页面',
+  tag: '标签',
   notebook: '笔记本',
 }
 
 const KIND_ICONS = {
   document: FileText,
   card: BookOpen,
+  page: FileSearch,
+  tag: Hash,
   notebook: NotebookPen,
 } as const
 
@@ -95,7 +100,7 @@ export function GlobalSearch({ open, onClose, onGoTo }: GlobalSearchProps) {
   }, [open, query])
 
   const groups = useMemo(() => {
-    const order: GlobalHit['kind'][] = ['card', 'document', 'notebook']
+    const order: GlobalHit['kind'][] = ['card', 'page', 'document', 'tag', 'notebook']
     return order
       .map((kind) => ({ kind, items: hits.filter((hit) => hit.kind === kind) }))
       .filter((group) => group.items.length > 0)
@@ -103,6 +108,14 @@ export function GlobalSearch({ open, onClose, onGoTo }: GlobalSearchProps) {
 
   const openHit = useCallback((hit: GlobalHit) => {
     onClose()
+    if (hit.kind === 'tag') {
+      requestBoardFilter(hit.id)
+      onGoTo('board')
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('pdfnote:board-filter', { detail: { tag: hit.id } }))
+      }, 160)
+      return
+    }
     if (hit.kind === 'notebook') {
       onGoTo('notebook')
       window.setTimeout(() => {
@@ -171,7 +184,7 @@ export function GlobalSearch({ open, onClose, onGoTo }: GlobalSearchProps) {
         <div className="global-search-body" data-testid="global-search-results">
           {!query.trim() && (
             <p className="global-search-hint">
-              一次搜三处：文档标题、卡片的问题/摘录/笔记、笔记本标题。回收站里的内容不会被搜出来。
+              一次搜五处：卡片、页内全文、文档标题、标签、笔记本标题。页内全文在文档首次打开后自动建立索引；回收站里的内容不会被搜出来。
             </p>
           )}
           {query.trim() && loading && flat.length === 0 && <p className="global-search-hint">正在搜索…</p>}
@@ -200,9 +213,9 @@ export function GlobalSearch({ open, onClose, onGoTo }: GlobalSearchProps) {
                       <strong>{hit.title}</strong>
                       {hit.snippet && <small>{hit.snippet}</small>}
                     </span>
-                    {hit.kind !== 'notebook' && (
+                    {hit.kind !== 'notebook' && hit.kind !== 'tag' && (
                       <span className="global-search-meta">
-                        {hit.documentId ? (hit.page ? `P${hit.page}` : '文档') : '脑图'}
+                        {hit.kind === 'page' ? `P${hit.page}` : hit.documentId ? (hit.page ? `P${hit.page}` : '文档') : '脑图'}
                       </span>
                     )}
                   </button>

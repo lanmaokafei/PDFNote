@@ -386,6 +386,7 @@ fn import_overwrite(
         "book_analysis",
         "page_notes",
         "page_ocr",
+        "page_index",
         "review_logs",
         "mindmap_layout",
         "annotations",
@@ -423,7 +424,7 @@ fn import_overwrite(
                 .map_err(|error| error.to_string())?;
         }
         // page_ocr 是纯派生缓存：旧备份没有该表时跳过，页面首次打开会自动重建。
-        for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr", "book_analysis", "book_outline", "mindmap_canvases"] {
+        for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr", "page_index", "book_analysis", "book_outline", "mindmap_canvases"] {
             copy_table_if_present(&transaction, table)?;
         }
         // 0.41.0 两遍阅读：一本书一行，直接整表覆盖；0.49 阅读计时按书 + 日期累计。

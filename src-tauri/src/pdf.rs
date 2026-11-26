@@ -36,7 +36,7 @@ pub fn build_pdf(pages: &[PdfImagePage]) -> Result<Vec<u8>, String> {
 
     out.extend_from_slice(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
 
-    let mut begin_object = |out: &mut Vec<u8>, offsets: &mut Vec<usize>, number: usize, body: &str| {
+    let begin_object = |out: &mut Vec<u8>, offsets: &mut Vec<usize>, number: usize, body: &str| {
         offsets[number] = out.len();
         out.extend_from_slice(format!("{number} 0 obj\n{body}\nendobj\n").as_bytes());
     };

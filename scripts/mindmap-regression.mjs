@@ -794,6 +794,15 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       return null
     },
     list_tags: () => (board ? ['心内', '药理', '空标签'] : []),
+    list_page_index_pages: () => [],
+    save_page_index: (args) => {
+      window.__pageIndex = { documentId: args?.documentId, pages: (args?.pages ?? []).map((page) => ({
+        page: page?.page ?? 0,
+        length: (page?.text ?? '').length,
+        head: (page?.text ?? '').slice(0, 40),
+      })) }
+      return (args?.pages ?? []).length
+    },
     global_search: (args) => {
       const query = String(args?.query ?? '').trim()
       if (!query) return []
@@ -816,6 +825,23 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       for (const notebook of window.__notebookState ?? []) {
         if (!notebook.title.includes(query)) continue
         hits.push({ kind: 'notebook', id: notebook.id, title: notebook.title, snippet: '', documentId: null, page: null })
+      }
+      // 页内全文（真实数据来自 page_index；测试用固定句子代替）
+      if ('线粒体是细胞的能量工厂'.includes(query) || query.includes('能量工厂')) {
+        hits.push({
+          kind: 'page',
+          id: `${document.id}:1`,
+          title: `${document.title} · 第 1 页`,
+          snippet: '线粒体是细胞的能量工厂，参与氧化磷酸化。',
+          documentId: document.id,
+          page: 1,
+        })
+      }
+      const tagCounts = new Map()
+      for (const card of cardState) for (const tag of card.tags ?? []) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
+      for (const [tag, count] of tagCounts) {
+        if (!tag.includes(query)) continue
+        hits.push({ kind: 'tag', id: tag, title: `#${tag}`, snippet: `${count} 张卡片使用这个标签`, documentId: null, page: null })
       }
       return hits
     },
@@ -3016,6 +3042,47 @@ if (process.env.STEP === 'global-search') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'global-search', cards, opened, empty: empty.slice(0, 30), selected }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=global-search-ext：页内全文跳页与标签跳卡片盒。
+if (process.env.STEP === 'global-search-ext') {
+  await page.waitForSelector('.app-shell', { timeout: 15000 })
+  await page.waitForTimeout(600)
+
+  await page.keyboard.press('Meta+k')
+  await page.waitForSelector('[data-testid="global-search"]', { timeout: 5000 })
+  await page.locator('[data-testid="global-search-input"]').fill('能量工厂')
+  await page.waitForSelector('[data-testid="global-search-item"][data-kind="page"]', { timeout: 5000 })
+  const pageText = await page.locator('[data-testid="global-search-item"][data-kind="page"]').first().innerText()
+  if (!pageText.includes('第 1 页')) problems.push(`页内结果标题不对：${pageText}`)
+  await page.keyboard.press('Enter')
+  await page.waitForSelector('.pdf-annotation-layer', { timeout: 30000 })
+  const opened = await page.evaluate(() => ({
+    palette: document.querySelectorAll('[data-testid="global-search"]').length,
+    pill: document.querySelector('.pdf-page-pill')?.textContent ?? '',
+  }))
+  if (opened.palette !== 0) problems.push('页内结果打开后搜索面板没有关闭')
+  if (!opened.pill.includes('第 1 /')) problems.push(`没有跳到命中页：${opened.pill}`)
+  await page.waitForTimeout(1200)
+  const indexed = await page.evaluate(() => window.__pageIndex ?? null)
+  if (!indexed) problems.push('打开文档后没有建立页内索引')
+  else if (!indexed.pages.some((page) => page.length > 0)) problems.push('索引页文本为空')
+
+  await page.keyboard.press('Meta+k')
+  await page.waitForSelector('[data-testid="global-search"]', { timeout: 5000 })
+  await page.locator('[data-testid="global-search-input"]').fill('心内')
+  await page.waitForSelector('[data-testid="global-search-item"][data-kind="tag"]', { timeout: 5000 })
+  const tagText = await page.locator('[data-testid="global-search-item"][data-kind="tag"]').first().innerText()
+  if (!tagText.includes('张卡片')) problems.push(`标签结果缺少数量：${tagText}`)
+  await page.locator('[data-testid="global-search-item"][data-kind="tag"]').first().click()
+  await page.waitForSelector('.board-search input', { timeout: 10000 })
+  await page.waitForTimeout(600)
+  const boardQuery = await page.locator('[data-testid="board-search"]').inputValue()
+  if (boardQuery !== '心内') problems.push(`标签没有带到卡片盒筛选：${boardQuery}`)
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'global-search-ext', pageText, opened, tagText, boardQuery, indexed }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

@@ -13,6 +13,7 @@ mod pdf;
 mod notebooks;
 mod notes;
 mod ocr;
+mod page_index;
 mod page_text;
 mod reading;
 mod review;
@@ -82,6 +83,8 @@ pub fn run() {
             commands::list_tags,
             commands::list_tag_stats,
             commands::global_search,
+            commands::save_page_index,
+            commands::list_page_index_pages,
             commands::save_notebook_pdf,
             commands::save_export_files,
             commands::rename_tag,

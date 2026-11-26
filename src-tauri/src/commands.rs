@@ -1,5 +1,7 @@
+use rusqlite::Connection;
 use crate::{
     ai,
+    page_index,
     pdf, anki, backup, book, canvas_layers, canvases, cards, documents, models, notebooks, reading,
     review, state::AppState, update,
 };
@@ -628,7 +630,7 @@ fn match_snippet(text: &str, needle: &str, limit: usize) -> String {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GlobalHit {
-    /// document / card / notebook
+    /// document / card / notebook / page / tag
     pub kind: String,
     pub id: String,
     pub title: String,
@@ -642,18 +644,17 @@ pub struct GlobalHit {
 /// 没上 FTS：本地数据量在几千条量级，LIKE + LIMIT 足够快；
 /// 关键是**排除回收站**——卡片回收站与文档回收站都要排掉，否则搜出来点不开。
 #[tauri::command]
-pub fn global_search(
-    state: State<'_, AppState>,
-    query: String,
-    limit: Option<u32>,
+pub fn search_global(
+    connection: &Connection,
+    query: &str,
+    limit: i64,
 ) -> Result<Vec<GlobalHit>, String> {
     let needle = query.trim();
     if needle.is_empty() {
         return Ok(Vec::new());
     }
-    let cap = limit.unwrap_or(12).clamp(1, 40) as i64;
+    let cap = limit.clamp(1, 40);
     let pattern = format!("%{}%", escape_like(needle));
-    let connection = state.db()?;
     let mut hits: Vec<GlobalHit> = Vec::new();
 
     let mut documents = connection
@@ -751,7 +752,96 @@ pub fn global_search(
         hits.push(row);
     }
 
+    // 页内全文：只搜已建立索引的页（首次打开文档时后台抽取）。
+    let mut pages = connection
+        .prepare(
+            "SELECT p.document_id, d.title, p.page, p.text
+             FROM page_index p
+             JOIN documents d ON d.id = p.document_id
+             WHERE p.text LIKE ?1 ESCAPE '\\'
+               AND d.id NOT IN (SELECT document_id FROM document_trash)
+             ORDER BY d.updated_at DESC, p.page ASC LIMIT ?2",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = pages
+        .query_map(rusqlite::params![pattern, cap], |row| {
+            let document_id: String = row.get(0)?;
+            let document_title: String = row.get(1)?;
+            let page: u32 = row.get(2)?;
+            let text: String = row.get(3)?;
+            Ok(GlobalHit {
+                kind: "page".into(),
+                id: format!("{document_id}:{page}"),
+                title: format!("{document_title} · 第 {page} 页"),
+                snippet: match_snippet(&text, needle, 72),
+                document_id: Some(document_id),
+                page: Some(page),
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows.flatten() {
+        hits.push(row);
+    }
+
+    // 标签：只统计回收站之外的卡片，避免点进去空空如也。
+    let mut tags = connection
+        .prepare(
+            "SELECT ct.tag, COUNT(*) FROM card_tags ct
+             JOIN cards c ON c.id = ct.card_id
+             WHERE ct.tag LIKE ?1 ESCAPE '\\'
+               AND NOT EXISTS (SELECT 1 FROM card_trash t WHERE t.card_id = c.id)
+               AND (c.document_id IS NULL
+                 OR c.document_id NOT IN (SELECT document_id FROM document_trash))
+             GROUP BY ct.tag
+             ORDER BY COUNT(*) DESC, ct.tag ASC LIMIT ?2",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = tags
+        .query_map(rusqlite::params![pattern, cap], |row| {
+            let tag: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok(GlobalHit {
+                kind: "tag".into(),
+                id: tag.clone(),
+                title: format!("#{tag}"),
+                snippet: format!("{count} 张卡片使用这个标签"),
+                document_id: None,
+                page: None,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows.flatten() {
+        hits.push(row);
+    }
+
     Ok(hits)
+}
+
+#[tauri::command]
+pub fn save_page_index(
+    state: State<'_, AppState>,
+    document_id: String,
+    pages: Vec<page_index::PageIndexInput>,
+) -> Result<u32, String> {
+    page_index::save(&state, &document_id, pages)
+}
+
+#[tauri::command]
+pub fn list_page_index_pages(
+    state: State<'_, AppState>,
+    document_id: String,
+) -> Result<Vec<u32>, String> {
+    page_index::list_pages(&state, &document_id)
+}
+
+#[tauri::command]
+pub fn global_search(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<u32>,
+) -> Result<Vec<GlobalHit>, String> {
+    let connection = state.db()?;
+    search_global(&connection, &query, limit.unwrap_or(12) as i64)
 }
 
 /// 手写本导出 PDF 的入参：每页一张 JPEG（前端 Canvas 渲染）。

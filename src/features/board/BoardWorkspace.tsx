@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Boxes, FileText, Pencil, RefreshCw, RotateCcw, Search, Tags, Trash2 } from 'lucide-react'
 import type { Card, Document } from '../../domain/card'
+import { takeBoardFilter } from './pendingFilter'
 import { pushUndo } from '../undo/undoStack'
 import {
   isTauriRuntime,
@@ -105,6 +106,23 @@ export function BoardWorkspace({ onOpenMindmap, onCardsChanged }: BoardWorkspace
   const [subMode, setSubMode] = useState<SubMode>('none')
   const [filters, setFilters] = useState<BoardFilters>(EMPTY_FILTERS)
   const [limits, setLimits] = useState<Record<string, number>>({})
+  // 挂载时取走交接位里的标签（懒加载时事件会丢）。
+  useEffect(() => {
+    const pending = takeBoardFilter()
+    if (pending) setFilters((current) => ({ ...current, query: pending }))
+  }, [])
+
+  // 跨库搜索点标签：切到卡片盒并直接把标签填进搜索框。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const tag = (event as CustomEvent<{ tag?: string }>).detail?.tag
+      if (!tag) return
+      setFilters((current) => ({ ...current, query: tag }))
+    }
+    window.addEventListener('pdfnote:board-filter', handler)
+    return () => window.removeEventListener('pdfnote:board-filter', handler)
+  }, [])
+
   const [dragging, setDragging] = useState<{ card: Card; columnId: string } | null>(null)
   // dragover/drop 与 dragstart 是不同事件批次，靠 state 判断可能拿到上一帧的 null；
   // 用 ref 同步记录起点，避免第一次拖拽被忽略。

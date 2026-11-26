@@ -84,7 +84,7 @@ const cards = Array.from({ length: CARD_COUNT }, (_, index) => ({
     : 'new',
 }))
 
-const pdfBytes = readFileSync(new URL('../test-fixtures/mini.pdf', import.meta.url))
+const pdfBytes = readFileSync(new URL(process.env.SCAN ? '../test-fixtures/scan.pdf' : '../test-fixtures/mini.pdf', import.meta.url))
 const pdfBase64 = pdfBytes.toString('base64')
 
 const document = {
@@ -796,12 +796,30 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
     list_tags: () => (board ? ['心内', '药理', '空标签'] : []),
     list_page_index_pages: () => [],
     save_page_index: (args) => {
-      window.__pageIndex = { documentId: args?.documentId, pages: (args?.pages ?? []).map((page) => ({
-        page: page?.page ?? 0,
-        length: (page?.text ?? '').length,
-        head: (page?.text ?? '').slice(0, 40),
-      })) }
+      window.__pageIndexCalls = window.__pageIndexCalls ?? []
+      window.__pageIndexCalls.push({
+        documentId: args?.documentId,
+        pages: (args?.pages ?? []).map((page) => ({
+          page: page?.page ?? 0,
+          source: page?.source ?? 'text',
+          length: (page?.text ?? '').length,
+          head: (page?.text ?? '').slice(0, 40),
+        })),
+      })
+      window.__pageIndex = window.__pageIndexCalls[window.__pageIndexCalls.length - 1]
       return (args?.pages ?? []).length
+    },
+    page_index_stats: () => {
+      const calls = window.__pageIndexCalls ?? []
+      const byDoc = new Map()
+      let pages = 0
+      let ocrPages = 0
+      for (const call of calls) for (const page of call.pages) {
+        byDoc.set(call.documentId, true)
+        pages += 1
+        if (page.source === 'ocr') ocrPages += 1
+      }
+      return { documents: byDoc.size, pages, ocrPages }
     },
     global_search: (args) => {
       const query = String(args?.query ?? '').trim()
@@ -3042,6 +3060,38 @@ if (process.env.STEP === 'global-search') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'global-search', cards, opened, empty: empty.slice(0, 30), selected }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=library-index：全库建索引，扫描页走 OCR。
+if (process.env.STEP === 'library-index') {
+  await page.waitForSelector('[data-testid="search-index-open"]', { timeout: 15000 })
+  await page.locator('[data-testid="search-index-open"]').click()
+  await page.waitForSelector('[data-testid="search-index-dialog"]', { timeout: 5000 })
+  await page.waitForTimeout(400)
+  const ocrChecked = await page.locator('[data-testid="search-index-ocr"]').isChecked()
+  if (!ocrChecked) problems.push('OCR 选项默认应勾选')
+
+  await page.evaluate(() => {
+    window.__tocOcrLines = [{ text: '扫描页上的文字' }, { text: '第二行' }]
+  })
+  await page.locator('[data-testid="search-index-start"]').click()
+  await page.waitForSelector('[data-testid="search-index-summary"]', { timeout: 120000 })
+  const summary = await page.locator('[data-testid="search-index-summary"]').innerText()
+  if (process.env.SHOT) await page.screenshot({ path: '/tmp/library-index.png' })
+  if (!summary.includes('OCR 1 页')) problems.push(`OCR 页数不对：${summary}`)
+
+  const calls = await page.evaluate(() => window.__pageIndexCalls ?? [])
+  const ocrPage = calls.flatMap((call) => call.pages).find((page) => page.source === 'ocr')
+  if (!ocrPage) problems.push('没有写入 source=ocr 的页索引')
+  else if (!ocrPage.head.includes('扫描页上的文字')) problems.push(`OCR 文本不正确：${ocrPage.head}`)
+
+  await page.locator('[data-testid="search-index-close"]').click()
+  await page.waitForTimeout(300)
+  if (await page.locator('[data-testid="search-index-dialog"]').count() !== 0) problems.push('关闭后弹窗仍在')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'library-index', summary, calls }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

@@ -827,6 +827,11 @@ pub fn save_page_index(
 }
 
 #[tauri::command]
+pub fn page_index_stats(state: State<'_, AppState>) -> Result<page_index::PageIndexStats, String> {
+    page_index::stats(&state)
+}
+
+#[tauri::command]
 pub fn list_page_index_pages(
     state: State<'_, AppState>,
     document_id: String,

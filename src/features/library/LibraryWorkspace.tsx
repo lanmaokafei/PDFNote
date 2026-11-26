@@ -3,6 +3,7 @@ import { pushUndo } from '../undo/undoStack'
 import { open } from '@tauri-apps/plugin-dialog'
 import {
   Copy,
+  Database,
   FileText,
   FolderOpen,
   HardDrive,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react'
 import type { BootstrapStatus, Document } from '../../domain/card'
 import { ContextMenu } from '../../ui/ContextMenu'
+import { SearchIndexDialog } from './SearchIndexDialog'
 import { useContextMenu } from '../../ui/contextMenuCore'
 import {
   deleteDocument,
@@ -79,6 +81,7 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [query, setQuery] = useState('')
+  const [indexOpen, setIndexOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Document | null>(null)
   // 默认移入回收站；勾「保留卡片」才是永久解除文档（卡片留下）。
   const [keepCards, setKeepCards] = useState(false)
@@ -384,6 +387,9 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
             aria-label="搜索文档标题"
           />
         </label>
+        <button type="button" className="library-quiet" onClick={() => setIndexOpen(true)} data-testid="search-index-open">
+          <Database size={14} /> 搜索索引
+        </button>
         <button type="button" className="library-quiet" onClick={openTrash} data-testid="library-trash">
           <Trash2 size={14} /> 回收站
         </button>
@@ -464,6 +470,8 @@ export function LibraryWorkspace({ onOpenDocument, onChanged, focusSearchToken =
           ))}
         </div>
       )}
+
+      {indexOpen && <SearchIndexDialog onClose={() => setIndexOpen(false)} />}
 
       {trashOpen && (
         <div className="library-modal-backdrop" role="presentation" onMouseDown={(event) => {

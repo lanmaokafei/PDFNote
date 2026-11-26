@@ -10,6 +10,9 @@ use serde::Deserialize;
 pub struct PageIndexInput {
     pub page: u32,
     pub text: String,
+    /// text / ocr；缺省按文本层算。
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 /// 单页最多保留 4000 字：够搜索，也不会把整本书塞进一行。
@@ -56,17 +59,50 @@ pub fn save(state: &AppState, document_id: &str, pages: Vec<PageIndexInput>) -> 
         }
         transaction
             .execute(
-                "INSERT INTO page_index (document_id, page, text, updated_at)
-                 VALUES (?1, ?2, ?3, ?4)
+                "INSERT INTO page_index (document_id, page, text, updated_at, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
                  ON CONFLICT(document_id, page) DO UPDATE SET
-                 text = excluded.text, updated_at = excluded.updated_at",
-                params![document_id, page.page, text, timestamp],
+                 text = excluded.text, updated_at = excluded.updated_at, source = excluded.source",
+                params![
+                    document_id,
+                    page.page,
+                    text,
+                    timestamp,
+                    page.source.unwrap_or_else(|| "text".into())
+                ],
             )
             .map_err(|error| error.to_string())?;
         saved += 1;
     }
     transaction.commit().map_err(|error| error.to_string())?;
     Ok(saved)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageIndexStats {
+    pub documents: i64,
+    pub pages: i64,
+    pub ocr_pages: i64,
+}
+
+pub fn stats(state: &AppState) -> Result<PageIndexStats, String> {
+    let database = state.db()?;
+    database
+        .query_row(
+            "SELECT COUNT(DISTINCT document_id), COUNT(*),
+                    COALESCE(SUM(CASE WHEN source = 'ocr' THEN 1 ELSE 0 END), 0)
+             FROM page_index",
+            [],
+            |row| {
+                Ok(PageIndexStats {
+                    documents: row.get(0)?,
+                    pages: row.get(1)?,
+                    ocr_pages: row.get(2)?,
+                })
+            },
+        )
+        .map_err(|error| error.to_string())
 }
 
 pub fn list_pages(state: &AppState, document_id: &str) -> Result<Vec<u32>, String> {
@@ -122,6 +158,7 @@ mod tests {
         save(&state, "d1", vec![PageIndexInput {
             page: 3,
             text: "线粒体是细胞的能量工厂，参与氧化磷酸化。".into(),
+            source: None,
         }])
         .unwrap();
 
@@ -142,15 +179,19 @@ mod tests {
     fn saves_and_lists_pages_idempotently() {
         let (_directory, state) = test_state();
         let saved = save(&state, "doc-1", vec![
-            PageIndexInput { page: 1, text: "第一页 内容".into() },
-            PageIndexInput { page: 2, text: "  ".into() },
+            PageIndexInput { page: 1, text: "第一页 内容".into(), source: None },
+            PageIndexInput { page: 2, text: "  ".into(), source: None },
         ])
         .unwrap();
         assert_eq!(saved, 1, "空白页不落库");
         assert_eq!(list_pages(&state, "doc-1").unwrap(), vec![1]);
 
-        save(&state, "doc-1", vec![PageIndexInput { page: 1, text: "改过的内容".into() }]).unwrap();
+        save(&state, "doc-1", vec![PageIndexInput { page: 1, text: "改过的内容".into(), source: Some("ocr".into()) }]).unwrap();
         assert_eq!(list_pages(&state, "doc-1").unwrap(), vec![1]);
-        assert!(save(&state, "", vec![PageIndexInput { page: 1, text: "x".into() }]).is_err());
+        let stats = super::stats(&state).unwrap();
+        assert_eq!(stats.documents, 1);
+        assert_eq!(stats.pages, 1);
+        assert_eq!(stats.ocr_pages, 1, "source=ocr 要计入 OCR 页");
+        assert!(save(&state, "", vec![PageIndexInput { page: 1, text: "x".into(), source: None }]).is_err());
     }
 }

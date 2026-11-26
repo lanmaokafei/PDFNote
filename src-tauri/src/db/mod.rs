@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
 
-pub const SCHEMA_VERSION: u32 = 18;
+pub const SCHEMA_VERSION: u32 = 19;
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
 const DOCUMENT_PROGRESS_SQL: &str = include_str!("../../migrations/002_document_progress.sql");
 const COLLABORATION_SQL: &str = include_str!("../../migrations/003_collaboration.sql");
@@ -20,6 +20,7 @@ const REVIEW_DAILY_SQL: &str = include_str!("../../migrations/015_review_daily.s
 const DOCUMENT_TRASH_SQL: &str = include_str!("../../migrations/016_document_trash.sql");
 const REVIEW_REVERT_SQL: &str = include_str!("../../migrations/017_review_revert.sql");
 const PAGE_INDEX_SQL: &str = include_str!("../../migrations/018_page_index.sql");
+const PAGE_INDEX_SOURCE_SQL: &str = include_str!("../../migrations/019_page_index_source.sql");
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
@@ -60,7 +61,7 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
             "数据库 schema 版本 {version} 高于当前应用支持的版本 {SCHEMA_VERSION}"
         ));
     }
-    let migrations: [(&str, u32); 18] = [
+    let migrations: [(&str, u32); 19] = [
         (INIT_SQL, 1),
         (DOCUMENT_PROGRESS_SQL, 2),
         (COLLABORATION_SQL, 3),
@@ -79,6 +80,7 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
         (DOCUMENT_TRASH_SQL, 16),
         (REVIEW_REVERT_SQL, 17),
         (PAGE_INDEX_SQL, 18),
+        (PAGE_INDEX_SOURCE_SQL, 19),
     ];
     for (sql, target_version) in migrations {
         if target_version > version {

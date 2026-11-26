@@ -668,7 +668,7 @@ export async function globalSearch(query: string, limit = 12): Promise<GlobalHit
 /** 页内全文索引：首次打开文档时由前端抽取，存进 page_index。 */
 export async function savePageIndex(
   documentId: string,
-  pages: { page: number; text: string }[],
+  pages: { page: number; text: string; source?: 'text' | 'ocr' }[],
 ): Promise<number> {
   if (!isTauriRuntime()) return 0
   return invoke('save_page_index', { documentId, pages })
@@ -677,4 +677,16 @@ export async function savePageIndex(
 export async function listPageIndexPages(documentId: string): Promise<number[]> {
   if (!isTauriRuntime()) return []
   return invoke('list_page_index_pages', { documentId })
+}
+
+
+export interface PageIndexStats {
+  documents: number
+  pages: number
+  ocrPages: number
+}
+
+export async function pageIndexStats(): Promise<PageIndexStats> {
+  if (!isTauriRuntime()) return { documents: 0, pages: 0, ocrPages: 0 }
+  return invoke('page_index_stats')
 }

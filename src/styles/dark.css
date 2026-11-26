@@ -1204,3 +1204,64 @@ html[data-theme="dark"] .pdf-dock button:hover:not(:disabled) {
   color: #eef5ea;
   background: rgba(255, 255, 255, .08);
 }
+
+/* 全库搜索索引（0.71） */
+html[data-theme="dark"] .index-dialog {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .55);
+}
+
+html[data-theme="dark"] .index-dialog h2,
+html[data-theme="dark"] .index-stats strong,
+html[data-theme="dark"] .index-summary strong {
+  color: var(--dk-text);
+}
+
+html[data-theme="dark"] .index-intro,
+html[data-theme="dark"] .index-progress small,
+html[data-theme="dark"] .index-foot-hint,
+html[data-theme="dark"] .index-stats span,
+html[data-theme="dark"] .index-option small {
+  color: var(--dk-muted);
+}
+
+html[data-theme="dark"] .index-stats,
+html[data-theme="dark"] .index-stats > div,
+html[data-theme="dark"] .index-option,
+html[data-theme="dark"] .index-progress {
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .index-option span,
+html[data-theme="dark"] .index-progress-head {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .index-progress-bar {
+  background: #26302a;
+}
+
+html[data-theme="dark"] .index-summary {
+  border-color: #3c5340;
+  background: #17211a;
+}
+
+html[data-theme="dark"] .index-summary p {
+  color: var(--dk-text-soft);
+}
+
+html[data-theme="dark"] .index-dialog header button,
+html[data-theme="dark"] .index-dialog footer button {
+  color: var(--dk-text);
+  border-color: var(--dk-line);
+  background: var(--dk-surface-2);
+}
+
+html[data-theme="dark"] .index-error {
+  color: #f0b9a9;
+  border-color: #57342c;
+  background: #2a1d19;
+}

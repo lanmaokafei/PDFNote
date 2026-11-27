@@ -636,6 +636,8 @@ pub struct GlobalHit {
     pub title: String,
     pub snippet: String,
     pub document_id: Option<String>,
+    /// 手写本页命中时带笔记本 id（document_id 为空）。
+    pub notebook_id: Option<String>,
     pub page: Option<u32>,
 }
 
@@ -675,6 +677,7 @@ pub fn search_global(
                 snippet: String::new(),
                 title: title.clone(),
                 document_id: Some(row.get(0)?),
+                notebook_id: None,
                 page: Some(1),
             })
         })
@@ -722,6 +725,7 @@ pub fn search_global(
                 title: if title.is_empty() { "未命名卡片".into() } else { title },
                 snippet: match_snippet(source, needle, 64),
                 document_id,
+                notebook_id: None,
                 page,
             })
         })
@@ -744,6 +748,7 @@ pub fn search_global(
                 title: row.get(1)?,
                 snippet: String::new(),
                 document_id: None,
+                notebook_id: None,
                 page: None,
             })
         })
@@ -775,6 +780,38 @@ pub fn search_global(
                 title: format!("{document_title} · 第 {page} 页"),
                 snippet: match_snippet(&text, needle, 72),
                 document_id: Some(document_id),
+                notebook_id: None,
+                page: Some(page),
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows.flatten() {
+        hits.push(row);
+    }
+
+    // 手写本页：OCR 索引（source 无需区分，识别过才有行）。
+    let mut notebook_pages = connection
+        .prepare(
+            "SELECT npi.notebook_id, n.title, npi.page, npi.text
+             FROM notebook_page_index npi
+             JOIN notebooks n ON n.id = npi.notebook_id
+             WHERE npi.text LIKE ?1 ESCAPE '\\'
+             ORDER BY n.updated_at DESC, npi.page ASC LIMIT ?2",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = notebook_pages
+        .query_map(rusqlite::params![pattern, cap], |row| {
+            let notebook_id: String = row.get(0)?;
+            let notebook_title: String = row.get(1)?;
+            let page: u32 = row.get(2)?;
+            let text: String = row.get(3)?;
+            Ok(GlobalHit {
+                kind: "page".into(),
+                id: format!("{notebook_id}:{page}"),
+                title: format!("{notebook_title} · 第 {page} 页"),
+                snippet: match_snippet(&text, needle, 72),
+                document_id: None,
+                notebook_id: Some(notebook_id),
                 page: Some(page),
             })
         })
@@ -806,6 +843,7 @@ pub fn search_global(
                 title: format!("#{tag}"),
                 snippet: format!("{count} 张卡片使用这个标签"),
                 document_id: None,
+                notebook_id: None,
                 page: None,
             })
         })
@@ -824,6 +862,23 @@ pub fn save_page_index(
     pages: Vec<page_index::PageIndexInput>,
 ) -> Result<u32, String> {
     page_index::save(&state, &document_id, pages)
+}
+
+#[tauri::command]
+pub fn save_notebook_page_index(
+    state: State<'_, AppState>,
+    notebook_id: String,
+    pages: Vec<page_index::NotebookPageIndexInput>,
+) -> Result<u32, String> {
+    page_index::save_notebook(&state, &notebook_id, pages)
+}
+
+#[tauri::command]
+pub fn list_notebook_page_index(
+    state: State<'_, AppState>,
+    notebook_id: String,
+) -> Result<Vec<page_index::NotebookPageIndexState>, String> {
+    page_index::list_notebook_pages(&state, &notebook_id)
 }
 
 #[tauri::command]

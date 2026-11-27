@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use std::{path::Path, time::Duration};
 
-pub const SCHEMA_VERSION: u32 = 19;
+pub const SCHEMA_VERSION: u32 = 20;
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
 const DOCUMENT_PROGRESS_SQL: &str = include_str!("../../migrations/002_document_progress.sql");
 const COLLABORATION_SQL: &str = include_str!("../../migrations/003_collaboration.sql");
@@ -21,6 +21,7 @@ const DOCUMENT_TRASH_SQL: &str = include_str!("../../migrations/016_document_tra
 const REVIEW_REVERT_SQL: &str = include_str!("../../migrations/017_review_revert.sql");
 const PAGE_INDEX_SQL: &str = include_str!("../../migrations/018_page_index.sql");
 const PAGE_INDEX_SOURCE_SQL: &str = include_str!("../../migrations/019_page_index_source.sql");
+const NOTEBOOK_PAGE_INDEX_SQL: &str = include_str!("../../migrations/020_notebook_page_index.sql");
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
@@ -61,7 +62,7 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
             "数据库 schema 版本 {version} 高于当前应用支持的版本 {SCHEMA_VERSION}"
         ));
     }
-    let migrations: [(&str, u32); 19] = [
+    let migrations: [(&str, u32); 20] = [
         (INIT_SQL, 1),
         (DOCUMENT_PROGRESS_SQL, 2),
         (COLLABORATION_SQL, 3),
@@ -81,6 +82,7 @@ pub fn migrate(connection: &Connection) -> Result<(), String> {
         (REVIEW_REVERT_SQL, 17),
         (PAGE_INDEX_SQL, 18),
         (PAGE_INDEX_SOURCE_SQL, 19),
+        (NOTEBOOK_PAGE_INDEX_SQL, 20),
     ];
     for (sql, target_version) in migrations {
         if target_version > version {
@@ -136,7 +138,7 @@ mod tests {
         assert!(columns(&connection, "documents").contains(&"last_page".to_string()));
         assert!(columns(&connection, "cards").contains(&"excerpt_image".to_string()));
         assert!(columns(&connection, "cards").contains(&"link_aliases".to_string()));
-        for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr", "page_index", "book_analysis", "book_outline", "mindmap_canvases", "document_readings", "reading_daily", "card_trash", "review_daily", "document_trash"] {
+        for table in ["card_tags", "card_links", "page_inks", "page_notes", "page_ocr", "page_index", "notebook_page_index", "book_analysis", "book_outline", "mindmap_canvases", "document_readings", "reading_daily", "card_trash", "review_daily", "document_trash"] {
             let count: i64 = connection
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",

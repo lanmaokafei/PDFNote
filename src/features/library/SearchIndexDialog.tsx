@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Database, X } from 'lucide-react'
-import { listDocuments, pageIndexStats, type PageIndexStats } from '../../services/pdfnote'
-import type { Document } from '../../domain/card'
+import { listDocuments, listNotebooks, pageIndexStats, type PageIndexStats } from '../../services/pdfnote'
+import type { Document, Notebook } from '../../domain/card'
 import { buildLibraryIndex, type LibraryIndexProgress, type LibraryIndexSummary } from './libraryIndex'
+import { indexNotebooks, type NotebookIndexProgress, type NotebookIndexSummary } from '../notebook/notebookIndex'
 import './SearchIndexDialog.css'
 
 interface SearchIndexDialogProps {
@@ -15,20 +16,24 @@ interface SearchIndexDialogProps {
  */
 export function SearchIndexDialog({ onClose }: SearchIndexDialogProps) {
   const [documents, setDocuments] = useState<Document[]>([])
+  const [notebooks, setNotebooks] = useState<Notebook[]>([])
   const [stats, setStats] = useState<PageIndexStats | null>(null)
   const [withOcr, setWithOcr] = useState(true)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<LibraryIndexProgress | null>(null)
   const [summary, setSummary] = useState<LibraryIndexSummary | null>(null)
+  const [notebookSummary, setNotebookSummary] = useState<NotebookIndexSummary | null>(null)
+  const [notebookProgress, setNotebookProgress] = useState<NotebookIndexProgress | null>(null)
   const [error, setError] = useState('')
   const controllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     void (async () => {
       try {
-        const [list, current] = await Promise.all([listDocuments(), pageIndexStats()])
+        const [list, current, books] = await Promise.all([listDocuments(), pageIndexStats(), listNotebooks()])
         setDocuments(list)
         setStats(current)
+        setNotebooks(books)
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason))
       }
@@ -42,6 +47,8 @@ export function SearchIndexDialog({ onClose }: SearchIndexDialogProps) {
     controllerRef.current = controller
     setRunning(true)
     setSummary(null)
+    setNotebookSummary(null)
+    setNotebookProgress(null)
     setError('')
     try {
       const result = await buildLibraryIndex(documents, {
@@ -50,6 +57,14 @@ export function SearchIndexDialog({ onClose }: SearchIndexDialogProps) {
         onProgress: setProgress,
       })
       setSummary(result)
+      // 手写本只有 OCR 才能索引：笔迹本身没有文字。
+      if (withOcr && !result.cancelled && notebooks.length > 0) {
+        const bookResult = await indexNotebooks(notebooks, {
+          signal: controller.signal,
+          onProgress: setNotebookProgress,
+        })
+        setNotebookSummary(bookResult)
+      }
       setStats(await pageIndexStats())
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -87,7 +102,8 @@ export function SearchIndexDialog({ onClose }: SearchIndexDialogProps) {
           <div><span>已索引文档</span><strong>{stats ? stats.documents : '—'}</strong></div>
           <div><span>已索引页</span><strong>{stats ? stats.pages : '—'}</strong></div>
           <div><span>其中 OCR</span><strong>{stats ? stats.ocrPages : '—'}</strong></div>
-          <div><span>可建索引</span><strong>{documents.filter((doc) => doc.file_status === 'ready').length}</strong></div>
+          <div><span>手写本 / 页</span><strong>{stats ? `${stats.notebooks} / ${stats.notebookPages}` : '—'}</strong></div>
+          <div><span>可建索引</span><strong>{documents.filter((doc) => doc.file_status === 'ready').length + notebooks.length}</strong></div>
         </div>
 
         <label className="index-option">
@@ -116,6 +132,19 @@ export function SearchIndexDialog({ onClose }: SearchIndexDialogProps) {
           </div>
         )}
 
+        {notebookProgress && !notebookSummary && (
+          <div className="index-progress" data-testid="notebook-index-progress">
+            <div className="index-progress-head">
+              <span>手写本 · {notebookProgress.title}</span>
+              <span>{notebookProgress.notebookIndex + 1} / {notebookProgress.notebookTotal} 本</span>
+            </div>
+            <div className="index-progress-bar">
+              <i style={{ width: `${notebookProgress.total ? Math.round((notebookProgress.done / notebookProgress.total) * 100) : 0}%` }} />
+            </div>
+            <small>本本进度 {notebookProgress.done} / {notebookProgress.total} 页</small>
+          </div>
+        )}
+
         {summary && (
           <div className="index-summary" data-testid="search-index-summary">
             <strong>{summary.cancelled ? '已取消' : '索引完成'}</strong>
@@ -123,8 +152,16 @@ export function SearchIndexDialog({ onClose }: SearchIndexDialogProps) {
               补了 {summary.documents} 本文档：文本层 {summary.textPages} 页、OCR {summary.ocrPages} 页
               {summary.skipped > 0 ? `、跳过 ${summary.skipped} 页` : ''}。
             </p>
-            {summary.failed.length > 0 && (
-              <ul>{summary.failed.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>
+            {notebookSummary && (
+              <p>
+                手写本 {notebookSummary.notebooks} 本：识别 {notebookSummary.pages} 页
+                {notebookSummary.skipped > 0 ? `、跳过 ${notebookSummary.skipped} 页` : ''}。
+              </p>
+            )}
+            {(summary.failed.length > 0 || (notebookSummary?.failed.length ?? 0) > 0) && (
+              <ul>
+                {[...summary.failed, ...(notebookSummary?.failed ?? [])].slice(0, 4).map((item) => <li key={item}>{item}</li>)}
+              </ul>
             )}
           </div>
         )}

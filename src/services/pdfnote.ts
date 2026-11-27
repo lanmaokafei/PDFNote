@@ -656,6 +656,8 @@ export interface GlobalHit {
   title: string
   snippet: string
   documentId: string | null
+  /** 手写本页命中时带笔记本 id。 */
+  notebookId: string | null
   page: number | null
 }
 
@@ -684,9 +686,29 @@ export interface PageIndexStats {
   documents: number
   pages: number
   ocrPages: number
+  notebooks: number
+  notebookPages: number
+}
+
+export interface NotebookPageIndexState {
+  page: number
+  signature: string
+}
+
+export async function listNotebookPageIndex(notebookId: string): Promise<NotebookPageIndexState[]> {
+  if (!isTauriRuntime()) return []
+  return invoke('list_notebook_page_index', { notebookId })
+}
+
+export async function saveNotebookPageIndex(
+  notebookId: string,
+  pages: { page: number; text: string; signature: string }[],
+): Promise<number> {
+  if (!isTauriRuntime()) return 0
+  return invoke('save_notebook_page_index', { notebookId, pages })
 }
 
 export async function pageIndexStats(): Promise<PageIndexStats> {
-  if (!isTauriRuntime()) return { documents: 0, pages: 0, ocrPages: 0 }
+  if (!isTauriRuntime()) return { documents: 0, pages: 0, ocrPages: 0, notebooks: 0, notebookPages: 0 }
   return invoke('page_index_stats')
 }

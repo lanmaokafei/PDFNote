@@ -123,6 +123,15 @@ export function GlobalSearch({ open, onClose, onGoTo }: GlobalSearchProps) {
       }, 220)
       return
     }
+    if (hit.notebookId && hit.page) {
+      onGoTo('notebook')
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('pdfnote:open-notebook', {
+          detail: { id: hit.notebookId, page: hit.page },
+        }))
+      }, 220)
+      return
+    }
     if (hit.documentId && hit.page) {
       window.dispatchEvent(new CustomEvent('pdfnote:open-source', {
         detail: { documentId: hit.documentId, page: hit.page },
@@ -215,7 +224,9 @@ export function GlobalSearch({ open, onClose, onGoTo }: GlobalSearchProps) {
                     </span>
                     {hit.kind !== 'notebook' && hit.kind !== 'tag' && (
                       <span className="global-search-meta">
-                        {hit.kind === 'page' ? `P${hit.page}` : hit.documentId ? (hit.page ? `P${hit.page}` : '文档') : '脑图'}
+                        {hit.kind === 'page'
+                          ? (hit.notebookId ? `本子 P${hit.page}` : `P${hit.page}`)
+                          : hit.documentId ? (hit.page ? `P${hit.page}` : '文档') : '脑图'}
                       </span>
                     )}
                   </button>

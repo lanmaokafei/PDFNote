@@ -383,6 +383,21 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       }
       return null
     },
+    list_notebook_page_index: (args) => (window.__notebookIndexState?.[args?.notebookId] ?? []),
+    save_notebook_page_index: (args) => {
+      window.__notebookIndexState = window.__notebookIndexState ?? {}
+      window.__notebookIndexCalls = window.__notebookIndexCalls ?? []
+      window.__notebookIndexCalls.push({ notebookId: args?.notebookId, pages: args?.pages ?? [] })
+      const list = window.__notebookIndexState[args?.notebookId] ?? []
+      for (const page of args?.pages ?? []) {
+        const index = list.findIndex((item) => item.page === page.page)
+        const record = { page: page.page, signature: page.signature, text: page.text }
+        if (index >= 0) list[index] = record
+        else list.push(record)
+      }
+      window.__notebookIndexState[args?.notebookId] = list
+      return (args?.pages ?? []).length
+    },
     list_notebook_inks: (args) => notebookInkState
       .filter((item) => item.notebook_id === args?.notebookId)
       .map((item) => ({ ...item })),
@@ -819,7 +834,10 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
         pages += 1
         if (page.source === 'ocr') ocrPages += 1
       }
-      return { documents: byDoc.size, pages, ocrPages }
+      const notebookIndex = window.__notebookIndexState ?? {}
+      let notebookPages = 0
+      for (const list of Object.values(notebookIndex)) notebookPages += list.length
+      return { documents: byDoc.size, pages, ocrPages, notebooks: Object.keys(notebookIndex).length, notebookPages }
     },
     global_search: (args) => {
       const query = String(args?.query ?? '').trim()
@@ -854,6 +872,23 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
           documentId: document.id,
           page: 1,
         })
+      }
+      const notebookIndex = window.__notebookIndexState ?? {}
+      for (const [notebookId, pages] of Object.entries(notebookIndex)) {
+        const notebook = (window.__notebookState ?? []).find((item) => item.id === notebookId)
+        if (!notebook) continue
+        for (const page of pages) {
+          if (!page.text.includes(query)) continue
+          hits.push({
+            kind: 'page',
+            id: `${notebookId}:${page.page}`,
+            title: `${notebook.title} · 第 ${page.page} 页`,
+            snippet: page.text.slice(0, 60),
+            documentId: null,
+            notebookId,
+            page: page.page,
+          })
+        }
       }
       const tagCounts = new Map()
       for (const card of cardState) for (const tag of card.tags ?? []) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
@@ -3060,6 +3095,71 @@ if (process.env.STEP === 'global-search') {
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'global-search', cards, opened, empty: empty.slice(0, 30), selected }, null, 2))
+  process.exit(problems.length ? 1 : 0)
+}
+
+// STEP=notebook-index：手写本 OCR 建索引，并从搜索跳回那一页。
+if (process.env.STEP === 'notebook-index') {
+  await page.locator('.app-segment', { hasText: '笔记本' }).click()
+  await page.waitForSelector('.notebook-shelf', { timeout: 10000 })
+  await page.locator('.notebook-primary').click()
+  await page.locator('[data-testid="notebook-title"]').fill('手写索引本')
+  await page.locator('[data-testid="notebook-create"]').click()
+  await page.waitForSelector('.notebook-editor', { timeout: 10000 })
+  await page.waitForTimeout(500)
+
+  const box = await page.locator('.notebook-page').first().boundingBox()
+  if (box) {
+    const startX = box.x + box.width * 0.3
+    const startY = box.y + box.height * 0.25
+    await page.mouse.move(startX, startY)
+    await page.mouse.down()
+    for (let step = 1; step <= 10; step += 1) {
+      await page.mouse.move(startX + step * 14, startY + step * 4, { steps: 1 })
+    }
+    await page.mouse.up()
+    await page.waitForTimeout(400)
+  }
+  if ((await page.evaluate(() => window.__notebookInkState.length)) < 1) problems.push('没有画上第一笔')
+
+  await page.locator('.app-segment').filter({ hasText: '资料库' }).first().click()
+  await page.waitForSelector('[data-testid="search-index-open"]', { timeout: 10000 })
+  await page.locator('[data-testid="search-index-open"]').click()
+  await page.waitForSelector('[data-testid="search-index-dialog"]', { timeout: 5000 })
+  await page.evaluate(() => {
+    window.__tocOcrLines = [{ text: '扫描页上的文字' }]
+  })
+  await page.locator('[data-testid="search-index-start"]').click()
+  await page.waitForSelector('[data-testid="search-index-summary"]', { timeout: 120000 })
+  const summary = await page.locator('[data-testid="search-index-summary"]').innerText()
+  if (!summary.includes('手写本 1 本')) problems.push(`手写本索引汇总不对：${summary}`)
+  if (!summary.includes('识别 1 页')) problems.push(`手写本识别页数不对：${summary}`)
+
+  const calls = await page.evaluate(() => window.__notebookIndexCalls ?? [])
+  const indexedPage = calls.flatMap((call) => call.pages)[0]
+  if (!indexedPage) problems.push('手写本页没有落库')
+  else {
+    if (!indexedPage.text.includes('扫描页上的文字')) problems.push(`手写本 OCR 文本不对：${indexedPage.text}`)
+    if (!indexedPage.signature) problems.push('手写本页缺少笔迹指纹')
+  }
+  await page.locator('[data-testid="search-index-close"]').click()
+  await page.waitForTimeout(300)
+
+  // 从搜索跳回手写本那一页
+  await page.keyboard.press('Meta+k')
+  await page.waitForSelector('[data-testid="global-search"]', { timeout: 5000 })
+  await page.locator('[data-testid="global-search-input"]').fill('扫描页')
+  await page.waitForSelector('[data-testid="global-search-item"][data-kind="page"]', { timeout: 5000 })
+  const hitText = await page.locator('[data-testid="global-search-item"][data-kind="page"]').first().innerText()
+  if (!hitText.includes('手写索引本')) problems.push(`手写本结果标题不对：${hitText}`)
+  await page.locator('[data-testid="global-search-item"][data-kind="page"]').first().click()
+  await page.waitForSelector('.notebook-editor', { timeout: 10000 })
+  await page.waitForTimeout(700)
+  const editorTitle = await page.locator('.notebook-editor').first().innerText()
+  if (!editorTitle.includes('手写索引本')) problems.push('没有打开目标手写本')
+
+  await browser.close()
+  console.log(JSON.stringify({ problems, step: 'notebook-index', summary, indexedPage, hitText }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

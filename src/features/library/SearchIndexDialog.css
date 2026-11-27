@@ -69,7 +69,7 @@
 
 .index-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   overflow: hidden;
   border: 1px solid #e2e8dc;
   border-radius: 9px;

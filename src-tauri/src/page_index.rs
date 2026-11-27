@@ -84,25 +84,29 @@ pub struct PageIndexStats {
     pub documents: i64,
     pub pages: i64,
     pub ocr_pages: i64,
+    pub notebooks: i64,
+    pub notebook_pages: i64,
 }
 
 pub fn stats(state: &AppState) -> Result<PageIndexStats, String> {
     let database = state.db()?;
-    database
+    let (documents, pages, ocr_pages) = database
         .query_row(
             "SELECT COUNT(DISTINCT document_id), COUNT(*),
                     COALESCE(SUM(CASE WHEN source = 'ocr' THEN 1 ELSE 0 END), 0)
              FROM page_index",
             [],
-            |row| {
-                Ok(PageIndexStats {
-                    documents: row.get(0)?,
-                    pages: row.get(1)?,
-                    ocr_pages: row.get(2)?,
-                })
-            },
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let (notebooks, notebook_pages) = database
+        .query_row(
+            "SELECT COUNT(DISTINCT notebook_id), COUNT(*) FROM notebook_page_index",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(PageIndexStats { documents, pages, ocr_pages, notebooks, notebook_pages })
 }
 
 pub fn list_pages(state: &AppState, document_id: &str) -> Result<Vec<u32>, String> {
@@ -118,7 +122,7 @@ pub fn list_pages(state: &AppState, document_id: &str) -> Result<Vec<u32>, Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{list_pages, normalize, save, PageIndexInput};
+    use super::{list_notebook_pages, list_pages, normalize, save, save_notebook, NotebookPageIndexInput, PageIndexInput};
     use crate::state::test_state;
 
     #[test]
@@ -176,6 +180,41 @@ mod tests {
     }
 
     #[test]
+    fn notebook_pages_are_indexed_and_searchable() {
+        let (_directory, state) = test_state();
+        {
+            let database = state.db().unwrap();
+            database
+                .execute(
+                    "INSERT INTO notebooks (id, title, paper, created_at, updated_at)
+                     VALUES ('nb1', '手写本一', 'grid', 'now', 'now')",
+                    [],
+                )
+                .unwrap();
+        }
+        save_notebook(&state, "nb1", vec![
+            NotebookPageIndexInput {
+                page: 2,
+                text: "手写笔记：熵与不确定性".into(),
+                signature: "3:now".into(),
+            },
+            NotebookPageIndexInput { page: 3, text: "  ".into(), signature: "0:now".into() },
+        ])
+        .unwrap();
+        let pages = list_notebook_pages(&state, "nb1").unwrap();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].page, 2);
+        assert_eq!(pages[0].signature, "3:now");
+
+        let database = state.db().unwrap();
+        let hits = crate::commands::search_global(&database, "熵", 10).unwrap();
+        let hit = hits.iter().find(|item| item.notebook_id.is_some()).expect("应命中手写本页");
+        assert!(hit.title.contains("手写本一"));
+        assert_eq!(hit.page, Some(2));
+        assert!(hit.snippet.contains("熵"), "{}", hit.snippet);
+    }
+
+    #[test]
     fn saves_and_lists_pages_idempotently() {
         let (_directory, state) = test_state();
         let saved = save(&state, "doc-1", vec![
@@ -194,4 +233,73 @@ mod tests {
         assert_eq!(stats.ocr_pages, 1, "source=ocr 要计入 OCR 页");
         assert!(save(&state, "", vec![PageIndexInput { page: 1, text: "x".into(), source: None }]).is_err());
     }
+}
+
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NotebookPageIndexInput {
+    pub page: u32,
+    pub text: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotebookPageIndexState {
+    pub page: u32,
+    pub signature: String,
+}
+
+pub fn save_notebook(
+    state: &AppState,
+    notebook_id: &str,
+    pages: Vec<NotebookPageIndexInput>,
+) -> Result<u32, String> {
+    if notebook_id.trim().is_empty() {
+        return Err("notebook_id 不能为空".into());
+    }
+    if pages.is_empty() {
+        return Ok(0);
+    }
+    let timestamp = crate::models::now();
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let mut saved = 0u32;
+    for page in pages {
+        if page.page == 0 {
+            continue;
+        }
+        let text = normalize(&page.text);
+        if text.is_empty() {
+            continue;
+        }
+        transaction
+            .execute(
+                "INSERT INTO notebook_page_index (notebook_id, page, text, signature, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(notebook_id, page) DO UPDATE SET
+                 text = excluded.text, signature = excluded.signature, updated_at = excluded.updated_at",
+                params![notebook_id, page.page, text, page.signature, timestamp],
+            )
+            .map_err(|error| error.to_string())?;
+        saved += 1;
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(saved)
+}
+
+pub fn list_notebook_pages(
+    state: &AppState,
+    notebook_id: &str,
+) -> Result<Vec<NotebookPageIndexState>, String> {
+    let database = state.db()?;
+    let mut statement = database
+        .prepare("SELECT page, signature FROM notebook_page_index WHERE notebook_id = ?1 ORDER BY page")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![notebook_id], |row| {
+            Ok(NotebookPageIndexState { page: row.get(0)?, signature: row.get(1)? })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }

@@ -109,10 +109,14 @@ export function NotebookWorkspace() {
 
   // 跨库搜索打开一本笔记本：列表还没加载完时先记下 id，加载完再补开。
   const pendingOpenRef = useRef<string | null>(null)
+  // 跨库搜索跳到手写本某页：等编辑器渲染完再滚过去。
+  const pendingPageRef = useRef<number | null>(null)
   useEffect(() => {
     const handler = (event: Event) => {
-      const id = (event as CustomEvent<{ id?: string }>).detail?.id
+      const detail = (event as CustomEvent<{ id?: string; page?: number }>).detail
+      const id = detail?.id
       if (!id) return
+      if (detail?.page) pendingPageRef.current = detail.page
       const target = notebooks.find((item) => item.id === id)
       if (target) setActive(target)
       else pendingOpenRef.current = id
@@ -120,6 +124,18 @@ export function NotebookWorkspace() {
     window.addEventListener('pdfnote:open-notebook', handler)
     return () => window.removeEventListener('pdfnote:open-notebook', handler)
   }, [notebooks])
+
+  useEffect(() => {
+    if (!active) return
+    const page = pendingPageRef.current
+    if (!page) return
+    const timer = window.setTimeout(() => {
+      const target = document.querySelectorAll('.notebook-page')[page - 1]
+      target?.scrollIntoView({ block: 'start' })
+      pendingPageRef.current = null
+    }, 260)
+    return () => window.clearTimeout(timer)
+  }, [active])
 
   useEffect(() => {
     const id = pendingOpenRef.current

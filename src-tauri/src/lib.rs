@@ -86,6 +86,8 @@ pub fn run() {
             commands::save_page_index,
             commands::list_page_index_pages,
             commands::page_index_stats,
+            commands::save_notebook_page_index,
+            commands::list_notebook_page_index,
             commands::save_notebook_pdf,
             commands::save_export_files,
             commands::rename_tag,

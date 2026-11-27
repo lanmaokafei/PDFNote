@@ -545,6 +545,77 @@ pub fn move_cards_to_canvas(
     Ok(moving.len() as u32)
 }
 
+/// 撤销 / 重做跨画布移动用的落位快照。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlacementRestore {
+    pub card_id: String,
+    pub canvas_id: String,
+    pub x: f64,
+    pub y: f64,
+    pub parent_id: Option<String>,
+    pub sort_order: i64,
+}
+
+/// 把一批卡片恢复到某张画布的指定位置、父子关系与顺序（单事务）。
+///
+/// 语义是「精确还原」：其它画布的布局行会被删掉，卡片只剩快照里的这张画布。
+/// 撤销移动与重做都复用它，避免两个方向各写一套。
+pub fn restore_card_placement(
+    state: &AppState,
+    entries: Vec<PlacementRestore>,
+) -> Result<u32, String> {
+    if entries.is_empty() {
+        return Ok(0);
+    }
+    if entries.len() > 5_000 {
+        return Err("too many placement entries".into());
+    }
+    if entries.iter().any(|entry| !entry.x.is_finite() || !entry.y.is_finite()) {
+        return Err("mindmap coordinates must be finite".into());
+    }
+    let timestamp = now();
+    let mut database = state.db()?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    let mut restored = 0u32;
+    for entry in entries {
+        get_card(&transaction, &entry.card_id)?;
+        if !canvases::canvas_exists(&transaction, &entry.canvas_id)? {
+            return Err(format!("画布 {} 不存在", entry.canvas_id));
+        }
+        if let Some(parent_id) = &entry.parent_id {
+            if parent_id == &entry.card_id {
+                return Err("卡片不能以自己为父节点".into());
+            }
+        }
+        transaction
+            .execute(
+                "DELETE FROM mindmap_layout WHERE card_id = ?1 AND canvas_id <> ?2",
+                params![entry.card_id, entry.canvas_id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "INSERT INTO mindmap_layout (card_id, canvas_id, x, y, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(canvas_id, card_id) DO UPDATE SET
+                 x = excluded.x, y = excluded.y, updated_at = excluded.updated_at",
+                params![entry.card_id, entry.canvas_id, entry.x, entry.y, timestamp],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "UPDATE cards SET parent_id = ?1, sort_order = ?2, updated_at = ?3 WHERE id = ?4",
+                params![entry.parent_id, entry.sort_order, timestamp, entry.card_id],
+            )
+            .map_err(|error| error.to_string())?;
+        restored += 1;
+    }
+    canvases::sync_mindmap_surface(&transaction)?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(restored)
+}
+
 pub fn move_card(
     state: &AppState,
     id: String,
@@ -1662,6 +1733,39 @@ mod tests {
             let moved_child = get_card(&database, &child.id).unwrap();
             assert_eq!(moved_child.parent_id.as_deref(), Some(parent.id.as_str()), "子树关系要保留");
         }
+
+        // 撤销：恢复到原画布的坐标与父子关系
+        restore_card_placement(&state, vec![
+            PlacementRestore {
+                card_id: parent.id.clone(),
+                canvas_id: "main".into(),
+                x: 80.0,
+                y: 80.0,
+                parent_id: None,
+                sort_order: 0,
+            },
+            PlacementRestore {
+                card_id: child.id.clone(),
+                canvas_id: "main".into(),
+                x: 80.0,
+                y: 260.0,
+                parent_id: Some(parent.id.clone()),
+                sort_order: 0,
+            },
+        ])
+        .unwrap();
+        let restored_main = list_mindmap_layout(&state, None).unwrap();
+        assert_eq!(restored_main.len(), 3, "撤销后应回到主画布：{restored_main:?}");
+        assert_eq!(list_mindmap_layout(&state, Some(target.id.clone())).unwrap().len(), 1, "目标画布只剩预置卡");
+        {
+            let database = state.db().unwrap();
+            let restored_child = get_card(&database, &child.id).unwrap();
+            assert_eq!(restored_child.parent_id.as_deref(), Some(parent.id.as_str()));
+            let restored_parent = get_card(&database, &parent.id).unwrap();
+            assert!(restored_parent.parent_id.is_none());
+        }
+        let position = restored_main.iter().find(|layout| layout.card_id == child.id).unwrap();
+        assert_eq!((position.x, position.y), (80.0, 260.0), "坐标要精确还原");
 
         let error = move_cards_to_canvas(&state, vec![parent.id.clone()], "missing".into()).unwrap_err();
         assert!(error.contains("不存在"), "{error}");

@@ -659,6 +659,17 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       window.__canvasMove = { cardIds: ids, canvasId: target }
       return ids.length
     },
+    restore_card_placement: (args) => {
+      const entries = args?.entries ?? []
+      for (const entry of entries) {
+        for (const key of Object.keys(layoutMembership)) {
+          layoutMembership[key] = layoutMembership[key].filter((id) => id !== entry.cardId)
+        }
+        layoutMembership[entry.canvasId] = [...new Set([...(layoutMembership[entry.canvasId] ?? []), entry.cardId])]
+      }
+      window.__placementRestore = entries
+      return entries.length
+    },
     save_mindmap_layout: (args) => {
       const items = args?.items ?? args?.layouts ?? []
       if (Array.isArray(items)) layoutState.push(...items)
@@ -2938,8 +2949,32 @@ if (process.env.STEP === 'outline-canvas') {
   if (afterMove.nodes < 2) problems.push(`目标画布上应看到原有 + 搬过去的卡片，实际 ${afterMove.nodes}`)
   if (process.env.SHOT) await page.screenshot({ path: '/tmp/outline-canvas-after.png' })
 
+  // ⌘Z 撤销：回到原画布并恢复卡片；⇧⌘Z 重做：再次回到目标画布
+  await page.locator('body').click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press('Meta+z')
+  await page.waitForTimeout(1500)
+  const undone = await page.evaluate(() => ({
+    selected: document.querySelector('[data-testid="canvas-select"]')?.value ?? '',
+    nodes: document.querySelectorAll('.mindmap-node').length,
+    restore: window.__placementRestore?.length ?? 0,
+  }))
+  if (undone.selected !== currentCanvas) problems.push(`撤销后没有回到原画布：${undone.selected}`)
+  if (undone.nodes < 1) problems.push('撤销后原画布看不到卡片')
+  if (undone.restore < 1) problems.push('撤销没有调用落位恢复')
+
+  await page.locator('body').click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press('Meta+Shift+z')
+  await page.waitForTimeout(1500)
+  const redone = await page.evaluate((id) => ({
+    selected: document.querySelector('[data-testid="canvas-select"]')?.value ?? '',
+    nodes: document.querySelectorAll('.mindmap-node').length,
+    expected: id,
+  }), targetId)
+  if (redone.selected !== targetId) problems.push(`重做后没有回到目标画布：${redone.selected}`)
+  if (redone.nodes < 2) problems.push(`重做后目标画布节点不足：${redone.nodes}`)
+
   await browser.close()
-  console.log(JSON.stringify({ problems, step: 'outline-canvas', currentCanvas, targetId, moved }, null, 2))
+  console.log(JSON.stringify({ problems, step: 'outline-canvas', currentCanvas, targetId, moved, undone, redone }, null, 2))
   process.exit(problems.length ? 1 : 0)
 }
 

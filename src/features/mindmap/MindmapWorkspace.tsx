@@ -58,6 +58,7 @@ import {
   listMindmapCanvases,
   listMindmapLayout,
   moveCardsToCanvas,
+  restoreCardPlacement,
   moveCard,
   saveMindmapLayout,
   setCardCollapsed,
@@ -956,8 +957,14 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     }))).catch(() => undefined)
   }, [canvasId, cards, hasLoaded, layoutScope, positions])
 
+  // 撤销 / 重做闭包会捕获旧渲染里的 selectCanvas；用 ref 判断「当前画布」才不会误判为已切换。
+  const canvasIdRef = useRef(canvasId)
+  useEffect(() => {
+    canvasIdRef.current = canvasId
+  }, [canvasId])
+
   const selectCanvas = useCallback((id: string) => {
-    if (id === canvasId) return
+    if (id === canvasIdRef.current) return
     // 换画布相当于换了一块桌面：新卡重新从视口正中心开始。
     resetMindmapInsertSequence()
     saveCanvasId(documentId, id)
@@ -965,7 +972,7 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     // 通知 PDF：标注跟着画布走（同一本书的两张画布各有各的高亮）。
     notifyCanvasChanged(documentId, id)
     setNotice(`已切换到「${canvases.find((canvas) => canvas.id === id)?.name ?? id}」。`)
-  }, [canvasId, canvases, documentId])
+  }, [canvases, documentId])
 
   const handleCanvasesChanged = useCallback((list: MindmapCanvas[], activeId?: string) => {
     setCanvases(list)
@@ -1722,7 +1729,24 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     }
   }, [outlineDrop])
 
-  /** 拖到画布 chip：连同子树整块搬走，一次事务。 */
+  /** 收集入口卡片的整棵子树（移动与撤销快照都以子树为单位）。 */
+  const collectSubtree = useCallback((roots: string[]): string[] => {
+    const result = new Set(roots)
+    const stack = [...roots]
+    const all = Object.values(cardsById)
+    while (stack.length > 0) {
+      const id = stack.pop() as string
+      for (const card of all) {
+        if (card.parent_id === id && !result.has(card.id)) {
+          result.add(card.id)
+          stack.push(card.id)
+        }
+      }
+    }
+    return [...result]
+  }, [cardsById])
+
+  /** 拖到画布 chip：连同子树整块搬走，一次事务；成功后自动切画布并登记撤销。 */
   const handleOutlineCanvasDrop = useCallback((targetId: string) => {
     const dragId = outlineDragRef.current
     if (!dragId) return
@@ -1732,15 +1756,66 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     setOutlineDrop(null)
     setOutlineCanvasDrop(null)
     void runTask(async () => {
+      const sourceId = canvasId
+      const subtree = collectSubtree(ids)
+      // 移动前的精确快照：坐标、父子、顺序都记下来，撤销要原样还回去。
+      const sourceSnapshot = subtree.map((id) => {
+        const card = cardsById[id]
+        const point = positions[id] ?? { x: 80, y: 80 }
+        return {
+          cardId: id,
+          canvasId: sourceId,
+          x: point.x,
+          y: point.y,
+          parentId: card?.parent_id ?? null,
+          sortOrder: card?.sort_order ?? 0,
+        }
+      })
+
       const moved = await moveCardsToCanvas(ids, targetId)
       setSelectedIds(new Set())
+      await loadCards()
+      // 目标画布的实际落位由后端算出，重做时按它还原。
+      const layouts = await listMindmapLayout(targetId)
+      const layoutById = new Map(layouts.map((layout) => [layout.card_id, layout]))
+      const latest = useCardStore.getState().cardsById
+      const targetSnapshot = subtree.map((id) => {
+        const layout = layoutById.get(id)
+        const card = latest[id]
+        return {
+          cardId: id,
+          canvasId: targetId,
+          x: layout?.x ?? 80,
+          y: layout?.y ?? 80,
+          parentId: card?.parent_id ?? null,
+          sortOrder: card?.sort_order ?? 0,
+        }
+      })
+
       const name = canvases.find((canvas) => canvas.id === targetId)?.name ?? targetId
-      // 直接切到目标画布并 fitView：否则用户看不到搬过去的子树落在哪。
       pendingMoveFitRef.current = true
       selectCanvas(targetId)
       setNotice(`已把 ${moved} 张卡片移到「${name}」（含子树），并切换到该画布。`)
+
+      pushUndo({
+        label: `跨画布移动（${moved} 张）`,
+        undo: async () => {
+          await restoreCardPlacement(sourceSnapshot)
+          await loadCards()
+          pendingMoveFitRef.current = true
+          selectCanvas(sourceId)
+          setNotice(`已撤销：${moved} 张卡片回到原画布。`)
+        },
+        redo: async () => {
+          await restoreCardPlacement(targetSnapshot)
+          await loadCards()
+          pendingMoveFitRef.current = true
+          selectCanvas(targetId)
+          setNotice(`已重做：${moved} 张卡片再次移到「${name}」。`)
+        },
+      })
     })
-  }, [canvases, runTask, selectCanvas, selectedIds])
+  }, [canvasId, canvases, cardsById, collectSubtree, loadCards, positions, runTask, selectCanvas, selectedIds])
 
   const handleOutlineDrop = useCallback((event: React.DragEvent<HTMLDivElement>, card: Card) => {
     event.preventDefault()

@@ -378,6 +378,21 @@ export async function removeAnnotation(id: string, deleteCard: boolean): Promise
   return invoke('remove_annotation', { id, deleteCard })
 }
 
+export interface PlacementRestore {
+  cardId: string
+  canvasId: string
+  x: number
+  y: number
+  parentId: string | null
+  sortOrder: number
+}
+
+/** 撤销 / 重做跨画布移动：精确还原画布、坐标、父子与顺序。 */
+export async function restoreCardPlacement(entries: PlacementRestore[]): Promise<number> {
+  desktopOnly()
+  return invoke('restore_card_placement', { entries })
+}
+
 export async function moveCardsToCanvas(cardIds: string[], canvasId: string): Promise<number> {
   desktopOnly()
   return invoke('move_cards_to_canvas', { cardIds, canvasId })

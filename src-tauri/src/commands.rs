@@ -376,6 +376,14 @@ pub fn remove_annotation(
 }
 
 #[tauri::command]
+pub fn restore_card_placement(
+    state: State<'_, AppState>,
+    entries: Vec<cards::PlacementRestore>,
+) -> Result<u32, String> {
+    cards::restore_card_placement(&state, entries)
+}
+
+#[tauri::command]
 pub fn move_cards_to_canvas(
     state: State<'_, AppState>,
     card_ids: Vec<String>,

@@ -650,8 +650,14 @@ await page.addInitScript(({ cards, document, pdfBase64, dense, canvasPref, empty
       return count
     },
     move_cards_to_canvas: (args) => {
-      window.__canvasMove = { cardIds: args?.cardIds ?? [], canvasId: args?.canvasId ?? '' }
-      return (args?.cardIds ?? []).length
+      const ids = args?.cardIds ?? []
+      const target = args?.canvasId ?? ''
+      for (const key of Object.keys(layoutMembership)) {
+        layoutMembership[key] = layoutMembership[key].filter((id) => !ids.includes(id))
+      }
+      layoutMembership[target] = [...new Set([...(layoutMembership[target] ?? []), ...ids])]
+      window.__canvasMove = { cardIds: ids, canvasId: target }
+      return ids.length
     },
     save_mindmap_layout: (args) => {
       const items = args?.items ?? args?.layouts ?? []
@@ -2897,7 +2903,9 @@ if (process.env.STEP === 'outline-canvas') {
   const targets = await page.locator('[data-testid="outline-canvas-target"]').count()
   if (targets < 1) problems.push('拖起行后没有出现其它画布落点')
 
-  const target = page.locator('[data-testid="outline-canvas-target"]').first()
+  // 优先选已经有成员的 B 画布：能看到「搬过去 + 原有卡片」同屏。
+  const preferred = page.locator('[data-testid="outline-canvas-target"][data-canvas-id="book-canvas-b"]')
+  const target = (await preferred.count()) ? preferred : page.locator('[data-testid="outline-canvas-target"]').first()
   const targetId = await target.getAttribute('data-canvas-id')
   if (!targetId || targetId === currentCanvas) problems.push(`画布落点不对：${targetId} / 当前 ${currentCanvas}`)
 
@@ -2918,6 +2926,17 @@ if (process.env.STEP === 'outline-canvas') {
   if (moved.call && moved.call.cardIds.length < 1) problems.push('跨画布移动的卡片为空')
   if (!moved.notice.includes('移到')) problems.push(`没有提示移动结果：${moved.notice}`)
   if (await page.locator('[data-testid="outline-canvas-drop"]').count() !== 0) problems.push('移动后落点面板没有收起')
+
+  // 移完应切到目标画布，且能立即看到搬过去的卡片
+  await page.waitForTimeout(1500)
+  const afterMove = await page.evaluate((id) => ({
+    selected: document.querySelector('[data-testid="canvas-select"]')?.value ?? '',
+    nodes: document.querySelectorAll('.mindmap-node').length,
+    expected: id,
+  }), targetId)
+  if (afterMove.selected !== targetId) problems.push(`移动后没有切到目标画布：${afterMove.selected}`)
+  if (afterMove.nodes < 2) problems.push(`目标画布上应看到原有 + 搬过去的卡片，实际 ${afterMove.nodes}`)
+  if (process.env.SHOT) await page.screenshot({ path: '/tmp/outline-canvas-after.png' })
 
   await browser.close()
   console.log(JSON.stringify({ problems, step: 'outline-canvas', currentCanvas, targetId, moved }, null, 2))

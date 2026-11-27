@@ -360,6 +360,57 @@ pub fn save_mindmap_layout(
     transaction.commit().map_err(|error| error.to_string())
 }
 
+/// 目标画布落位用的节点尺寸：与前端常量保持一致，避免视觉上挤在一起。
+const LAYOUT_NODE_WIDTH: f64 = 254.0;
+const LAYOUT_NODE_GAP: f64 = 46.0;
+const LAYOUT_ROW_HEIGHT: f64 = 190.0;
+
+/// 子树占几个叶子槽：决定父节点在水平方向上的中心。
+fn subtree_slots(
+    id: &str,
+    children: &HashMap<String, Vec<String>>,
+    memo: &mut HashMap<String, f64>,
+) -> f64 {
+    if let Some(value) = memo.get(id) {
+        return *value;
+    }
+    let slots = match children.get(id) {
+        Some(kids) if !kids.is_empty() => kids
+            .iter()
+            .map(|kid| subtree_slots(kid, children, memo))
+            .sum::<f64>()
+            .max(1.0),
+        _ => 1.0,
+    };
+    memo.insert(id.to_string(), slots);
+    slots
+}
+
+/// 经典树形落位：叶子从左往右排，父节点居中在子节点上方。
+fn place_subtree(
+    id: &str,
+    depth: usize,
+    cursor: &mut f64,
+    base_y: f64,
+    children: &HashMap<String, Vec<String>>,
+    slots: &mut HashMap<String, f64>,
+    out: &mut HashMap<String, (f64, f64)>,
+) {
+    let width = subtree_slots(id, children, slots);
+    let left = *cursor;
+    let center = left + (width * (LAYOUT_NODE_WIDTH + LAYOUT_NODE_GAP)) / 2.0;
+    let x = center - LAYOUT_NODE_WIDTH / 2.0;
+    let y = base_y + depth as f64 * LAYOUT_ROW_HEIGHT;
+    out.insert(id.to_string(), (x, y));
+    let mut child_cursor = left;
+    if let Some(kids) = children.get(id) {
+        for kid in kids {
+            place_subtree(kid, depth + 1, &mut child_cursor, base_y, children, slots, out);
+        }
+    }
+    *cursor = left + width * (LAYOUT_NODE_WIDTH + LAYOUT_NODE_GAP);
+}
+
 /// 把卡片（连同子树）移动到另一张画布。
 ///
 /// 画布归属就是 `mindmap_layout` 的一行：先从其它画布删掉，再往目标画布插入。
@@ -381,14 +432,18 @@ pub fn move_cards_to_canvas(
 
     // 一次取全表的父子关系，避免对每张卡都做一次递归查询。
     let mut parents: HashMap<String, Option<String>> = HashMap::new();
+    let mut sibling_order: HashMap<String, i64> = HashMap::new();
     {
         let mut statement = transaction
-            .prepare("SELECT id, parent_id FROM cards")
+            .prepare("SELECT id, parent_id, sort_order FROM cards")
             .map_err(|error| error.to_string())?;
         let rows = statement
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, i64>(2)?))
+            })
             .map_err(|error| error.to_string())?;
         for row in rows.flatten() {
+            sibling_order.insert(row.0.clone(), row.2);
             parents.insert(row.0, row.1);
         }
     }
@@ -397,6 +452,10 @@ pub fn move_cards_to_canvas(
         if let Some(parent) = parent {
             children.entry(parent.clone()).or_default().push(id.clone());
         }
+    }
+    // 同级按 sort_order 排，落位才不会打乱用户看到的顺序。
+    for kids in children.values_mut() {
+        kids.sort_by_key(|id| (sibling_order.get(id).copied().unwrap_or(0), id.clone()));
     }
 
     let mut moving: Vec<String> = Vec::new();
@@ -439,9 +498,30 @@ pub fn move_cards_to_canvas(
             |row| row.get(0),
         )
         .unwrap_or(0);
+
+    // 目标画布已有内容时，落点放到最下方，避免和现有节点叠在一起。
+    let target_bottom: Option<f64> = transaction
+        .query_row(
+            "SELECT MAX(y) FROM mindmap_layout WHERE canvas_id = ?1",
+            params![canvas_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let base_y = target_bottom.map(|y| y + LAYOUT_ROW_HEIGHT + 40.0).unwrap_or(80.0);
+    let mut positions: HashMap<String, (f64, f64)> = HashMap::new();
+    let mut slots: HashMap<String, f64> = HashMap::new();
+    let mut cursor = 80.0;
+    let mut roots: Vec<String> = moving.iter().filter(|id| heads.contains(*id)).cloned().collect();
+    roots.sort_by_key(|id| (sibling_order.get(id).copied().unwrap_or(0), id.clone()));
+    for root in &roots {
+        place_subtree(root, 0, &mut cursor, base_y, &children, &mut slots, &mut positions);
+    }
+
     for (index, id) in moving.iter().enumerate() {
-        let x = 80.0 + (index % 5) as f64 * 260.0;
-        let y = 80.0 + (index / 5) as f64 * 180.0;
+        let (x, y) = positions
+            .get(id)
+            .copied()
+            .unwrap_or((80.0, base_y + index as f64 * LAYOUT_ROW_HEIGHT));
         transaction
             .execute(
                 "INSERT INTO mindmap_layout (card_id, canvas_id, x, y, updated_at)
@@ -1535,6 +1615,18 @@ mod tests {
         .unwrap();
         let parent = create_card(&state, input("父节点", None)).unwrap();
         let child = create_card(&state, input("子节点", Some(parent.id.clone()))).unwrap();
+        // 目标画布先放一张卡，验证搬过去的内容不会压在上面。
+        let existing = create_card(&state, input("已有卡片", None)).unwrap();
+        {
+            let database = state.db().unwrap();
+            database
+                .execute(
+                    "INSERT INTO mindmap_layout (card_id, canvas_id, x, y, updated_at)
+                     VALUES (?1, 'canvas-b', 80, 80, 'now')",
+                    params![existing.id],
+                )
+                .unwrap();
+        }
 
         let moved = move_cards_to_canvas(
             &state,
@@ -1545,10 +1637,22 @@ mod tests {
         assert_eq!(moved, 2, "子树应一起移动");
 
         let main_layout = list_mindmap_layout(&state, None).unwrap();
-        assert!(main_layout.is_empty(), "原画布不应残留布局：{main_layout:?}");
+        assert_eq!(main_layout.len(), 1, "原画布只应剩预置的 existing：{main_layout:?}");
+        assert_eq!(main_layout[0].card_id, existing.id);
         let target_layout = list_mindmap_layout(&state, Some(target.id.clone())).unwrap();
-        assert_eq!(target_layout.len(), 2);
+        assert_eq!(target_layout.len(), 3);
         assert!(target_layout.iter().all(|layout| layout.x != 0.0 || layout.y != 0.0));
+        let moved_positions: Vec<_> = target_layout
+            .iter()
+            .filter(|layout| layout.card_id != existing.id)
+            .collect();
+        assert!(
+            moved_positions.iter().all(|layout| layout.y > 80.0 + 100.0),
+            "搬过去的卡片要落在已有内容下方：{moved_positions:?}"
+        );
+        let parent_pos = moved_positions.iter().find(|layout| layout.card_id == parent.id).unwrap();
+        let child_pos = moved_positions.iter().find(|layout| layout.card_id == child.id).unwrap();
+        assert!(parent_pos.y < child_pos.y, "父节点应在子节点上方");
 
         {
             let database = state.db().unwrap();

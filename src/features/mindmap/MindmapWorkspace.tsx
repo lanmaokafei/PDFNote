@@ -444,6 +444,17 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
       : { ...FIT_VIEW_OPTIONS, duration }
     void fitViewInstance(options)
   }, [fitViewInstance])
+  // 跨画布移动后切到目标画布：等新画布加载完再 fitView，让搬过去的子树进视野。
+  const pendingMoveFitRef = useRef(false)
+  useEffect(() => {
+    if (!pendingMoveFitRef.current || loading) return
+    pendingMoveFitRef.current = false
+    const timer = window.setTimeout(() => {
+      void fitViewInstance({ padding: 0.18, duration: 420 })
+    }, 160)
+    return () => window.clearTimeout(timer)
+  }, [canvasId, fitViewInstance, loading])
+
   const searchHits = useMemo(() => searchCards(orderedVisibleCards, searchText), [orderedVisibleCards, searchText])
   useEffect(() => {
     setSearchIndex(0)
@@ -1723,11 +1734,13 @@ function MindmapCanvas({ onCardsChanged, compact = false, documentId = null, doc
     void runTask(async () => {
       const moved = await moveCardsToCanvas(ids, targetId)
       setSelectedIds(new Set())
-      await refresh()
       const name = canvases.find((canvas) => canvas.id === targetId)?.name ?? targetId
-      setNotice(`已把 ${moved} 张卡片移到「${name}」（含子树）。切到该画布即可继续整理。`)
+      // 直接切到目标画布并 fitView：否则用户看不到搬过去的子树落在哪。
+      pendingMoveFitRef.current = true
+      selectCanvas(targetId)
+      setNotice(`已把 ${moved} 张卡片移到「${name}」（含子树），并切换到该画布。`)
     })
-  }, [canvases, refresh, runTask, selectedIds])
+  }, [canvases, runTask, selectCanvas, selectedIds])
 
   const handleOutlineDrop = useCallback((event: React.DragEvent<HTMLDivElement>, card: Card) => {
     event.preventDefault()
